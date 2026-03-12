@@ -7,7 +7,6 @@
 #' before) or to a status page for a newly queued job. `httr` follows the
 #' redirect automatically, so `resp$url` reflects the final destination.
 #'
-#'
 #' @param measure_notation Character. Unique measure ID — the `notation`
 #'   column from [get_measures()].
 #' @param from_date Character. Start date (inclusive) in `"YYYY-MM-DD"` format.
