@@ -1,0 +1,29 @@
+Package: reach.io
+Title: Data IO for the flode environment
+Version: 0.0.0.9000
+Authors@R: 
+    person("Jonathan", "Payne", , "jon.payne@environment-agency.gov.uk", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0003-2551-5353"))
+Description: A hydrometric data pipeline toolkit for the Environment Agency
+    Hydrology API <https://environment.data.gov.uk/hydrology/doc/reference>.
+    Provides tools to query and download rainfall, flow, and water level data
+    via synchronous and batch methods; build and maintain a master gauge
+    registry; route gauge fetches to the correct source system (HDE, WISKI,
+    or bulk file); ingest historical bulk files into partitioned Parquet
+    (Bronze tier); and orchestrate parallelised backfills across thousands
+    of gauges with per-gauge logging and failure recovery.
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    httr,
+    data.table,
+    arrow,
+    future,
+    future.apply,
+    lubridate,
+    parallel
+Suggests: 
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
