@@ -7,9 +7,9 @@
 reach.io is an R package that covers the full journey from raw EA data sources
 through to partitioned Parquet Bronze storage. It provides two groups of tools:
 
-- **API download tools** — query and download rainfall, flow, and water level
+- **API download tools** - query and download rainfall, flow, and water level
   data directly from the EA Hydrology API
-- **Pipeline tools** — build a gauge registry, route fetches to the correct
+- **Pipeline tools** - build a gauge registry, route fetches to the correct
   source system, ingest historical bulk files, and orchestrate large parallelised
   backfills with per-gauge logging
 
@@ -50,16 +50,16 @@ reach.io/
 
 ---
 
-## Part 1 — API download tools
+## Part 1 - API download tools
 
 These tools query the [EA Hydrology API](https://environment.data.gov.uk/hydrology/doc/reference)
 directly. No registration or API key is required. Data is available under the
 Open Government Licence v3.0.
 
-### Step 1 — Find stations
+### Step 1 - Find stations
 
 Look up stations by WISKI ID, RLOIid, notation, name, or proximity. Multiple
-lookup types can be combined in one call — results are pooled and de-duplicated.
+lookup types can be combined in one call - results are pooled and de-duplicated.
 
 ```r
 library(reach.io)
@@ -79,7 +79,7 @@ stns <- find_stations(names = "Avon")
 # Within 10 km of a point
 stns <- find_stations(lat = 51.5, long = -1.8, dist = 10)
 
-# Combined — results from all methods are pooled
+# Combined: results from all methods are pooled
 stns <- find_stations(names = "Exe", wiski_ids = "SS92F014")
 ```
 
@@ -87,7 +87,7 @@ stns <- find_stations(names = "Exe", wiski_ids = "SS92F014")
 `wiskiID`, `RLOIid`, `lat`, `long`, and `riverName`. The `wiskiID` column
 slots directly into `download_hydrology()`.
 
-### Step 2 — Inspect available measures (optional)
+### Step 2 - Inspect available measures (optional)
 
 ```r
 # All daily mean flow measures
@@ -99,11 +99,11 @@ all_flow[`station.wiskiID` %in% c("SS92F014", "S11512_FW")]
 # 15-minute rainfall measures
 get_measures("rainfall", period_name = "15min")
 
-# All level statistics — min, max, instantaneous
+# All level statistics; min, max, instantaneous
 get_measures("level", value_type = "all")
 ```
 
-### Step 3 — Download readings
+### Step 3 - Download readings
 
 `download_hydrology()` is the main entry point. Supply at least one station
 identifier and a date range. It resolves station identifiers, fetches the
@@ -124,7 +124,7 @@ matching measures, and downloads readings.
 | `"disk"` | One CSV per measure written to `out_dir/<parameter>/`. |
 
 ```r
-# In-memory download by WISKI ID — returns result$flow, result$level, result$summary
+# In-memory download by WISKI ID: returns result$flow, result$level, result$summary
 result <- download_hydrology(
   parameters = c("flow", "level"),
   from_date  = "2020-01-01",
@@ -187,7 +187,7 @@ for large jobs as it queues requests server-side and avoids timeouts.
 
 ---
 
-## Part 2 — Pipeline tools
+## Part 2 - Pipeline tools
 
 These tools support a medallion-style Bronze storage architecture. Output is
 written as Hive-partitioned Parquet (`gauge_id=<id>/`) compatible with both
@@ -273,7 +273,7 @@ Output: `data/fw_bronze/flow/gauge_id=39001/bulk_20240101.parquet`
 Each source system reads its connection details from environment variables.
 Set these before running any backfill or incremental sync.
 
-**HDE** uses the EA Hydrology API directly — no extra config needed.
+**HDE** uses the EA Hydrology API directly, no extra config needed.
 
 **WISKI** requires a KiWIS base URL and optionally an API key:
 
@@ -309,7 +309,7 @@ data_dt <- route_gauge(
 
 **Adding a new source system:**
 1. Write a `fetch_from_<name>()` function following the same signature as the
-   existing stubs — it must return a `data.table` with columns `gauge_id`,
+   existing stubs - it must return a `data.table` with columns `gauge_id`,
    `datetime`, `value`, `unit`, `flag`
 2. Add a case to the `switch()` in `route_gauge()`
 3. Add the new name to `VALID_SOURCES` in `R/package.R`
