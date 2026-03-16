@@ -1,5 +1,7 @@
 # reach.io
 
+<img src="man/figures/logo.svg" align="right" width="160"/>
+
 **Hydrometric data pipeline tools for the Environment Agency Hydrology API.**
 
 reach.io is an R package that covers the full journey from raw EA data sources
