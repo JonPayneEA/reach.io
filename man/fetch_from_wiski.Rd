@@ -7,26 +7,38 @@
 fetch_from_wiski(gauge_id, data_type, start_date, end_date)
 }
 \arguments{
-\item{gauge_id}{Character. Gauge identifier.}
+\item{gauge_id}{Character. Gauge identifier matching \code{gauge_id} in the
+registry. Expected to be a WISKI ID for HDE-sourced gauges.}
 
-\item{data_type}{Character. Type of data to fetch, e.g. \code{"flow"}.}
+\item{data_type}{Character. Parameter type: \code{"flow"}, \code{"level"}, or
+\code{"rainfall"}.}
 
 \item{start_date}{Character. Start date in \code{"YYYY-MM-DD"} format.}
 
 \item{end_date}{Character. End date in \code{"YYYY-MM-DD"} format.}
 }
 \value{
-A \code{data.table} with columns \code{gauge_id}, \code{datetime}, \code{value},
-\code{unit}, \code{flag}.
+A \code{data.table} with columns \code{gauge_id}, \code{datetime} (POSIXct),
+\code{value} (numeric), \code{unit} (character), \code{flag} (integer).
+Returns an empty \code{data.table} if no data is found.
 }
 \description{
-Stub implementation. Replace with a real call to the WISKI/KiWIS API,
-which uses different authentication and a different response structure
-from the EA HDE. Must return a \code{data.table} with columns \code{gauge_id},
-\code{datetime}, \code{value}, \code{unit}, and \code{flag}.
+Calls the KiWIS REST API for a single gauge using the \code{getTimeseriesValues}
+endpoint. WISKI uses a \code{ts_id}-based query structure with different
+authentication from the EA HDE. The \code{gauge_id} is expected to be a WISKI
+time series ID (ts_id) for WISKI-sourced gauges in the registry.
+}
+\details{
+The KiWIS base URL and authentication are read from environment variables
+\code{WISKI_BASE_URL} and \code{WISKI_API_KEY} respectively. Set these before use:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{Sys.setenv(WISKI_BASE_URL = "https://your-wiski-instance/KiWIS/KiWIS")
+Sys.setenv(WISKI_API_KEY  = "your-key")
+}\if{html}{\out{</div>}}
 }
 \examples{
 \dontrun{
-fetch_from_wiski("SS92F014", "level", "2020-01-01", "2020-12-31")
+Sys.setenv(WISKI_BASE_URL = "https://wiski.example.com/KiWIS/KiWIS")
+fetch_from_wiski("12345678", "level", "2020-01-01", "2020-12-31")
 }
 }

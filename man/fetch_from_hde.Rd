@@ -7,25 +7,33 @@
 fetch_from_hde(gauge_id, data_type, start_date, end_date)
 }
 \arguments{
-\item{gauge_id}{Character. Gauge identifier.}
+\item{gauge_id}{Character. Gauge identifier matching \code{gauge_id} in the
+registry. Expected to be a WISKI ID for HDE-sourced gauges.}
 
-\item{data_type}{Character. Type of data to fetch, e.g. \code{"flow"}.}
+\item{data_type}{Character. Parameter type: \code{"flow"}, \code{"level"}, or
+\code{"rainfall"}.}
 
 \item{start_date}{Character. Start date in \code{"YYYY-MM-DD"} format.}
 
 \item{end_date}{Character. End date in \code{"YYYY-MM-DD"} format.}
 }
 \value{
-A \code{data.table} with columns \code{gauge_id}, \code{datetime}, \code{value},
-\code{unit}, \code{flag}.
+A \code{data.table} with columns \code{gauge_id}, \code{datetime} (POSIXct),
+\code{value} (numeric), \code{unit} (character), \code{flag} (integer).
+Returns an empty \code{data.table} if no data is found.
 }
 \description{
-Stub implementation. Replace with a real call to the EA HDE API. Must
-return a \code{data.table} with columns \code{gauge_id}, \code{datetime}, \code{value},
-\code{unit}, and \code{flag}.
+Calls the EA Hydrology API readings endpoint for a single gauge and
+returns readings as a \code{data.table}. Internally wraps \code{\link[=find_stations]{find_stations()}}
+to resolve the gauge notation and \code{\link[=get_measures]{get_measures()}} to find the relevant
+measure notation, then calls \code{\link[=fetch_readings]{fetch_readings()}} for the date range.
+}
+\details{
+The date range is split into annual chunks via \code{\link[=make_date_chunks]{make_date_chunks()}} to
+stay within the API row limit.
 }
 \examples{
 \dontrun{
-fetch_from_hde("39001", "flow", "2020-01-01", "2020-12-31")
+fetch_from_hde("SS92F014", "flow", "2020-01-01", "2020-12-31")
 }
 }

@@ -2,31 +2,48 @@
 % Please edit documentation in R/router.R
 \name{fetch_from_bulk_file}
 \alias{fetch_from_bulk_file}
-\title{Fetch data from a bulk file via the Bulk File Ingestor}
+\title{Fetch data from a bulk file}
 \usage{
 fetch_from_bulk_file(gauge_id, data_type, start_date, end_date)
 }
 \arguments{
-\item{gauge_id}{Character. Gauge identifier.}
+\item{gauge_id}{Character. Gauge identifier matching \code{gauge_id} in the
+registry. Expected to be a WISKI ID for HDE-sourced gauges.}
 
-\item{data_type}{Character. Type of data to fetch, e.g. \code{"flow"}.}
+\item{data_type}{Character. Parameter type: \code{"flow"}, \code{"level"}, or
+\code{"rainfall"}.}
 
 \item{start_date}{Character. Start date in \code{"YYYY-MM-DD"} format.}
 
 \item{end_date}{Character. End date in \code{"YYYY-MM-DD"} format.}
 }
 \value{
-A \code{data.table} with columns \code{gauge_id}, \code{datetime}, \code{value},
-\code{unit}, \code{flag}.
+A \code{data.table} with columns \code{gauge_id}, \code{datetime} (POSIXct),
+\code{value} (numeric), \code{unit} (character), \code{flag} (integer).
+Returns an empty \code{data.table} if no file is found.
 }
 \description{
-Stub implementation. Delegates to \code{\link[=ingest_bulk_file]{ingest_bulk_file()}} for the actual
-read. In practice this function would locate the correct file for the
-gauge on an FTP drop or shared storage path. Must return a \code{data.table}
-with columns \code{gauge_id}, \code{datetime}, \code{value}, \code{unit}, and \code{flag}.
+Locates a bulk export file for the gauge on local storage or a mounted
+FTP path and delegates to \code{\link[=ingest_bulk_file]{ingest_bulk_file()}} to read and standardise
+it. The bulk file directory root is read from the environment variable
+\code{BULK_FILE_ROOT}. Within that root, files are expected at the path:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{<BULK_FILE_ROOT>/<data_type>/<gauge_id>.*
+}\if{html}{\out{</div>}}
+
+The first matching file with a recognised extension (\code{.csv}, \code{.tsv},
+\code{.txt}) is used. The date range arguments are used to filter rows after
+ingestion.
+}
+\details{
+Set the root path before use:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{Sys.setenv(BULK_FILE_ROOT = "/mnt/ftp/ea_bulk")
+}\if{html}{\out{</div>}}
 }
 \examples{
 \dontrun{
+Sys.setenv(BULK_FILE_ROOT = "/mnt/ftp/ea_bulk")
 fetch_from_bulk_file("39001", "rainfall", "2000-01-01", "2020-12-31")
 }
 }

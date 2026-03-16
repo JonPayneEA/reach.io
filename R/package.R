@@ -13,9 +13,13 @@
 #' - [route_gauge()] -- dispatch a gauge fetch to the correct source system
 #' - [ingest_bulk_file()] -- ingest historical bulk files to partitioned Parquet
 #' - [run_backfill()] -- parallelised backfill orchestrator with logging
+#' - [run_incremental()] -- incremental sync from high watermark per gauge
 #'
 #' @keywords internal
 "_PACKAGE"
+
+# S7 generics (print, as_data_table, as_long) are defined in classes.R
+#' @import S7
 
 # -- Package-level constants --------------------------------------------------
 
@@ -43,6 +47,7 @@ PARAMETER_CONFIG <- list(
     default_period    = "15min"
   )
 )
+
 
 # Valid source systems recognised by the pipeline router
 #' @noRd

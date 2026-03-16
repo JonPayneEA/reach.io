@@ -14,7 +14,6 @@
 #'
 #' @return A named list with `status_url` (the URL to poll or download from)
 #'   and `measure` (the notation passed in, carried forward for tracking).
-#'  
 #'
 #' @noRd
 submit_batch <- function(measure_notation, from_date, to_date) {
@@ -137,7 +136,7 @@ run_batch <- function(mid, from_date, to_date, output, out_dir, param,
       if ("date"     %in% names(dt)) dt[, date     := as.Date(date)]
       if ("dateTime" %in% names(dt)) dt[, dateTime := as.POSIXct(dateTime,
                                                         tz = "UTC")]
-      dt[, measure_notation := mid][]
+      dt[, measure_notation := mid]
 
       Sys.sleep(1)
       list(measure = mid, data = dt, file = NA_character_,
