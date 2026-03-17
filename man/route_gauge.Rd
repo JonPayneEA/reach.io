@@ -20,8 +20,8 @@ A \code{data.table} with columns \code{gauge_id}, \code{datetime}, \code{value},
 }
 \description{
 Reads the \code{source_system} field of a one-row registry \code{data.table} and
-dispatches to \code{\link[=fetch_from_hde]{fetch_from_hde()}}, \code{\link[=fetch_from_wiski]{fetch_from_wiski()}}, or
-\code{\link[=fetch_from_bulk_file]{fetch_from_bulk_file()}}. Fetch errors are caught and returned as \code{NULL}
+dispatches to \code{\link[=fetch_from_hde]{fetch_from_hde()}}, \code{\link[=fetch_from_wiski]{fetch_from_wiski()}},
+\code{\link[=fetch_from_bulk_file]{fetch_from_bulk_file()}}, or \code{\link[=fetch_from_wiski_all]{fetch_from_wiski_all()}}. Fetch errors are caught and returned as \code{NULL}
 with a warning so the caller (\code{\link[=run_backfill]{run_backfill()}} or \code{\link[=run_incremental]{run_incremental()}})
 can log the failure and continue.
 }

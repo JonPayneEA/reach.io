@@ -1,0 +1,394 @@
+# -- WISKI .all File Ingestor -------------------------------------------------
+#
+# .all files are proprietary Kisters/WISKI exports containing vertically
+# stacked station blocks. Each block has a metadata header followed by a
+# time series data section. Files can be 10gb+ and span multiple years.
+#
+# Two-pass approach:
+#
+# Pass 1 - .parse_all_blocks():
+#   Parse each .all file independently. Write one Parquet per station per
+#   source file into a temp subdirectory. Files are read in chunks to keep
+#   memory flat regardless of input size.
+#
+# Pass 2 - .merge_all_parquets():
+#   Group temp Parquet files by station number (= gauge_id), rbind each
+#   group, deduplicate on datetime, normalise to the pipeline schema, and
+#   write to output_dir/gauge_id=<id>/all_YYYYMMDD.parquet.
+#
+# The public entry point ingest_all_file() runs both passes and cleans up
+# the temp directory.
+
+
+# -- Pass 1 -------------------------------------------------------------------
+
+#' Parse a .all file to intermediate per-station Parquet files
+#'
+#' Internal. Reads a WISKI .all export in chunks and writes one raw Parquet
+#' per station per source file to a temp subdirectory. Called by
+#' [ingest_all_file()].
+#'
+#' @param path Character. Path to the .all file.
+#' @param tmp_dir Character. Directory to write intermediate Parquet files.
+#' @param chunk_size Integer. Lines to read per chunk. Default 50000.
+#'
+#' @return Invisibly NULL. Side effect: writes Parquet files to `tmp_dir`.
+#'
+#' @noRd
+.parse_all_blocks <- function(path, tmp_dir, chunk_size = 50000L) {
+  
+  dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  con <- file(path, open = "r", encoding = "UTF-8")
+  on.exit(close(con))
+  
+  carried <- character(0)
+  
+  # Parse one station block and write raw Parquet to tmp_dir. Columns are
+  # kept as-is from the .all file at this stage — normalisation happens in
+  # pass 2 so the merge step has full metadata available.
+  write_block <- function(block) {
+    
+    meta_lines <- block[grepl(":\t", block) & !startsWith(block, "Time stamp")]
+    meta <- do.call(c, lapply(strsplit(meta_lines, ":\t"), function(x) {
+      stats::setNames(list(trimws(x[2L])), trimws(x[1L]))
+    }))
+    
+    header_i <- which(startsWith(block, "Time stamp,"))
+    if (!length(header_i)) return(invisible(NULL))
+    
+    data_rows <- block[(header_i + 1L):length(block)]
+    data_rows <- data_rows[nzchar(data_rows)]
+    if (!length(data_rows)) return(invisible(NULL))
+    
+    dt <- data.table::fread(
+      text       = c(block[header_i], data_rows),
+      sep        = ",",
+      na.strings = c("---", "")
+    )
+    
+    data.table::setnames(dt, make.names(names(dt), unique = TRUE))
+    
+    station_num <- meta[["Station Number"]]
+    if (is.null(station_num) || is.na(station_num)) return(invisible(NULL))
+    
+    dt[, timestamp      := as.POSIXct(Time.stamp,
+                                      format = "%d/%m/%Y %H:%M:%S",
+                                      tz     = "UTC")]
+    dt[, Time.stamp     := NULL]
+    dt[, station_number := station_num]
+    dt[, station_name   := meta[["Station Name"]]      %||% NA_character_]
+    dt[, parameter      := meta[["Parameter Name"]]    %||% NA_character_]
+    dt[, unit           := meta[["Time series Unit"]]  %||% NA_character_]
+    dt[, ts_name        := meta[["Time series Name"]]  %||% NA_character_]
+    dt[, lon            := suppressWarnings(as.numeric(meta[["Longitude"]]))]
+    dt[, lat            := suppressWarnings(as.numeric(meta[["Latitude"]]))]
+    
+    out_path <- file.path(tmp_dir, paste0(station_num, ".parquet"))
+    
+    # Append to existing file for this station if one already exists in this
+    # pass (multiple blocks for the same station within one .all file)
+    if (file.exists(out_path)) {
+      existing <- data.table::as.data.table(arrow::read_parquet(out_path))
+      dt       <- data.table::rbindlist(list(existing, dt),
+                                        use.names = TRUE, fill = TRUE)
+    }
+    
+    arrow::write_parquet(dt, out_path)
+    invisible(NULL)
+  }
+  
+  repeat {
+    raw <- readLines(con, n = chunk_size, warn = FALSE)
+    
+    if (!length(raw)) {
+      if (length(carried)) write_block(carried)
+      break
+    }
+    
+    lines  <- c(carried, raw)
+    starts <- which(startsWith(lines, "Station Site:"))
+    
+    if (!length(starts)) {
+      carried <- lines
+      next
+    }
+    
+    for (i in seq_along(starts)) {
+      block_end <- if (i < length(starts)) starts[i + 1L] - 1L else length(lines)
+      block     <- lines[starts[i]:block_end]
+      
+      if (i < length(starts)) {
+        write_block(block)
+      } else {
+        carried <- block
+      }
+    }
+  }
+  
+  invisible(NULL)
+}
+
+
+# -- Pass 2 -------------------------------------------------------------------
+
+#' Merge intermediate Parquet files to final Bronze partitions
+#'
+#' Internal. Groups temp Parquet files by station number, rbinds, deduplicates
+#' on datetime, normalises to the pipeline schema, and writes to Hive-
+#' partitioned Bronze Parquet. Called by [ingest_all_file()].
+#'
+#' @param tmp_dir Character. Directory containing intermediate Parquet files
+#'   from [reach.io::.parse_all_blocks()].
+#' @param output_dir Character. Root Bronze output directory.
+#' @param run_date Date. Used to name output files.
+#'
+#' @return A `data.table` log with columns `gauge_id`, `rows`, `out_file`.
+#'
+#' @noRd
+.merge_all_parquets <- function(tmp_dir, output_dir, run_date) {
+  
+  all_files <- list.files(tmp_dir, pattern = "\\.parquet$", full.names = TRUE)
+  if (!length(all_files)) stop("No intermediate Parquet files found in: ", tmp_dir)
+  
+  station_ids <- tools::file_path_sans_ext(basename(all_files))
+  file_groups <- split(all_files, station_ids)
+  
+  message(sprintf("Merging %d station(s) to Bronze...", length(file_groups)))
+  
+  log_rows <- vector("list", length(file_groups))
+  
+  for (k in seq_along(file_groups)) {
+    station  <- names(file_groups)[k]
+    files    <- file_groups[[station]]
+    
+    dt <- data.table::rbindlist(
+      lapply(files, function(f) {
+        data.table::as.data.table(arrow::read_parquet(f))
+      }),
+      use.names = TRUE, fill = TRUE
+    )
+    
+    # Deduplicate on datetime — overlapping records appear at export boundaries
+    data.table::setorder(dt, timestamp)
+    dt <- unique(dt, by = "timestamp")
+    
+    # -- Normalise to pipeline schema -----------------------------------------
+    # Identify the value column — .all files use varying names; take the first
+    # numeric column that is not a known metadata column
+    meta_cols <- c("timestamp", "station_number", "station_name",
+                   "parameter", "unit", "ts_name", "lon", "lat")
+    value_col <- names(dt)[
+      !names(dt) %in% meta_cols &
+        sapply(dt, is.numeric)
+    ][1L]
+    
+    # Quality flag column — named "Quality.Code" or similar in .all exports
+    flag_col <- names(dt)[grepl("quality", names(dt), ignore.case = TRUE)][1L]
+    
+    out_dt <- data.table::data.table(
+      gauge_id = station,
+      datetime = dt$timestamp,
+      value    = if (!is.na(value_col)) dt[[value_col]] else NA_real_,
+      unit     = dt$unit,
+      flag     = if (!is.na(flag_col)) suppressWarnings(as.integer(dt[[flag_col]]))
+      else 1L
+    )
+    
+    out_dt <- out_dt[!is.na(datetime) & !is.na(value)]
+    
+    # -- Write to Hive-partitioned Bronze Parquet -----------------------------
+    part_dir <- file.path(output_dir, paste0("gauge_id=", station))
+    dir.create(part_dir, showWarnings = FALSE, recursive = TRUE)
+    
+    out_file <- file.path(
+      part_dir,
+      sprintf("all_%s.parquet", format(run_date, "%Y%m%d"))
+    )
+    arrow::write_parquet(out_dt, out_file)
+    
+    log_rows[[k]] <- data.table::data.table(
+      gauge_id = station,
+      rows     = nrow(out_dt),
+      out_file = out_file
+    )
+    
+    message(sprintf("  %s: %s rows -> %s",
+                    station,
+                    format(nrow(out_dt), big.mark = ","),
+                    out_file))
+  }
+  
+  data.table::rbindlist(log_rows)
+}
+
+
+# -- Public entry point -------------------------------------------------------
+
+#' Ingest a WISKI .all export file to partitioned Bronze Parquet
+#'
+#' Parses a WISKI/Kisters `.all` export file and writes per-station data to
+#' Hive-partitioned Bronze Parquet (`gauge_id=<id>/all_YYYYMMDD.parquet`),
+#' ready for consumption by [run_backfill()] and [run_incremental()].
+#'
+#' Uses a two-pass approach to handle files that may be 10GB+ and span
+#' multiple years without loading the entire file into memory:
+#'
+#' Pass 1 reads the file in chunks of `chunk_size` lines, parsing each
+#' station block and writing an intermediate Parquet per station to a temp
+#' directory.
+#'
+#' Pass 2 groups the intermediate files by station number (which is used
+#' directly as `gauge_id`), deduplicates on datetime, normalises to the
+#' pipeline schema, and writes the final Bronze output.
+#'
+#' The temp directory is removed on completion unless `keep_tmp = TRUE`.
+#'
+#' Output schema: `gauge_id` (character), `datetime` (POSIXct, UTC),
+#' `value` (numeric), `unit` (character), `flag` (integer).
+#'
+#' @param path Character. Path to the `.all` file.
+#' @param output_dir Character. Root Bronze output directory. Per-station
+#'   subdirectories (`gauge_id=<id>/`) are created inside this path.
+#' @param chunk_size Integer. Lines to read per chunk in pass 1. Default
+#'   50000. Reduce if memory is constrained; increase for faster I/O on
+#'   large disks.
+#' @param keep_tmp Logical. Keep intermediate Parquet files after pass 2?
+#'   Default `FALSE`. Set `TRUE` for debugging or to re-run pass 2 without
+#'   re-parsing.
+#'
+#' @return A `data.table` log with columns `gauge_id`, `rows`, and
+#'   `out_file`, one row per station written. Returned invisibly.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' # Ingest a single .all file
+#' log_dt <- ingest_all_file(
+#'   path       = "data/wiski/2008_2010.all",
+#'   output_dir = "data/fw_bronze/flow"
+#' )
+#'
+#' # Ingest multiple files covering different periods
+#' for (f in list.files("data/wiski", pattern = "\\.all$", full.names = TRUE)) {
+#'   ingest_all_file(f, output_dir = "data/fw_bronze/flow")
+#' }
+#'
+#' # Read the Bronze output for one station
+#' dt <- data.table::as.data.table(
+#'   arrow::collect(
+#'     arrow::open_dataset("data/fw_bronze/flow/gauge_id=2723TH")
+#'   )
+#' )
+#' data.table::setkeyv(dt, c("gauge_id", "datetime"))
+#' dt <- unique(dt, by = c("gauge_id", "datetime"))
+#' }
+ingest_all_file <- function(path,
+                            output_dir,
+                            chunk_size = 50000L,
+                            keep_tmp   = FALSE) {
+  
+  if (!file.exists(path)) stop("File not found: ", path)
+  
+  run_date <- Sys.Date()
+  tmp_dir  <- file.path(
+    output_dir,
+    paste0(".tmp_", tools::file_path_sans_ext(basename(path)))
+  )
+  
+  message(sprintf("Pass 1: parsing %s", basename(path)))
+  .parse_all_blocks(path, tmp_dir, chunk_size)
+  
+  message("Pass 2: merging to Bronze Parquet")
+  log_dt <- .merge_all_parquets(tmp_dir, output_dir, run_date)
+  
+  if (!keep_tmp) {
+    unlink(tmp_dir, recursive = TRUE)
+    message("Temp files removed.")
+  }
+  
+  message(sprintf(
+    "Ingest complete: %d station(s), %s total rows.",
+    nrow(log_dt),
+    format(sum(log_dt$rows), big.mark = ",")
+  ))
+  
+  invisible(log_dt)
+}
+
+
+# -- Route gateway ------------------------------------------------------------
+
+#' Fetch data from a WISKI .all export file
+#'
+#' Locates the `.all` file for a gauge under `WISKI_ALL_ROOT`, runs
+#' [ingest_all_file()], and returns the resulting data filtered to the
+#' requested date range. The file root is read from the environment variable
+#' `WISKI_ALL_ROOT`. Within that root, files are expected at:
+#' ```
+#' <WISKI_ALL_ROOT>/<gauge_id>.all
+#' ```
+#'
+#' Set the root path before use:
+#' ```
+#' Sys.setenv(WISKI_ALL_ROOT = "/mnt/wiski/exports")
+#' ```
+#'
+#' @param gauge_id Character. Gauge identifier matching `gauge_id` in the
+#'   registry, and the station number embedded in the `.all` file.
+#' @param data_type Character. Parameter type — used for logging only as
+#'   `.all` files carry all parameters for a station together.
+#' @param start_date Character. Start date in `"YYYY-MM-DD"` format.
+#' @param end_date Character. End date in `"YYYY-MM-DD"` format.
+#'
+#' @return A `data.table` with columns `gauge_id`, `datetime` (POSIXct),
+#'   `value` (numeric), `unit` (character), `flag` (integer), filtered to
+#'   the requested date range. Returns an empty `data.table` if no file
+#'   is found.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' Sys.setenv(WISKI_ALL_ROOT = "/mnt/wiski/exports")
+#' fetch_from_wiski_all("2723TH", "flow", "2010-01-01", "2012-12-31")
+#' }
+fetch_from_wiski_all <- function(gauge_id, data_type, start_date, end_date) {
+  
+  message(sprintf("  [WISKI_ALL] %s | %s | %s to %s",
+                  gauge_id, data_type, start_date, end_date))
+  
+  all_root <- Sys.getenv("WISKI_ALL_ROOT", unset = NA_character_)
+  if (is.na(all_root)) {
+    stop("[WISKI_ALL] WISKI_ALL_ROOT environment variable not set.")
+  }
+  
+  all_file <- file.path(all_root, paste0(gauge_id, ".all"))
+  if (!file.exists(all_file)) {
+    warning(sprintf("[WISKI_ALL] No .all file found for gauge_id: %s at %s",
+                    gauge_id, all_file))
+    return(data.table::data.table())
+  }
+  
+  # Ingest to a temp Bronze directory then read back and filter
+  tmp_bronze <- tempfile()
+  on.exit(unlink(tmp_bronze, recursive = TRUE))
+  
+  ingest_all_file(all_file, output_dir = tmp_bronze, keep_tmp = FALSE)
+  
+  part_dir <- file.path(tmp_bronze, paste0("gauge_id=", gauge_id))
+  if (!dir.exists(part_dir)) return(data.table::data.table())
+  
+  dt <- data.table::as.data.table(
+    arrow::collect(arrow::open_dataset(part_dir))
+  )
+  
+  if (nrow(dt) == 0) return(dt)
+  
+  # Filter to requested date range
+  from_dt <- as.POSIXct(start_date, tz = "UTC")
+  to_dt   <- as.POSIXct(end_date,   tz = "UTC")
+  dt[datetime >= from_dt & datetime <= to_dt,
+     .(gauge_id, datetime, value, unit, flag)]
+}

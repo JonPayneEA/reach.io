@@ -269,8 +269,8 @@ fetch_from_bulk_file <- function(gauge_id, data_type, start_date, end_date) {
 #' Route a single gauge fetch to the correct source system
 #'
 #' Reads the `source_system` field of a one-row registry `data.table` and
-#' dispatches to [fetch_from_hde()], [fetch_from_wiski()], or
-#' [fetch_from_bulk_file()]. Fetch errors are caught and returned as `NULL`
+#' dispatches to [fetch_from_hde()], [fetch_from_wiski()],
+#' [fetch_from_bulk_file()], or [fetch_from_wiski_all()]. Fetch errors are caught and returned as `NULL`
 #' with a warning so the caller ([run_backfill()] or [run_incremental()])
 #' can log the failure and continue.
 #'
@@ -311,6 +311,9 @@ route_gauge <- function(gauge_row, start_date, end_date) {
         gauge_row$gauge_id, gauge_row$data_type,
         start_date, end_date),
       "BULK_FILE" = fetch_from_bulk_file(
+        gauge_row$gauge_id, gauge_row$data_type,
+        start_date, end_date),
+      "WISKI_ALL" = fetch_from_wiski_all(
         gauge_row$gauge_id, gauge_row$data_type,
         start_date, end_date),
       stop("No client for source_system: ", gauge_row$source_system)

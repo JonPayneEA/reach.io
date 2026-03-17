@@ -24,6 +24,7 @@ A hydrometric data pipeline toolkit for the Environment Agency Hydrology API \ur
 \item \code{\link[=build_gauge_registry]{build_gauge_registry()}} -- build the master gauge registry Parquet table
 \item \code{\link[=route_gauge]{route_gauge()}} -- dispatch a gauge fetch to the correct source system
 \item \code{\link[=ingest_bulk_file]{ingest_bulk_file()}} -- ingest historical bulk files to partitioned Parquet
+\item \code{\link[=ingest_all_file]{ingest_all_file()}} -- ingest WISKI .all exports to partitioned Parquet
 \item \code{\link[=run_backfill]{run_backfill()}} -- parallelised backfill orchestrator with logging
 \item \code{\link[=run_incremental]{run_incremental()}} -- incremental sync from high watermark per gauge
 }

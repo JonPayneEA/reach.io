@@ -12,6 +12,7 @@
 #' - [build_gauge_registry()] -- build the master gauge registry Parquet table
 #' - [route_gauge()] -- dispatch a gauge fetch to the correct source system
 #' - [ingest_bulk_file()] -- ingest historical bulk files to partitioned Parquet
+#' - [ingest_all_file()] -- ingest WISKI .all exports to partitioned Parquet
 #' - [run_backfill()] -- parallelised backfill orchestrator with logging
 #' - [run_incremental()] -- incremental sync from high watermark per gauge
 #'
@@ -33,25 +34,24 @@ API_HARD_LIMIT <- 2000000L
 PARAMETER_CONFIG <- list(
   rainfall = list(
     observed_property = "rainfall",
-    value_type        = NULL,   # only one type available: total
-    default_period    = "15min" # another type available: daily
+    value_type        = NULL,          # only one type available: total
+    default_period    = "15min"        # also available: daily
   ),
   flow = list(
     observed_property = "waterFlow",
-    value_type        = "instantaneous", # Other types available: mean, max, min. NULL returns all.
+    value_type        = "instantaneous", # also available: mean, max, min; NULL returns all
     default_period    = "15min"
   ),
   level = list(
     observed_property = "waterLevel",
-    value_type        = "instantaneous", # Other types available: mean, max, min. NULL returns all
+    value_type        = "instantaneous", # also available: mean, max, min; NULL returns all
     default_period    = "15min"
   )
 )
 
-
 # Valid source systems recognised by the pipeline router
 #' @noRd
-VALID_SOURCES <- c("HDE", "WISKI", "BULK_FILE")
+VALID_SOURCES <- c("HDE", "WISKI", "BULK_FILE", "WISKI_ALL")
 
 # -- Null-coalescing operator -------------------------------------------------
 
