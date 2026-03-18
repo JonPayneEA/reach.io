@@ -70,6 +70,70 @@ test_that("extreme 15-min rainfall intensity is flagged as Suspect", { ... })
 test_that("flat-lined stage series is flagged as Suspect", { ... })
 ```
 
+#### Gridded NetCDF QC Tests
+> `tests/testthat/test-silver-netcdf.R`
+
+Gridded sources (e.g. `radarH19`) require a fundamentally different set of checks to point gauge data. Checks operate across three dimensions (time × lat × lon) rather than a single time series. Some known failures (beam blockage, range degradation) are permanent and spatially fixed — these are better handled via a static quality mask referenced during QC rather than re-detected each run.
+
+##### Structural / Metadata
+
+| Check | Detail |
+|-------|--------|
+| Expected dimensions | `time × lat × lon` (or `y × x`) all present |
+| CRS defined | Projection metadata present and parseable |
+| Units declared | Variable `units` attribute exists and is a recognised string |
+| Fill value consistency | `_FillValue` / `missing_value` matches actual masked cells |
+| CF conventions | `Conventions` attribute present; coordinate variables follow CF naming |
+| Grid resolution | Cell spacing is uniform and matches registry metadata |
+| Bounding box | Domain covers expected spatial extent (e.g. UK boundary) |
+
+##### Temporal
+
+| Check | Detail |
+|-------|--------|
+| No missing timesteps | Time coordinate is complete for expected frequency |
+| No duplicate timesteps | Each time value appears exactly once |
+| Monotonically increasing | Time coordinate is strictly increasing |
+| Time zone / epoch | `units` string decodes correctly (e.g. `hours since 1970-01-01 00:00:00 UTC`) |
+| Latency | Latest timestep is within expected lag of real time (freshness check) |
+
+##### Spatial / Per-Cell Values
+
+| Check | Detail |
+|-------|--------|
+| Physical range | e.g. rainfall ≥ 0; reflectivity within valid dBZ range |
+| No all-NaN slices | A timestep where every cell is masked likely indicates a missing file stitched in |
+| Isolated extreme cells | Single-cell spikes inconsistent with spatial neighbours (clutter artefacts) |
+| Spatial continuity | Extreme value isolated from neighbours by > n standard deviations |
+| Beam blockage zones | Known radar shadow areas consistently near-zero — flag rather than fail |
+| Range degradation | Quality degrades with distance from radar origin — flag peripheral cells |
+| Bright band contamination | Anomalous reflectivity layer at melting level (radar-specific) |
+| Edge artefacts | Boundary cells from interpolation or mosaicking |
+
+> **Note:** Spatial checks must inspect neighbouring cells in the same timestep, not just a cell's own time history. A spike in a point gauge is a temporal outlier; a spike in a grid is a spatial outlier.
+
+##### Aggregation / Cross-Validation
+
+| Check | Detail |
+|-------|--------|
+| Areal mean vs. gauge network | Spatial average over catchment compared to collocated gauge readings |
+| Temporal totals vs. climatology | Daily/monthly accumulations within expected climatological bounds |
+| Zero-rain coverage | % of cells reporting zero during a known rainfall event |
+| Spatial correlation structure | Rain fields should be spatially correlated — uncorrelated fields indicate corruption |
+
+##### Structural Tests
+
+```r
+test_that("NetCDF file has expected dimensions (time, lat, lon)", { ... })
+test_that("time coordinate is monotonically increasing with no gaps", { ... })
+test_that("no all-NaN time slices are present", { ... })
+test_that("all cell values are within physical range", { ... })
+test_that("isolated single-cell spikes are flagged", { ... })
+test_that("CRS metadata is present and parseable", { ... })
+test_that("grid resolution matches registry metadata", { ... })
+test_that("areal mean correlates with collocated gauge for same period", { ... })
+```
+
 ---
 
 ### Bronze Store Catalogue
