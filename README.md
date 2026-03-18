@@ -619,5 +619,19 @@ functions are mocked using `testthat::local_mocked_bindings()`.
 
 ## Licence
 
-MIT. Data downloaded via the EA Hydrology API is available under the
+MIT. 
+
+Data downloaded via the EA Hydrology API is available under the
 [Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/).
+
+---
+
+## Governance
+
+`reach.io` is classified under the F&W Data and Digital Asset Governance Framework v1.2.
+All ingested data follows the **Medallion Architecture** (Bronze → Silver → Gold).
+
+- [Hydrometric Data Framework reference](inst/data-framework.md) — Bronze schema, dataset ID format, quality flags, storage structure
+- [flode Governance](https://github.com/JonPayneEA/flode/blob/master/GOVERNANCE.md) — roles, tier classification, branching, versioning
+- [Contributing](https://github.com/JonPayneEA/flode/blob/master/CONTRIBUTING.md) — coding standards, fastverse conventions, PR process
+
