@@ -17,6 +17,59 @@ The Medallion Architecture is defined but only the Bronze tier is currently impl
 - Gap detection and annotation
 - Deduplication baked into the promotion step (currently deferred to read time)
 
+#### Data-Type-Specific QC Tests
+> `tests/testthat/test-silver.R`
+
+Silver QC rules and their tests should be parameterised by data type, as each has distinct physical characteristics.
+
+##### Flow (Q)
+
+| Test | Logic | QC Flag |
+|------|-------|---------|
+| Non-negative (configurable) | `value < 0` where tidal/ultrasonic influence is absent | 4 (Rejected) |
+| Upper bound | `value > credible_max` (site-specific) | 3 (Suspect) |
+| Rate of change | `abs(diff(value)) / value > threshold` over 15 min | 3 (Suspect) |
+| Spike detection | Outlier relative to rolling median ± n×MAD | 3 (Suspect) |
+| Flat-lining | N consecutive identical non-zero values (stuck sensor) | 3 (Suspect) |
+| Rating extrapolation | Derived from stage outside valid rating range | `extrapolated = TRUE` |
+
+> **Note:** Negative flow is physically valid in some settings (ultrasonic gauges, tidal reaches). The non-negative check should accept an `allow_negative` argument — defaulting to `FALSE` for standard fluvial gauges and `TRUE` where tidal or bidirectional flow is expected. Tests should cover both cases.
+
+##### Stage / Level (H)
+
+| Test | Logic | QC Flag |
+|------|-------|---------|
+| Plausible range | Outside `[min_datum, max_credible]` for that station | 3 (Suspect) |
+| Spike detection | Sudden large jump then return (debris, ice, sensor contact) | 3 (Suspect) |
+| Rate of change | Rivers rise and fall at physically bounded rates | 3 (Suspect) |
+| Flat-lining | Identical value over extended period (frozen/stuck sensor) | 3 (Suspect) |
+| Stage–flow consistency | Level rising while flow drops (or vice versa) sustained | 3 (Suspect) |
+| Datum shift detection | Persistent step-change offset (sensor moved or recalibrated) | 3 (Suspect) / 2 (Estimated) |
+
+##### Rainfall (P)
+
+| Test | Logic | QC Flag |
+|------|-------|---------|
+| Non-negative | `value < 0` (reset or overflow artifact) | 4 (Rejected) or corrected |
+| Intensity cap | 15-min value > credible intensity (e.g. >50 mm/15 min) | 3 (Suspect) |
+| Daily accumulation cap | Rolling 24 h total > ~300 mm (UK context) | 3 (Suspect) |
+| Extended dry run | Long zero sequences during known wet periods (blocked gauge) | 3 (Suspect) |
+| Gauge reset handling | Negative increments from tipping bucket counter overflow | Correct or flag |
+| Temporal consistency | Rain at site while all neighbouring gauges show zero | 3 (Suspect) |
+
+##### Structural / Cross-Type Tests
+
+```r
+test_that("promote_to_silver() adds all required Silver columns", { ... })
+test_that("qc_flag is never NA after promotion", { ... })
+test_that("qc_value equals value where qc_flag is Good (1)", { ... })
+test_that("negative flow flagged as Rejected when allow_negative = FALSE", { ... })
+test_that("negative flow accepted when allow_negative = TRUE", { ... })
+test_that("stage outside rating range sets extrapolated = TRUE", { ... })
+test_that("extreme 15-min rainfall intensity is flagged as Suspect", { ... })
+test_that("flat-lined stage series is flagged as Suspect", { ... })
+```
+
 ---
 
 ### Bronze Store Catalogue
