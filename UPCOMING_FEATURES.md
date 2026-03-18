@@ -136,6 +136,70 @@ test_that("areal mean correlates with collocated gauge for same period", { ... }
 
 ---
 
+### Silver & Gold Data Retrieval
+> `read_silver.R` / `read_gold.R`
+
+Currently there is no way to read data back out of the Silver or Gold stores. The Bronze tier has `download_hydrology()` for fetching from external APIs but nothing equivalent for reading QC'd or derived data from the local store. Retrieval functions should follow the same S7 class conventions as the rest of the package and support efficient lazy reads via Arrow for large date ranges.
+
+#### Silver Retrieval
+
+```r
+read_silver(
+  gauge_id,
+  data_type,
+  start     = NULL,   # Date or NULL (read all)
+  end       = NULL,
+  min_quality = 1L,   # Include flags 1 (Good) and better; set NULL for all
+  cols      = NULL    # Column subset; NULL returns all Silver columns
+)
+```
+
+Key behaviours:
+- Returns the appropriate S7 class (`Flow_15min`, `Level_Daily`, etc.) consistent with Bronze reads
+- `min_quality` maps to `qc_flag` thresholds: `1` = Good only, `2` = include Estimated, `3` = include Suspect, `NULL` = all flags including Rejected
+- Uses Arrow lazy evaluation — only materialises the subset matching the date and quality filter
+- Raises a clear error if no Silver data exists for the gauge (rather than silently returning empty)
+- Falls back to `qc_value` rather than `value` as the primary reading column
+
+| Function | Purpose |
+|----------|---------|
+| `read_silver(gauge_id, data_type, ...)` | Single gauge, single data type |
+| `read_silver_multi(gauge_ids, data_type, ...)` | Multiple gauges, returns named list of S7 objects |
+| `read_silver_catchment(catchment_id, data_type, ...)` | All gauges in a catchment by registry lookup |
+| `list_silver_gauges(data_type = NULL)` | List all gauges present in the Silver store |
+
+#### Gold Retrieval
+
+Gold tier holds derived and aggregated outputs (daily aggregations, catchment means, modelled series). Read functions should reflect the different structure — Gold data is typically aggregated and may span multiple source gauges.
+
+```r
+read_gold(
+  gauge_id,
+  data_type,
+  start   = NULL,
+  end     = NULL,
+  period  = c("15min", "hourly", "daily"),  # Aggregation level
+  cols    = NULL
+)
+```
+
+| Function | Purpose |
+|----------|---------|
+| `read_gold(gauge_id, data_type, ...)` | Single gauge Gold series |
+| `read_gold_multi(gauge_ids, data_type, ...)` | Multiple gauges, returns named list |
+| `read_gold_catchment(catchment_id, ...)` | All Gold outputs for a catchment |
+| `list_gold_products(gauge_id)` | List available Gold products (data types + periods) for a gauge |
+
+#### Design Considerations
+
+- **Consistency with Bronze** — return values should be S7 objects so downstream code works unchanged regardless of which tier data comes from
+- **qc_flag transparency** — returned objects should always carry `qc_flag` so callers can apply their own thresholds if needed
+- **Arrow / DuckDB backend** — avoid loading full Parquet partitions into memory; push date and quality filters to the scan layer
+- **Missing tier behaviour** — if Silver is requested but only Bronze exists, raise an informative error rather than silently falling back; callers should be explicit about which tier they want
+- **Multi-type reads** — a `read_silver_event(catchment_id, start, end)` helper that returns flow, level, and rainfall together (as a named list) would support event analysis workflows
+
+---
+
 ### Bronze Store Catalogue
 > `catalogue.R`
 
