@@ -136,6 +136,123 @@ test_that("areal mean correlates with collocated gauge for same period", { ... }
 
 ---
 
+### MOSES Potential Evapotranspiration (PE)
+> `ingest_moses_pe.R` / `pe_sine.R`
+
+MOSES is already a defined store category (`bronze/MOSES/MO/`) but PE is not yet registered as a data type — `DATA_TYPE_CODES` in `schema.R` only contains `SM` for the MOSES category. PE is fundamental to water balance modelling and is required before hydrological signatures such as `runoff_ratio` and `aridity` can be computed. Two source formats need supporting: **rectangular tables** (site-extracted or catchment-average tabular outputs) and **gridded NetCDF** (full MOSES grid). A **sine curve tool** is also needed for gap filling, ungauged catchments, and model spin-up.
+
+#### Prerequisites (schema changes)
+
+Before ingestion tools can be written, the following changes are needed:
+
+- Add `pe = "PE"` to `DATA_TYPE_CODES` in `schema.R`
+- Add `PE` to the MOSES entry in the default `categories` argument of `setup_hydro_store()` in `setup.R`
+- This will create `bronze/MOSES/MO/PE/`, `silver/MOSES/PE/`, and `gold/MOSES/PE/` directories on store setup
+
+#### Loading from Rectangular Tables
+> `ingest_moses_table()`
+
+MOSES PE is often extracted to tabular form — either a wide site × date matrix or a long-format CSV with one row per site per timestep.
+
+```r
+ingest_moses_table(
+  path,
+  format    = c("long", "wide"),   # long: site_id|date|pe; wide: date × site columns
+  site_col  = "site_id",           # column name carrying site identifier (long format)
+  date_col  = "date",
+  pe_col    = "pe",
+  units     = c("mm/day", "mm/hr", "kg/m2/s", "W/m2"),  # auto-converts to mm/day
+  output_dir,
+  category  = "MOSES",
+  ...
+)
+```
+
+Behaviours:
+- Auto-detects wide vs. long if `format` omitted and column structure is unambiguous
+- Converts all units to mm/day on ingest (store always holds mm/day)
+- Applies Bronze schema: `timestamp`, `value`, `supplier_flag`, `dataset_id`, `site_id`, `data_type = "PE"`
+- Writes one Parquet partition per site following `bronze/MOSES/MO/PE/<YYYY>/<dataset_id>.parquet`
+- Logs a provenance record to the Hydrometric Data Register on completion
+
+#### Loading from Gridded NetCDF
+> `ingest_moses_netcdf()`
+
+Full MOSES grid outputs are provided as NetCDF on the Met Office 1 km OSGB grid. Two extraction modes are needed: point extraction at gauge locations and catchment-average extraction over a polygon boundary.
+
+```r
+ingest_moses_netcdf(
+  path,
+  variable    = "pe",           # NetCDF variable name; common alternatives: "et", "evap", "LE"
+  mode        = c("point", "catchment_avg"),
+  sites       = NULL,           # data.frame with site_id, easting, northing (point mode)
+  boundaries  = NULL,           # sf polygon layer with site_id column (catchment_avg mode)
+  units       = c("mm/day", "kg/m2/s", "W/m2"),
+  output_dir,
+  ...
+)
+```
+
+| Mode | Detail |
+|------|--------|
+| `"point"` | Bilinear interpolation to site coordinates (easting/northing OSGB or lon/lat WGS84) |
+| `"catchment_avg"` | Area-weighted zonal mean over catchment polygon; respects partial cell overlap |
+
+Behaviours:
+- Handles common MOSES variable names and auto-detects units from the `units` NetCDF attribute
+- Converts W m⁻² and kg m⁻² s⁻¹ to mm day⁻¹ using `λ = 2.45 MJ kg⁻¹`
+- Reprojects site coordinates to match NetCDF CRS if needed (requires `sf`)
+- Applies same Bronze schema and provenance logging as the table ingestor
+- Validates grid against expected MOSES domain (warns if bounding box is unexpected)
+
+#### Sine Curve Tools
+> `pe_sine.R`
+
+PE follows a strong annual cycle well approximated by a sine wave. Sine tools support gap filling, ungauged catchment estimation, model spin-up periods, and sensitivity analysis.
+
+The standard form used throughout is:
+
+```
+PE(t) = B + A × sin(2π/365.25 × (t − φ))
+```
+
+where `B` = annual mean (mm day⁻¹), `A` = amplitude (mm day⁻¹), `φ` = phase offset (day of year of peak; ~172 for UK, i.e. ~21 June).
+
+```r
+# Fit parameters from an observed PE series
+fit_pe_sine(
+  pe,               # numeric vector of daily PE values
+  dates,            # corresponding Date vector
+  method = c("nls", "lm_fourier")  # nonlinear least squares or linearised Fourier fit
+)
+# Returns: list(B, A, phi, r_squared, rmse)
+
+# Generate a synthetic PE series from fitted (or manually specified) parameters
+generate_pe_sine(
+  B, A, phi,
+  start,            # Date
+  end,              # Date
+  as_s7 = TRUE      # wrap in appropriate S7 class?
+)
+
+# Regionalise sine parameters from nearby gauges (for ungauged catchments)
+regionalise_pe_sine(
+  gauge_ids,        # gauges to pool
+  weights = NULL    # area or distance weights; equal weighting if NULL
+)
+```
+
+| Function | Use case |
+|----------|----------|
+| `fit_pe_sine()` | Characterise seasonal PE behaviour; extract B, A, φ for a gauge |
+| `generate_pe_sine()` | Synthetic PE for spin-up, ungauged sites, or scenario analysis |
+| `regionalise_pe_sine()` | Pool parameters from neighbouring gauges to estimate PE at ungauged location |
+| `compare_pe_sine()` | Overlay fitted curve against observed series; returns RMSE and bias |
+
+> **Note:** The sine approximation works well for UK lowland catchments but degrades in upland or coastal sites where PE timing is shifted by elevation or sea surface temperature. `fit_pe_sine()` should return `r_squared` so the caller can assess goodness-of-fit before using the curve operationally.
+
+---
+
 ### Silver & Gold Data Retrieval
 > `read_silver.R` / `read_gold.R`
 
