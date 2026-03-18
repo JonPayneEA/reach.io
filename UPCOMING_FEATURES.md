@@ -157,6 +157,108 @@ When re-ingesting historical data there is no mechanism to detect values that ha
 
 ## Medium Priority
 
+### Gold Tier: CAMELS-GB Style Catchment Attributes
+> `camels.R` / `signatures.R`
+
+Calculate a standardised set of static catchment attributes and hydrological signatures consistent with the [CAMELS-GB dataset](https://doi.org/10.5194/essd-12-2459-2020) (Coxon et al., 2020). This enables benchmarking against the 671-catchment CAMELS-GB reference dataset and supports large-sample hydrology workflows. Attributes split into two groups: **hydrological signatures** derived from the Silver/Gold time series, and **spatial attributes** derived from external GIS sources.
+
+#### Hydrological Signatures *(derived from flow and climate time series)*
+
+| Attribute | Description |
+|-----------|-------------|
+| `q_mean` | Mean daily discharge |
+| `runoff_ratio` | Runoff ratio (Q / P) |
+| `stream_elas` | Streamflow precipitation elasticity |
+| `slope_fdc` | Slope of the flow duration curve |
+| `baseflow_index` | Baseflow index (CAMELS method) |
+| `baseflow_index_ceh` | Baseflow index (CEH / Gustard 1992 method) |
+| `hfd_mean` | Mean half-flow date |
+| `Q5` / `Q95` | 5th and 95th flow percentiles |
+| `high_q_freq` / `high_q_dur` | Frequency and duration of high-flow events |
+| `low_q_freq` / `low_q_dur` | Frequency and duration of low-flow events |
+| `zero_q_freq` | Frequency of zero-flow days |
+
+#### Climate Indices *(derived from precipitation and PET time series)*
+
+| Attribute | Description |
+|-----------|-------------|
+| `p_mean` | Mean daily precipitation (mm d⁻¹) |
+| `pet_mean` | Mean daily PET — Penman–Monteith (mm d⁻¹) |
+| `aridity` | Aridity index (PET / P) |
+| `p_seasonality` | Seasonality and timing of precipitation |
+| `frac_snow` | Fraction of precipitation falling as snow |
+| `high_prec_freq` / `high_prec_dur` / `high_prec_timing` | High-precipitation event statistics |
+| `low_prec_freq` / `low_prec_dur` / `low_prec_timing` | Low-precipitation event statistics |
+
+#### Topographic Attributes *(from DEM)*
+
+| Attribute | Description |
+|-----------|-------------|
+| `elev_mean` / `elev_min` / `elev_max` | Catchment elevation statistics (m a.s.l.) |
+| `elev_10` / `elev_50` / `elev_90` | Elevation percentiles |
+| `dpsbar` | Mean drainage path slope (m km⁻¹) |
+
+#### Land Cover *(from Land Cover Map 2015 or equivalent)*
+
+| Attribute | Description |
+|-----------|-------------|
+| `dwood_perc` / `ewood_perc` | Deciduous and evergreen woodland (%) |
+| `grass_perc` / `shrub_perc` | Grassland and shrub/heath (%) |
+| `crop_perc` / `urban_perc` | Cropland and urban (%) |
+| `inwater_perc` / `bogs_perc` | Inland water and bogs/peatland (%) |
+| `dom_land_cover` | Dominant land cover class |
+
+#### Soil Attributes *(from European Soil Database or equivalent)*
+
+| Attribute | Description |
+|-----------|-------------|
+| `sand_perc` / `silt_perc` / `clay_perc` | Soil texture fractions (%) |
+| `organic_perc` | Organic matter content (%) |
+| `bulkdens` | Bulk density |
+| `tawc` | Total available water content |
+| `conductivity_cosby` / `conductivity_hypres` | Saturated hydraulic conductivity (two PTF methods) |
+| `porosity_cosby` / `porosity_hypres` | Porosity (two PTF methods) |
+| `soil_depth_pelletier` | Depth to bedrock (m) |
+
+#### Hydrogeology *(from BGS Hydrogeology Map)*
+
+Fractional area of nine hydrogeological productivity/flow-mechanism classes:
+
+| Attribute | Description |
+|-----------|-------------|
+| `frac_high_perc_eff_aquifer` | High productivity, intergranular (%) |
+| `frac_mod_perc_eff_aquifer` | Moderate productivity, intergranular (%) |
+| `frac_low_perc_aquifer` | Low productivity, intergranular (%) |
+| `frac_high_frac_eff_aquifer` | High productivity, fractured (%) |
+| `frac_mod_frac_eff_aquifer` | Moderate productivity, fractured (%) |
+| `frac_low_frac_aquifer` | Low productivity, fractured (%) |
+| `frac_non_aquifer` | Non-aquifer (%) |
+
+#### Human Management *(from NRFA, abstraction licences)*
+
+| Attribute | Description |
+|-----------|-------------|
+| `num_reservoir` / `reservoir_cap` | Reservoir count and total storage capacity (Ml) |
+| `reservoir_he` / `reservoir_nav` / `reservoir_drain` | Capacity by purpose: hydroelectric, navigation, drainage |
+| `reservoir_wr` / `reservoir_fs` / `reservoir_env` | Capacity by purpose: water regulation, flood storage, environmental |
+| `reservoir_year_first` / `reservoir_year_last` | First and last year of reservoir construction |
+| `abs_agriculture_perc` / `abs_amenities_perc` | Abstraction breakdown by sector (%) |
+| `abs_energy_perc` / `abs_industry_perc` / `abs_water_supply_perc` | Abstraction breakdown by sector (%) |
+| `gw_abs` / `sw_abs` | Groundwater and surface water abstractions (Ml d⁻¹) |
+| `discharges` | Total returns / discharges to rivers |
+
+#### Planned Functions
+
+- `compute_signatures(gauge_id, period)` — Calculate hydrological signatures from Silver flow series
+- `compute_climate_indices(gauge_id, period)` — Calculate climate indices from precipitation and PET series
+- `extract_spatial_attributes(catchment_boundary)` — Zonal statistics from raster layers (DEM, land cover, soils, BGS)
+- `build_camels_table(gauge_ids)` — Assemble full CAMELS-style attribute table for a set of gauges
+- `compare_to_camels_gb(gauge_id)` — Benchmark computed attributes against published CAMELS-GB values
+
+> **Reference:** Coxon, G. et al. (2020). CAMELS-GB: hydrometeorological time series and landscape attributes for 671 catchments in Great Britain. *Earth System Science Data*, 12(4), 2459–2483. https://doi.org/10.5194/essd-12-2459-2020
+
+---
+
 ### Validation Rules Engine
 > `validate.R`
 
