@@ -1,61 +1,87 @@
-# -- Bulk File Ingestor -------------------------------------------------------
+# ============================================================
+# Tool:        Bulk File Ingestor
+# Description: Reads EA bulk export files, standardises to
+#              the Bronze Parquet schema, writes partitioned
+#              Parquet and a provenance record.
+# Flode Module: flode.io
+# Author:      [Hydrometric Data Lead]
+# Created:     2026-02-01
+# Modified:    2026-02-01 - JP: aligned to Bronze schema v1.3
+# Tier:        1
+# Inputs:      CSV/TSV/fixed-width bulk export file
+# Outputs:     Bronze Parquet; provenance record row in register
+# Dependencies: data.table, arrow, lubridate
+# ============================================================
 
-#' Ingest a historical bulk file to partitioned Bronze Parquet
+#' Ingest a historical bulk file to Bronze Parquet
 #'
-#' Reads a historical bulk export file from an FTP drop or local path,
-#' standardises column names to the pipeline schema, parses and cleans the
-#' data, and writes the result as a partitioned Parquet file in the Bronze
-#' storage tier. Handles multiple file formats and the varying column naming
-#' conventions used in EA bulk exports.
+#' Reads a historical bulk export file, standardises column names, parses
+#' datetimes, applies the Bronze Parquet schema (Section 7.2 of the
+#' Hydrometric Data Framework), and writes to the framework folder structure.
+#' A provenance record is appended to the Hydrometric Data Register.
 #'
-#' Output is partitioned by `gauge_id` using Hive-style directory naming
-#' (`gauge_id=<id>/`) for compatibility with both Arrow/DuckDB and Spark
-#' partition discovery.
+#' Output path follows Appendix C:
+#' `<output_dir>/bronze/<SupplierCode>/<DataType>/<YYYY>/<DatasetID>.parquet`
 #'
-#' @param file_path Character. Path to the raw bulk file on disk or a
-#'   mounted FTP path.
-#' @param gauge_id Character. Gauge identifier to tag all rows with. Used
-#'   as the partition key in the output directory structure.
-#' @param output_dir Character. Root Bronze output directory. A subdirectory
-#'   `gauge_id=<gauge_id>/` is created inside this path.
+#' @param file_path Character. Path to the raw bulk file.
+#' @param site_id Character. Gauge identifier (used in the dataset ID and
+#'   the Bronze schema `site_id` column).
+#' @param data_type Character. Parameter: `"flow"`, `"level"`, or
+#'   `"rainfall"`.
+#' @param output_dir Character. Root output directory (the `hydrometric/`
+#'   root; subdirectories are created automatically).
+#' @param register_path Character. Path to the Hydrometric Data Register CSV.
+#' @param supplier Character. Supplier name for the provenance record,
+#'   e.g. `"Environment Agency"`.
+#' @param category Character. Data category from the gauge registry, e.g.
+#'   `"hydrometric"`, `"radarH19"`, `"MOSES"`. Default `"hydrometric"`.
+#' @param source_system Character. Registry source system value used to
+#'   derive the supplier code. Default `"BULK_FILE"`.
 #' @param file_format Character. One of `"csv"` (default), `"tsv"`, or
-#'   `"fixed"` (fixed-width). `data.table::fread()` handles all three.
+#'   `"fixed"`.
+#' @param received_by Character. Custodian name for the provenance record.
+#'   Defaults to `Sys.info()[["user"]]`.
+#' @param notes Character or NULL. Any unusual aspects of this delivery.
 #'
-#' @return The processed `data.table` invisibly. The primary side-effect is
-#'   writing a Parquet file to
-#'   `<output_dir>/gauge_id=<gauge_id>/bulk_<YYYYMMDD>.parquet`.
+#' @return The Bronze `data.table` invisibly. Side effects: writes Parquet
+#'   and appends a provenance record to the register.
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
 #' ingest_bulk_file(
-#'   file_path   = "data/raw/EA_39001_flow_2000_2020.csv",
-#'   gauge_id    = "39001",
-#'   output_dir  = "data/fw_bronze/flow",
-#'   file_format = "csv"
+#'   file_path     = "data/raw/EA_39001_flow_2000_2020.csv",
+#'   site_id       = "39001",
+#'   data_type     = "flow",
+#'   output_dir    = "data/hydrometric",
+#'   register_path = "data/hydrometric/register/register.csv",
+#'   supplier      = "Environment Agency"
 #' )
 #' }
 ingest_bulk_file <- function(file_path,
-                             gauge_id,
+                             site_id,
+                             data_type,
                              output_dir,
-                             file_format = c("csv", "tsv", "fixed")) {
+                             register_path,
+                             supplier      = "Environment Agency",
+                             category      = "hydrometric",
+                             source_system = "BULK_FILE",
+                             file_format   = c("csv", "tsv", "fixed"),
+                             received_by   = Sys.info()[["user"]],
+                             notes         = NA_character_) {
 
   file_format <- match.arg(file_format)
   message(sprintf("Ingesting bulk file: %s [%s]", file_path, file_format))
 
-  # -- Read file by format ----------------------------------------------------
-  # fread() handles csv and tsv natively; fixed-width is handled via sep = ""
-  # which causes fread to treat each character as a potential separator
+  # -- Read file ---------------------------------------------------------------
   raw_dt <- switch(file_format,
     "csv"   = data.table::fread(file_path),
     "tsv"   = data.table::fread(file_path, sep = "\t"),
     "fixed" = data.table::fread(file_path, sep = "")
   )
 
-  # -- Standardise column names to pipeline schema ----------------------------
-  # EA bulk exports use varying names across data types and time periods;
-  # map the most common variants to the canonical names used downstream
+  # -- Standardise column names ------------------------------------------------
   name_map <- c(
     Date        = "datetime",
     date        = "datetime",
@@ -63,13 +89,12 @@ ingest_bulk_file <- function(file_path,
     DateTime    = "datetime",
     Value       = "value",
     Measurement = "value",
-    Quality     = "flag",
-    QualityCode = "flag"
+    Quality     = "supplier_flag",
+    QualityCode = "supplier_flag"
   )
   old_names <- intersect(names(name_map), names(raw_dt))
   data.table::setnames(raw_dt, old_names, name_map[old_names])
 
-  # -- Enforce required columns -----------------------------------------------
   if (!"datetime" %in% names(raw_dt)) {
     stop("Could not identify a datetime column. ",
          "Expected one of: Date, date, timestamp, DateTime.")
@@ -79,53 +104,61 @@ ingest_bulk_file <- function(file_path,
          "Expected one of: Value, Measurement.")
   }
 
-  # -- Parse and clean (modify in place) --------------------------------------
-  raw_dt[, gauge_id    := gauge_id]
+  # -- Parse datetime ----------------------------------------------------------
+  raw_dt[, datetime := lubridate::parse_date_time(
+    datetime,
+    orders = c("Ymd HMS", "dmY HM", "Ymd HM", "Ymd"),
+    tz     = "UTC"
+  )]
+  raw_dt[, value := suppressWarnings(as.numeric(value))]
 
-  # parse_date_time() tries multiple format strings in order, which handles
-  # the mix of date formats found in EA historical exports
-  raw_dt[, datetime    := lubridate::parse_date_time(
-                            datetime,
-                            orders = c("Ymd HMS", "dmY HM", "Ymd HM", "Ymd"),
-                            tz     = "UTC")]
-
-  raw_dt[, value       := suppressWarnings(as.numeric(value))]
-
-  # Use flag column if present, otherwise default to 1 (unchecked/present)
-  raw_dt[, flag        := if ("flag" %in% names(raw_dt)) {
-                            as.integer(flag)
-                          } else {
-                            1L
-                          }]
-
-  raw_dt[, source      := "BULK_FILE"]
-  raw_dt[, ingest_date := Sys.Date()]
-
-  # Drop rows where parsing failed — these are typically header artefacts
-  # or rows with placeholder missing-value codes
-  processed_dt <- raw_dt[
-    !is.na(datetime) & !is.na(value),
-    .(gauge_id, datetime, value, flag, source, ingest_date)
-  ]
-
-  n_dropped <- nrow(raw_dt) - nrow(processed_dt)
-  if (n_dropped > 0) {
+  # Drop unparseable rows
+  n_in      <- nrow(raw_dt)
+  raw_dt    <- raw_dt[!is.na(datetime) & !is.na(value)]
+  n_dropped <- n_in - nrow(raw_dt)
+  if (n_dropped > 0L) {
     message(sprintf("  Dropped %d rows with unparseable datetime or value.",
                     n_dropped))
   }
 
-  # -- Write to partitioned Bronze Parquet ------------------------------------
-  # Hive-style partitioning (gauge_id=<id>/) is compatible with both
-  # Arrow open_dataset() and Spark partition discovery
-  part_dir <- file.path(output_dir, paste0("gauge_id=", gauge_id))
-  dir.create(part_dir, recursive = TRUE, showWarnings = FALSE)
+  # -- Build dataset ID and apply Bronze schema --------------------------------
+  supplier_code <- source_to_supplier(source_system)
+  dt_code       <- param_to_data_type(data_type)
+  dataset_id    <- make_dataset_id(supplier_code, site_id, dt_code)
 
-  out_file <- file.path(
-    part_dir,
-    paste0("bulk_", format(Sys.Date(), "%Y%m%d"), ".parquet")
+  bronze_dt <- apply_bronze_schema(
+    dt                = raw_dt,
+    dataset_id        = dataset_id,
+    site_id           = site_id,
+    data_type         = dt_code,
+    timestamp_col     = "datetime",
+    value_col         = "value",
+    supplier_flag_col = if ("supplier_flag" %in% names(raw_dt))
+                          "supplier_flag" else NULL
   )
-  arrow::write_parquet(processed_dt, out_file)
 
-  message(sprintf("  Written %d rows -> %s", nrow(processed_dt), out_file))
-  invisible(processed_dt)
+  # -- Write to Bronze path ----------------------------------------------------
+  out_file <- bronze_path(output_dir, category, supplier_code, dt_code, dataset_id)
+  dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)
+  arrow::write_parquet(bronze_dt, out_file)
+  message(sprintf("  Written %d rows -> %s", nrow(bronze_dt), out_file))
+
+  # -- Provenance record -------------------------------------------------------
+  write_provenance_record(
+    register_path       = register_path,
+    dataset_id          = dataset_id,
+    supplier            = supplier,
+    supplier_code       = supplier_code,
+    site_id             = site_id,
+    data_type           = dt_code,
+    time_period_start   = as.character(min(as.Date(bronze_dt$timestamp))),
+    time_period_end     = as.character(max(as.Date(bronze_dt$timestamp))),
+    temporal_resolution = "unknown",
+    method_of_receipt   = "bulk file",
+    file_path           = out_file,
+    received_by         = received_by,
+    notes               = notes
+  )
+
+  invisible(bronze_dt)
 }

@@ -1,3 +1,18 @@
+# ============================================================
+# Tool:        Parallelised Backfill Orchestrator
+# Description: Distributes historical gauge fetches across CPU
+#              cores, writes Bronze Parquet, and logs per-gauge
+#              outcomes. Supports failed-only reruns.
+# Flode Module: flode.io
+# Author:      [Hydrometric Data Lead]
+# Created:     2026-02-01
+# Modified:    2026-02-01 - JP: aligned to Bronze schema v1.3
+# Tier:        1
+# Inputs:      Gauge registry Parquet; date range
+# Outputs:     Bronze Parquet files; backfill log CSV
+# Dependencies: data.table, arrow, future, future.apply, parallel
+# ============================================================
+
 # -- Parallelised Backfill Orchestrator ---------------------------------------
 
 #' Run a parallelised backfill across all active gauges
@@ -18,10 +33,12 @@
 #'
 #' @param registry_path Character. Path to the gauge registry Parquet file
 #'   written by [build_gauge_registry()].
-#' @param output_dir Character. Root Bronze output directory. Per-gauge
-#'   subdirectories (`gauge_id=<id>/`) are created inside this path.
+#' @param output_dir Character. Root output directory (`hydrometric/`). Bronze
+#'   files are written under `output_dir/bronze/<SupplierCode>/<DataType>/<YYYY>/`.
 #' @param start_date Character. Backfill start date in `"YYYY-MM-DD"` format.
 #' @param end_date Character. Backfill end date in `"YYYY-MM-DD"` format.
+#' @param register_path Character. Path to the Hydrometric Data Register CSV.
+#'   A provenance record is appended for each successfully ingested dataset.
 #' @param log_path Character. Path to write the per-gauge result log CSV.
 #'   Directory is created if absent. Default `"logs/backfill_log.csv"`.
 #' @param failed_only Logical. If `TRUE` and `log_path` exists, restrict the
@@ -61,6 +78,7 @@ run_backfill <- function(registry_path,
                          output_dir,
                          start_date,
                          end_date,
+                         register_path = "data/hydrometric/register/register.csv",
                          log_path    = "logs/backfill_log.csv",
                          failed_only = FALSE,
                          n_workers   = parallel::detectCores() - 1L) {
@@ -120,15 +138,34 @@ run_backfill <- function(registry_path,
                elapsed_s = NA_real_,
                error     = NA_character_)
         } else {
-          # Write fetched data to Hive-partitioned Bronze Parquet
-          part_dir <- file.path(output_dir,
-                                paste0("gauge_id=", gauge$gauge_id))
-          dir.create(part_dir, recursive = TRUE, showWarnings = FALSE)
-          arrow::write_parquet(
-            data_dt,
-            file.path(part_dir,
-                      paste0("backfill_",
-                             format(Sys.Date(), "%Y%m%d"), ".parquet"))
+          # Write to Bronze path following framework structure:
+          # bronze/<category>/<supplier>/<data_type>/<year>/<dataset_id>.parquet
+          supplier_code <- source_to_supplier(gauge$source_system) %||% "EA"
+          dt_code       <- param_to_data_type(gauge$data_type) %||% "Q"
+          category      <- gauge$category %||% "hydrometric"
+          dataset_id    <- if ("dataset_id" %in% names(data_dt))
+                             data_dt$dataset_id[1L]
+                           else
+                             make_dataset_id(supplier_code, gauge$gauge_id,
+                                             dt_code)
+          out_file <- bronze_path(output_dir, category, supplier_code,
+                                  dt_code, dataset_id)
+          dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)
+          arrow::write_parquet(data_dt, out_file)
+
+          # Provenance record
+          write_provenance_record(
+            register_path       = register_path,
+            dataset_id          = dataset_id,
+            supplier            = gauge$source_system %||% "unknown",
+            supplier_code       = supplier_code,
+            site_id             = gauge$gauge_id,
+            data_type           = dt_code,
+            time_period_start   = start_date,
+            time_period_end     = end_date,
+            temporal_resolution = "unknown",
+            method_of_receipt   = gauge$source_system %||% "unknown",
+            file_path           = out_file
           )
 
           elapsed <- (proc.time() - t_start)[["elapsed"]]

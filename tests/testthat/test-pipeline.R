@@ -2,6 +2,7 @@ test_that("build_gauge_registry errors on missing columns", {
   tmp <- tempfile(fileext = ".csv")
   data.table::fwrite(
     data.table::data.table(gauge_id = "A", source_system = "HDE"),
+    # Missing category, data_type, catchment, ea_site_ref intentionally
     tmp
   )
   expect_error(build_gauge_registry(tmp, tempdir()),
@@ -32,6 +33,7 @@ test_that("build_gauge_registry writes parquet and returns data.table", {
       gauge_id      = c("A", "B"),
       source_system = c("HDE", "WISKI"),
       data_type     = c("flow", "level"),
+      category      = c("hydrometric", "hydrometric"),
       catchment     = c("Exe", "Severn"),
       ea_site_ref   = c("X1", "X2")
     ),

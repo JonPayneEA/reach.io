@@ -1,3 +1,19 @@
+# ============================================================
+# Tool:        Synchronous Download Helpers
+# Description: Internal helpers for the EA Hydrology sync
+#              API: fetch readings for a single measure,
+#              split date ranges into annual chunks, and
+#              orchestrate chunked downloads.
+# Flode Module: flode.io
+# Author:      [Hydrometric Data Lead]
+# Created:     2026-02-01
+# Modified:    2026-02-01 - JP: initial version
+# Tier:        1
+# Inputs:      Measure notation, date range, chunk list
+# Outputs:     data.table of readings or CSV file
+# Dependencies: httr, data.table
+# ============================================================
+
 # ── Synchronous download helpers ─────────────────────────────────────────────
 
 #' Fetch readings for a single measure (synchronous API)

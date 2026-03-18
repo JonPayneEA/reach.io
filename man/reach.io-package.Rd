@@ -19,9 +19,37 @@ A hydrometric data pipeline toolkit for the Environment Agency Hydrology API \ur
 }
 }
 
+\subsection{Schema and provenance tools}{
+\itemize{
+\item \code{\link[=make_dataset_id]{make_dataset_id()}} -- generate a Bronze dataset ID
+\item \code{\link[=source_to_supplier]{source_to_supplier()}} -- map source_system to supplier code
+\item \code{\link[=param_to_data_type]{param_to_data_type()}} -- map parameter name to framework data type code
+\item \code{\link[=apply_bronze_schema]{apply_bronze_schema()}} -- coerce a data.table to the Bronze Parquet schema
+\item \code{\link[=bronze_path]{bronze_path()}} -- build the Bronze file path following framework Appendix C
+\item \code{\link[=write_provenance_record]{write_provenance_record()}} -- append a provenance record to the register
+}
+}
+
+\subsection{Setup}{
+\itemize{
+\item \code{\link[=setup_hydro_store]{setup_hydro_store()}} -- create the hydrometric data store directory structure
+}
+}
+
 \subsection{Pipeline tools}{
 \itemize{
 \item \code{\link[=build_gauge_registry]{build_gauge_registry()}} -- build the master gauge registry Parquet table
+}
+}
+
+\subsection{Schema and provenance tools (Hydrometric Data Framework v1.3)}{
+\itemize{
+\item \code{\link[=make_dataset_id]{make_dataset_id()}} -- generate a Bronze dataset ID
+\item \code{\link[=source_to_supplier]{source_to_supplier()}} -- map source_system to supplier code
+\item \code{\link[=param_to_data_type]{param_to_data_type()}} -- map parameter name to framework data type code
+\item \code{\link[=apply_bronze_schema]{apply_bronze_schema()}} -- apply the mandatory Bronze Parquet schema
+\item \code{\link[=bronze_path]{bronze_path()}} -- construct the Bronze file path (Appendix C layout)
+\item \code{\link[=write_provenance_record]{write_provenance_record()}} -- append a provenance record to the register
 \item \code{\link[=route_gauge]{route_gauge()}} -- dispatch a gauge fetch to the correct source system
 \item \code{\link[=ingest_bulk_file]{ingest_bulk_file()}} -- ingest historical bulk files to partitioned Parquet
 \item \code{\link[=ingest_all_file]{ingest_all_file()}} -- ingest WISKI .all exports to partitioned Parquet
@@ -33,20 +61,20 @@ A hydrometric data pipeline toolkit for the Environment Agency Hydrology API \ur
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://github.com/JonPayneEA/reach.io}
-  \item Report bugs at \url{https://github.com/JonPayneEA/reach.io/issues}
+  \item \url{https://github.com/yourname/reach.io}
+  \item Report bugs at \url{https://github.com/yourname/reach.io/issues}
 }
 
 
 Useful links:
 \itemize{
-  \item \url{https://github.com/JonPayneEA/reach.io}
-  \item Report bugs at \url{https://github.com/JonPayneEA/reach.io/issues}
+  \item \url{https://github.com/yourname/reach.io}
+  \item Report bugs at \url{https://github.com/yourname/reach.io/issues}
 }
 
 }
 \author{
-\strong{Maintainer}: Jonathan Payne \email{jon.payne@environment-agency.gov.uk} (\href{https://orcid.org/0000-0003-2551-5353}{ORCID})
+\strong{Maintainer}: First Last \email{first.last@example.com}
 
 }
 \keyword{internal}

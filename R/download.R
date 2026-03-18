@@ -1,3 +1,18 @@
+# ============================================================
+# Tool:        EA Hydrology API Download
+# Description: Main entry point for downloading rainfall,
+#              flow, and level data from the EA Hydrology API
+#              via synchronous or batch methods.
+# Flode Module: flode.io
+# Author:      [Hydrometric Data Lead]
+# Created:     2026-02-01
+# Modified:    2026-02-01 - JP: initial version
+# Tier:        1
+# Inputs:      Station identifiers, date range, parameters
+# Outputs:     Named list of S7 objects or CSV files
+# Dependencies: httr, data.table, S7
+# ============================================================
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 #' Download hydrology readings from the EA Hydrology API
@@ -124,14 +139,14 @@ download_hydrology <- function(
     chunk_by_year    = TRUE,
     max_wait_s       = 600
 ) {
-  
+
   method <- match.arg(method)
   output <- match.arg(output)
-  
+
   if (output == "disk" && is.null(out_dir)) {
     stop("`out_dir` must be supplied when output = 'disk'.")
   }
-  
+
   # ── Resolve station identifiers ───────────────────────────────────────────
   # find_stations() now returns one row per measure with station.notation,
   # parameter, value_type, and period columns already parsed. When station
@@ -139,7 +154,7 @@ download_hydrology <- function(
   # get_measures() separately — it avoids a second API round trip and gives
   # richer filtering (by parameter, period, value_type) in one step.
   stns_dt <- NULL
-  
+
   if (!is.null(wiski_ids) || !is.null(rloi_ids) || !is.null(notations)) {
     message("Resolving station identifiers...")
     stns_dt <- find_stations(wiski_ids = wiski_ids,
@@ -152,54 +167,66 @@ download_hydrology <- function(
                     data.table::uniqueN(stns_dt$notation),
                     nrow(stns_dt)))
   }
-  
+
   # ── Setup ──────────────────────────────────────────────────────────────────
   if (method == "sync") {
     chunks <- if (chunk_by_year) make_date_chunks(from_date, to_date)
-    else data.table::data.table(chunk_from = from_date,
-                                chunk_to   = to_date)
+              else data.table::data.table(chunk_from = from_date,
+                                         chunk_to   = to_date)
     message(sprintf("Method: sync | Output: %s | %d chunk(s).",
                     output, nrow(chunks)))
   } else {
     message(sprintf("Method: batch | Output: %s.", output))
   }
-  
+
   param_data    <- list()
   all_summaries <- list()
-  
+
   # ── Loop over each requested parameter ────────────────────────────────────
   for (param in parameters) {
-    
+
     message(sprintf("\n== Parameter: %s ==", toupper(param)))
-    
+
     # Resolve period_name and value_type from PARAMETER_CONFIG, allowing
     # caller-supplied values to override the per-parameter defaults.
     config    <- PARAMETER_CONFIG[[param]]
     p_period  <- period_name %||% config$default_period
     p_valtype <- value_type  %||% config$value_type
-    
+    message(sprintf("  Config resolved: period='%s', value_type='%s'",
+                    p_period %||% "NULL", p_valtype %||% "NULL"))
+
     if (!is.null(stns_dt)) {
       # Station filter supplied: use find_stations() output directly.
       # Filter to this parameter, then apply period and value_type filters.
       measures <- stns_dt[parameter == param]
-      
-      if (!is.null(p_period) && p_period != "all") {
+
+      message(sprintf("  Found %d %s measure(s) before period/value_type filter.",
+                      nrow(measures), param))
+
+      # isTRUE guards against NULL or length-0 comparisons from config values
+      if (isTRUE(nchar(p_period) > 0) && !isTRUE(p_period == "all")) {
         measures <- measures[period == p_period]
       }
-      if (!is.null(p_valtype) && p_valtype != "all") {
+      if (isTRUE(nchar(p_valtype) > 0) && !isTRUE(p_valtype == "all")) {
         measures <- measures[value_type == p_valtype]
       }
-      
+
+      message(sprintf("  %d measure(s) after filter (period='%s', value_type='%s').",
+                      nrow(measures),
+                      p_period  %||% "any",
+                      p_valtype %||% "any"))
+
       if (nrow(measures) == 0) {
         warning(sprintf(
-          "No %s measures found for the supplied stations.", param
+          "No %s measures found for the supplied stations after filtering.",
+          param
         ))
         next
       }
-      
+
       # Use station.notation as the measure ID for fetch_readings()
       measures[, notation := station.notation]
-      
+
     } else {
       # No station filter: fall back to get_measures() to fetch all measures
       # for this parameter across all stations.
@@ -211,31 +238,31 @@ download_hydrology <- function(
         next
       }
     }
-    
+
     message(sprintf("  Processing %d measures.", nrow(measures)))
-    
+
     measure_dts   <- list()
     param_summary <- list()
-    
+
     # ── Loop over each measure ───────────────────────────────────────────────
     for (i in seq_len(nrow(measures))) {
-      
+
       mid <- measures$notation[i]
       message(sprintf("\n  [%d/%d] %s", i, nrow(measures), mid))
-      
+
       # Dispatch to the appropriate worker based on method
       result <- if (method == "sync") {
         run_sync(mid, chunks, output, out_dir, param, observation_type)
       } else {
         run_batch(mid, from_date, to_date, output, out_dir, param, max_wait_s)
       }
-      
+
       if (output == "memory" &&
           !is.null(result$data) &&
           nrow(result$data) > 0) {
         measure_dts[[mid]] <- result$data
       }
-      
+
       param_summary[[i]] <- data.table::data.table(
         parameter = param,
         measure   = mid,
@@ -244,24 +271,38 @@ download_hydrology <- function(
         ok        = result$ok   %||% FALSE
       )
     }
-    
+
     # Combine all measure data.tables for this parameter into one, then wrap
     # in the appropriate S7 class so the caller gets a typed, validated object
     if (output == "memory" && length(measure_dts) > 0) {
-      combined_dt         <- data.table::rbindlist(measure_dts, fill = TRUE)
-      param_data[[param]] <- HYDRO_CLASS[[param]][[p_period]](
-        readings  = combined_dt,
-        from_date = from_date,
-        to_date   = to_date
-      )
+      combined_dt <- data.table::rbindlist(measure_dts, fill = TRUE)
+
+      # Resolve the period key used to look up the S7 constructor. p_period
+      # should always be set by this point but guard against NULL just in case.
+      period_key  <- p_period %||% "15min"
+      constructor <- HYDRO_CLASS[[param]][[period_key]]
+
+      if (is.null(constructor)) {
+        warning(sprintf(
+          "No S7 class for parameter='%s' period='%s' — returning plain data.table.",
+          param, period_key
+        ))
+        param_data[[param]] <- combined_dt
+      } else {
+        param_data[[param]] <- constructor(
+          readings  = combined_dt,
+          from_date = from_date,
+          to_date   = to_date
+        )
+      }
     }
-    
+
     all_summaries[[param]] <- data.table::rbindlist(param_summary)
   }
-  
+
   # ── Collate summary ────────────────────────────────────────────────────────
   summary_dt <- data.table::rbindlist(all_summaries)
-  
+
   message("\n-- Summary --")
   for (param in parameters) {
     sub <- summary_dt[parameter == param]
@@ -275,7 +316,7 @@ download_hydrology <- function(
                       param, sum(sub$ok), sum(!sub$ok)))
     }
   }
-  
+
   if (output == "disk") {
     data.table::fwrite(summary_dt,
                        file.path(out_dir, "download_summary.csv"))
@@ -283,7 +324,7 @@ download_hydrology <- function(
                     file.path(out_dir, "download_summary.csv")))
     return(invisible(summary_dt))
   }
-  
+
   # Memory mode: return list with one data.table per parameter + summary
   c(param_data, list(summary = summary_dt))
 }

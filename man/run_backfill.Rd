@@ -9,6 +9,7 @@ run_backfill(
   output_dir,
   start_date,
   end_date,
+  register_path = "data/hydrometric/register/register.csv",
   log_path = "logs/backfill_log.csv",
   failed_only = FALSE,
   n_workers = parallel::detectCores() - 1L
@@ -18,12 +19,15 @@ run_backfill(
 \item{registry_path}{Character. Path to the gauge registry Parquet file
 written by \code{\link[=build_gauge_registry]{build_gauge_registry()}}.}
 
-\item{output_dir}{Character. Root Bronze output directory. Per-gauge
-subdirectories (\verb{gauge_id=<id>/}) are created inside this path.}
+\item{output_dir}{Character. Root output directory (\verb{hydrometric/}). Bronze
+files are written under \verb{output_dir/bronze/<SupplierCode>/<DataType>/<YYYY>/}.}
 
 \item{start_date}{Character. Backfill start date in \code{"YYYY-MM-DD"} format.}
 
 \item{end_date}{Character. Backfill end date in \code{"YYYY-MM-DD"} format.}
+
+\item{register_path}{Character. Path to the Hydrometric Data Register CSV.
+A provenance record is appended for each successfully ingested dataset.}
 
 \item{log_path}{Character. Path to write the per-gauge result log CSV.
 Directory is created if absent. Default \code{"logs/backfill_log.csv"}.}

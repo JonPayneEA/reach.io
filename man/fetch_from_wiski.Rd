@@ -7,10 +7,9 @@
 fetch_from_wiski(gauge_id, data_type, start_date, end_date)
 }
 \arguments{
-\item{gauge_id}{Character. Gauge identifier matching \code{gauge_id} in the
-registry. Expected to be a WISKI ID for HDE-sourced gauges.}
+\item{gauge_id}{Character. WISKI ID for HDE-sourced gauges.}
 
-\item{data_type}{Character. Parameter type: \code{"flow"}, \code{"level"}, or
+\item{data_type}{Character. Parameter: \code{"flow"}, \code{"level"}, or
 \code{"rainfall"}.}
 
 \item{start_date}{Character. Start date in \code{"YYYY-MM-DD"} format.}
@@ -18,23 +17,13 @@ registry. Expected to be a WISKI ID for HDE-sourced gauges.}
 \item{end_date}{Character. End date in \code{"YYYY-MM-DD"} format.}
 }
 \value{
-A \code{data.table} with columns \code{gauge_id}, \code{datetime} (POSIXct),
-\code{value} (numeric), \code{unit} (character), \code{flag} (integer).
-Returns an empty \code{data.table} if no data is found.
+A \code{data.table} conforming to the Bronze schema, or an empty
+\code{data.table} if no data found.
 }
 \description{
-Calls the KiWIS REST API for a single gauge using the \code{getTimeseriesValues}
-endpoint. WISKI uses a \code{ts_id}-based query structure with different
-authentication from the EA HDE. The \code{gauge_id} is expected to be a WISKI
-time series ID (ts_id) for WISKI-sourced gauges in the registry.
-}
-\details{
-The KiWIS base URL and authentication are read from environment variables
-\code{WISKI_BASE_URL} and \code{WISKI_API_KEY} respectively. Set these before use:
-
-\if{html}{\out{<div class="sourceCode">}}\preformatted{Sys.setenv(WISKI_BASE_URL = "https://your-wiski-instance/KiWIS/KiWIS")
-Sys.setenv(WISKI_API_KEY  = "your-key")
-}\if{html}{\out{</div>}}
+Calls the KiWIS REST API \code{getTimeseriesValues} endpoint. Connection
+details are read from environment variables \code{WISKI_BASE_URL} and
+optionally \code{WISKI_API_KEY}.
 }
 \examples{
 \dontrun{

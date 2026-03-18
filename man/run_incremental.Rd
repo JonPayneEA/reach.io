@@ -7,6 +7,7 @@
 run_incremental(
   registry_path,
   output_dir,
+  register_path = file.path(output_dir, "register", "hydrometric_data_register.csv"),
   end_date = as.character(Sys.Date()),
   default_start = "2000-01-01",
   log_path = "logs/incremental_log.csv",

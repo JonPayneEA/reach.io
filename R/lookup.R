@@ -1,3 +1,18 @@
+# ============================================================
+# Tool:        Station and Measure Lookup
+# Description: Queries the EA Hydrology API stations and
+#              measures endpoints. find_stations() returns one
+#              row per measure with parsed metadata columns.
+# Flode Module: flode.io
+# Author:      [Hydrometric Data Lead]
+# Created:     2026-02-01
+# Modified:    2026-02-01 - JP: initial version
+# Tier:        1
+# Inputs:      Station identifiers or location
+# Outputs:     data.table of station/measure metadata
+# Dependencies: httr, data.table
+# ============================================================
+
 # -- Station and measure lookup -----------------------------------------------
 
 #' Find stations matching a set of identifiers
@@ -71,12 +86,12 @@ find_stations <- function(names     = NULL,
                           lat       = NULL,
                           long      = NULL,
                           dist      = NULL) {
-  
+
   keep_cols <- c("label", "notation", "wiskiID", "RLOIid",
                  "lat", "long", "easting", "northing", "riverName", "measures")
-  
+
   results <- list()
-  
+
   fetch_stations <- function(query) {
     resp  <- httr::GET(paste0(BASE_URL, "/id/stations.json"), query = query)
     httr::stop_for_status(resp)
@@ -86,7 +101,7 @@ find_stations <- function(names     = NULL,
     dt <- dt[, intersect(keep_cols, names(dt)), with = FALSE]
     dt
   }
-  
+
   if (!is.null(names)) {
     for (nm in names) {
       message(sprintf("  Searching by name: '%s'", nm))
@@ -99,7 +114,7 @@ find_stations <- function(names     = NULL,
       }
     }
   }
-  
+
   if (!is.null(wiski_ids)) {
     for (wid in wiski_ids) {
       message(sprintf("  Looking up WISKI ID: %s", wid))
@@ -111,7 +126,7 @@ find_stations <- function(names     = NULL,
       }
     }
   }
-  
+
   if (!is.null(rloi_ids)) {
     for (rid in rloi_ids) {
       message(sprintf("  Looking up RLOIid: %s", rid))
@@ -123,7 +138,7 @@ find_stations <- function(names     = NULL,
       }
     }
   }
-  
+
   if (!is.null(notations)) {
     for (nt in notations) {
       message(sprintf("  Looking up notation: %s", nt))
@@ -135,7 +150,7 @@ find_stations <- function(names     = NULL,
       }
     }
   }
-  
+
   if (!is.null(lat) && !is.null(long) && !is.null(dist)) {
     message(sprintf("  Searching within %g km of (%.4f, %.4f)", dist, lat, long))
     dt <- fetch_stations(list(lat = lat, long = long, dist = dist,
@@ -147,39 +162,44 @@ find_stations <- function(names     = NULL,
       message("    No stations within radius.")
     }
   }
-  
+
   if (length(results) == 0) return(data.table::data.table())
-  
+
   dt <- unique(data.table::rbindlist(results, fill = TRUE), by = "notation")
-  
+
   # Resolve any remaining list columns except measures
   list_cols <- names(dt)[sapply(dt, is.list)]
   list_cols <- list_cols[list_cols != "measures"]
   dt[, (list_cols) := lapply(.SD, function(x) sapply(x, toString)),
      .SDcols = list_cols]
-  
+
   # Unnest measures to one row per measure, keeping all station scalar columns
   dt <- dt[, data.table::rbindlist(measures)[, 1L],
-           by = .(label, notation, wiskiID, RLOIid,
-                  lat, long, easting, northing, riverName)]
+             by = .(label, notation, wiskiID, RLOIid,
+                    lat, long, easting, northing, riverName)]
   data.table::setnames(dt, "@id", "station.notation")
-  
+
   # Parse the measure notation into useful metadata columns
   dt[, station.notation := basename(station.notation)]
   parts <- strsplit(dt$station.notation, "-")
   dt[, parameter  := sapply(parts, `[`, 6L)]
+  vt_raw <- sapply(parts, `[`, 7L)
+  pd_raw <- sapply(parts, `[`, 8L)
+
   dt[, value_type := data.table::fcase(
-    sapply(parts, `[`, 7L) == "m",   "mean",
-    sapply(parts, `[`, 7L) == "min", "min",
-    sapply(parts, `[`, 7L) == "max", "max",
-    sapply(parts, `[`, 7L) == "i",   "instantaneous",
-    sapply(parts, `[`, 7L) == "t",   "total"
+    vt_raw == "m",   "mean",
+    vt_raw == "min", "min",
+    vt_raw == "max", "max",
+    vt_raw == "i",   "instantaneous",
+    vt_raw == "t",   "total",
+    default = vt_raw   # keep raw value rather than silently producing NA
   )]
   dt[, period := data.table::fcase(
-    sapply(parts, `[`, 8L) == "900",   "15min",
-    sapply(parts, `[`, 8L) == "86400", "daily"
+    pd_raw == "900",   "15min",
+    pd_raw == "86400", "daily",
+    default = pd_raw   # keep raw value for any other period
   )]
-  
+
   dt[parameter %in% c("rainfall", "flow", "level")]
 }
 
@@ -229,30 +249,30 @@ get_measures <- function(parameter   = c("rainfall", "flow", "level"),
                          period_name = NULL,
                          value_type  = NULL,
                          limit       = 2000) {
-  
+
   parameter <- match.arg(parameter)
   config    <- PARAMETER_CONFIG[[parameter]]
-  
+
   if (is.null(period_name)) period_name <- config$default_period
   if (is.null(value_type))  value_type  <- config$value_type
-  
+
   query <- list(
     observedProperty = config$observed_property,
     periodName       = period_name,
     `_limit`         = limit
   )
-  
+
   # "all" is a sentinel meaning skip the valueType filter entirely
   if (!is.null(value_type) && value_type != "all") {
     query$valueType <- value_type
   }
-  
+
   url  <- paste0(BASE_URL, "/id/measures.json")
   resp <- httr::GET(url, query = query)
   httr::stop_for_status(resp)
-  
+
   items <- httr::content(resp, as = "parsed", simplifyVector = TRUE)$items
-  
+
   if (length(items) == 0) {
     warning(sprintf(
       "No measures found for parameter='%s', period='%s', valueType='%s'.",
@@ -260,9 +280,8 @@ get_measures <- function(parameter   = c("rainfall", "flow", "level"),
     ))
     return(data.table::data.table())
   }
-  
+
   dt <- data.table::as.data.table(items)
   dt[, parameter := parameter]
   dt
 }
-

@@ -1,3 +1,18 @@
+# ============================================================
+# Tool:        Batch Download Helpers
+# Description: Internal helpers for the EA Hydrology batch
+#              API: submit jobs, poll for completion, and
+#              download results.
+# Flode Module: flode.io
+# Author:      [Hydrometric Data Lead]
+# Created:     2026-02-01
+# Modified:    2026-02-01 - JP: initial version
+# Tier:        1
+# Inputs:      Measure notation, date range
+# Outputs:     data.table of readings or CSV file
+# Dependencies: httr, data.table
+# ============================================================
+
 # ── Batch download helpers ────────────────────────────────────────────────────
 
 #' Submit a single request to the EA Hydrology batch API

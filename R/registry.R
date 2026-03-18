@@ -1,3 +1,18 @@
+# ============================================================
+# Tool:        Gauge Registry Builder
+# Description: One-off setup tool. Reads the raw EA gauge
+#              list CSV, validates it, adds pipeline metadata
+#              columns, and writes the registry Parquet.
+# Flode Module: flode.io
+# Author:      [Hydrometric Data Lead]
+# Created:     2026-02-01
+# Modified:    2026-02-01 - JP: initial version
+# Tier:        1
+# Inputs:      Raw gauge list CSV from EA
+# Outputs:     gauge_registry.parquet
+# Dependencies: data.table, arrow
+# ============================================================
+
 # -- Gauge Registry Builder ---------------------------------------------------
 
 #' Build the master gauge registry Parquet table
@@ -12,8 +27,9 @@
 #' changing any other logic.
 #'
 #' @param input_csv Character. Path to the raw gauge list CSV. Must contain
-#'   columns: `gauge_id`, `source_system`, `data_type`, `catchment`,
-#'   `ea_site_ref`.
+#'   columns: `gauge_id`, `source_system`, `data_type`, `category`,
+#'   `catchment`, `ea_site_ref`.
+#'   `category` must be one of `"hydrometric"`, `"radarH19"`, `"MOSES"`.
 #' @param output_path Character. Directory to write the registry Parquet file
 #'   into. Created if it does not exist. The file is written as
 #'   `gauge_registry.parquet` inside this directory.
@@ -36,7 +52,7 @@ build_gauge_registry <- function(input_csv, output_path) {
   raw_dt <- data.table::fread(input_csv)
 
   # -- Validate required columns are present ----------------------------------
-  required_cols <- c("gauge_id", "source_system", "data_type",
+  required_cols <- c("gauge_id", "source_system", "data_type", "category",
                      "catchment", "ea_site_ref")
   missing <- setdiff(required_cols, names(raw_dt))
   if (length(missing) > 0) {
@@ -56,6 +72,15 @@ build_gauge_registry <- function(input_csv, output_path) {
     )
   }
 
+  # -- Validate category values ------------------------------------------------
+  bad_cats <- unique(raw_dt$category[!raw_dt$category %in% VALID_CATEGORIES])
+  if (length(bad_cats) > 0) {
+    stop(
+      "Unknown category values: ", paste(bad_cats, collapse = ", "),
+      "\nValid values: ",          paste(VALID_CATEGORIES, collapse = ", ")
+    )
+  }
+
   # -- Add registry metadata columns (modify in place) ------------------------
   raw_dt[, active        := TRUE]
   raw_dt[, date_added    := Sys.Date()]
@@ -64,7 +89,7 @@ build_gauge_registry <- function(input_csv, output_path) {
 
   # Select and order columns explicitly so the schema is stable regardless
   # of what extra columns the input CSV contains
-  registry_dt <- raw_dt[, .(gauge_id, source_system, data_type,
+  registry_dt <- raw_dt[, .(gauge_id, source_system, data_type, category,
                              catchment, ea_site_ref,
                              active, date_added, backfill_done, notes)]
 

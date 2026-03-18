@@ -1,3 +1,18 @@
+# ============================================================
+# Tool:        Output Helper
+# Description: Internal helper that either returns a
+#              data.table in memory or writes it to a CSV,
+#              used by the sync and batch download paths.
+# Flode Module: flode.io
+# Author:      [Hydrometric Data Lead]
+# Created:     2026-02-01
+# Modified:    2026-02-01 - JP: initial version
+# Tier:        1
+# Inputs:      data.table of readings, output mode
+# Outputs:     data.table (memory) or CSV file path (disk)
+# Dependencies: data.table
+# ============================================================
+
 # ── Output helper ─────────────────────────────────────────────────────────────
 
 #' Handle output of a completed data.table of readings

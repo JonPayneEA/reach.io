@@ -1,3 +1,18 @@
+# ============================================================
+# Tool:        S7 Hydrometric Data Classes
+# Description: S7 class hierarchy for typed hydrometric
+#              reading objects. Six concrete classes encode
+#              parameter type and timestep in the class name.
+# Flode Module: flode.io
+# Author:      [Hydrometric Data Lead]
+# Created:     2026-02-01
+# Modified:    2026-02-01 - JP: initial version
+# Tier:        2
+# Inputs:      data.table of readings from download_hydrology()
+# Outputs:     Typed S7 objects (Rainfall_Daily etc.)
+# Dependencies: S7, data.table
+# ============================================================
+
 # -- S7 classes for hydrometric data ------------------------------------------
 #
 # Six concrete classes cover every parameter/timestep combination:
@@ -41,7 +56,7 @@ NULL
 #' @noRd
 HydroData <- S7::new_class(
   "HydroData",
-  abstract = TRUE,
+  abstract   = TRUE,
   package    = "reach.io",
   properties = list(
     readings      = S7::new_property(class = S7::class_any),

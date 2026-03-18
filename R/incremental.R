@@ -1,3 +1,20 @@
+# ============================================================
+# Tool:        Incremental Sync Orchestrator
+# Description: Per-gauge high-watermark sync. Determines the
+#              latest timestamp in each Bronze partition and
+#              fetches only new data, appending to the
+#              partition and writing a provenance record.
+# Flode Module: flode.io
+# Author:      [Hydrometric Data Lead]
+# Created:     2026-02-01
+# Modified:    2026-02-01 - JP: initial version
+# Tier:        1
+# Inputs:      Gauge registry Parquet; existing Bronze output
+# Outputs:     Bronze Parquet per gauge; incremental log CSV
+# Dependencies: data.table, arrow, future, future.apply,
+#               parallel
+# ============================================================
+
 # -- Incremental Sync Orchestrator --------------------------------------------
 
 #' Get the high-watermark datetime for a single gauge partition
@@ -120,6 +137,8 @@ get_high_watermark <- function(output_dir, gauge_id) {
 #' }
 run_incremental <- function(registry_path,
                             output_dir,
+                            register_path = file.path(output_dir, "register",
+                                                      "hydrometric_data_register.csv"),
                             end_date      = as.character(Sys.Date()),
                             default_start = "2000-01-01",
                             log_path      = "logs/incremental_log.csv",
@@ -215,31 +234,59 @@ run_incremental <- function(registry_path,
           ))
         }
 
-        # -- Write new Parquet file alongside existing partition files ---------
-        # Named with a timestamp so successive incremental runs never collide.
-        # Arrow's open_dataset() reads all files in the directory together;
-        # deduplication of any row overlap is done at read time by the caller.
-        part_dir <- file.path(output_dir,
-                              paste0("gauge_id=", gauge$gauge_id))
-        dir.create(part_dir, recursive = TRUE, showWarnings = FALSE)
+        # -- Apply Bronze schema and write to framework folder structure ------
+        supplier_code <- source_to_supplier(gauge$source_system) %||% "EA"
+        dt_code       <- param_to_data_type(gauge$data_type) %||% "Q"
+        dataset_id    <- make_dataset_id(supplier_code, gauge$gauge_id,
+                                         dt_code,
+                                         received_date = as.Date(run_at))
 
-        out_file <- file.path(
-          part_dir,
-          sprintf("incremental_%s.parquet",
-                  format(run_at, "%Y%m%d_%H%M%S"))
+        bronze_dt <- apply_bronze_schema(
+          dt                = data_dt,
+          dataset_id        = dataset_id,
+          site_id           = gauge$gauge_id,
+          data_type         = dt_code,
+          timestamp_col     = "datetime",
+          value_col         = "value",
+          supplier_flag_col = if ("flag" %in% names(data_dt)) "flag" else NULL
         )
-        arrow::write_parquet(data_dt, out_file)
+
+        # Include run timestamp in filename so successive incremental runs
+        # never collide. Files sit alongside the backfill Parquet in the
+        # same Bronze directory; deduplication on timestamp is done at read
+        # time by the caller.
+        out_file <- file.path(
+          dirname(bronze_path(output_dir, supplier_code, dt_code, dataset_id)),
+          sprintf("incremental_%s.parquet", format(run_at, "%Y%m%d_%H%M%S"))
+        )
+        dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)
+        arrow::write_parquet(bronze_dt, out_file)
+
+        write_provenance_record(
+          register_path       = register_path,
+          dataset_id          = dataset_id,
+          supplier            = supplier_code,
+          supplier_code       = supplier_code,
+          site_id             = gauge$gauge_id,
+          data_type           = dt_code,
+          time_period_start   = start_date,
+          time_period_end     = end_date,
+          temporal_resolution = "unknown",
+          method_of_receipt   = paste0(gauge$source_system, " incremental"),
+          file_path           = out_file
+        )
 
         elapsed <- (proc.time() - t_start)[["elapsed"]]
         list(
-          run_at    = run_at,
-          gauge_id  = gauge$gauge_id,
-          watermark = start_date,
-          end_date  = end_date,
-          status    = "SUCCESS",
-          rows      = nrow(data_dt),
-          elapsed_s = round(elapsed, 2),
-          error     = NA_character_
+          run_at     = run_at,
+          gauge_id   = gauge$gauge_id,
+          dataset_id = dataset_id,
+          watermark  = start_date,
+          end_date   = end_date,
+          status     = "SUCCESS",
+          rows       = nrow(bronze_dt),
+          elapsed_s  = round(elapsed, 2),
+          error      = NA_character_
         )
 
       }, error = function(e) {

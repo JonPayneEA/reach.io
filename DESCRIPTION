@@ -1,9 +1,8 @@
 Package: reach.io
-Title: Data IO for the flode environment
-Version: 0.0.0.9000
-Authors@R: 
-    person("Jonathan", "Payne", , "jon.payne@environment-agency.gov.uk", role = c("aut", "cre"),
-           comment = c(ORCID = "0000-0003-2551-5353"))
+Title: Hydrometric Data Pipeline Tools for the Environment Agency API
+Version: 0.1.0
+Authors@R: person("First", "Last", email = "first.last@example.com",
+    role = c("aut", "cre"))
 Description: A hydrometric data pipeline toolkit for the Environment Agency
     Hydrology API <https://environment.data.gov.uk/hydrology/doc/reference>.
     Provides tools to query and download rainfall, flow, and water level data
@@ -12,7 +11,7 @@ Description: A hydrometric data pipeline toolkit for the Environment Agency
     or bulk file); ingest historical bulk files into partitioned Parquet
     (Bronze tier); and orchestrate parallelised backfills across thousands
     of gauges with per-gauge logging and failure recovery.
-License: GPL (>= 3)
+License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
@@ -23,9 +22,10 @@ Imports:
     future,
     future.apply,
     lubridate,
-    parallel
-Suggests: 
+    parallel,
+    S7
+Suggests:
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
-URL: https://github.com/JonPayneEA/reach.io
-BugReports: https://github.com/JonPayneEA/reach.io/issues
+URL: https://github.com/yourname/reach.io
+BugReports: https://github.com/yourname/reach.io/issues

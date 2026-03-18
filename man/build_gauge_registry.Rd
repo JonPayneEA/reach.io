@@ -8,8 +8,9 @@ build_gauge_registry(input_csv, output_path)
 }
 \arguments{
 \item{input_csv}{Character. Path to the raw gauge list CSV. Must contain
-columns: \code{gauge_id}, \code{source_system}, \code{data_type}, \code{catchment},
-\code{ea_site_ref}.}
+columns: \code{gauge_id}, \code{source_system}, \code{data_type}, \code{category},
+\code{catchment}, \code{ea_site_ref}.
+\code{category} must be one of \code{"hydrometric"}, \code{"radarH19"}, \code{"MOSES"}.}
 
 \item{output_path}{Character. Directory to write the registry Parquet file
 into. Created if it does not exist. The file is written as

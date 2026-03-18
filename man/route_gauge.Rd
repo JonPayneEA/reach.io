@@ -15,26 +15,26 @@ contain columns \code{gauge_id}, \code{source_system}, and \code{data_type}.}
 \item{end_date}{Character. End date in \code{"YYYY-MM-DD"} format.}
 }
 \value{
-A \code{data.table} with columns \code{gauge_id}, \code{datetime}, \code{value},
-\code{unit}, \code{flag}, or \code{NULL} if the fetch failed.
+A \code{data.table} conforming to the Bronze schema, or \code{NULL} if the
+fetch failed.
 }
 \description{
 Reads the \code{source_system} field of a one-row registry \code{data.table} and
 dispatches to \code{\link[=fetch_from_hde]{fetch_from_hde()}}, \code{\link[=fetch_from_wiski]{fetch_from_wiski()}},
-\code{\link[=fetch_from_bulk_file]{fetch_from_bulk_file()}}, or \code{\link[=fetch_from_wiski_all]{fetch_from_wiski_all()}}. Fetch errors are caught and returned as \code{NULL}
-with a warning so the caller (\code{\link[=run_backfill]{run_backfill()}} or \code{\link[=run_incremental]{run_incremental()}})
-can log the failure and continue.
+\code{\link[=fetch_from_bulk_file]{fetch_from_bulk_file()}}, or \code{\link[=fetch_from_wiski_all]{fetch_from_wiski_all()}}. Fetch errors are
+caught and returned as \code{NULL} with a warning so the caller can log and
+continue.
 }
 \details{
-To add a new source system: write a \verb{fetch_from_<n>()} function, add a
-case to the \code{switch()} below, update \code{VALID_SOURCES} in \code{package.R}, and
-re-run \code{\link[=build_gauge_registry]{build_gauge_registry()}} on the updated gauge list CSV.
+To add a new source system: write a \verb{fetch_from_<n>()} function returning
+the Bronze schema, add a case to the \code{switch()} below, update
+\code{VALID_SOURCES} in \code{package.R}, and re-run \code{\link[=build_gauge_registry]{build_gauge_registry()}}.
 }
 \examples{
 \dontrun{
 registry_dt <- data.table::as.data.table(
   arrow::read_parquet(
-    "data/fw_bronze/gauge_registry/gauge_registry.parquet"
+    "data/hydrometric/register/gauge_registry.parquet"
   )
 )
 dt <- route_gauge(registry_dt[gauge_id == "39001"],

@@ -7,10 +7,9 @@
 fetch_from_hde(gauge_id, data_type, start_date, end_date)
 }
 \arguments{
-\item{gauge_id}{Character. Gauge identifier matching \code{gauge_id} in the
-registry. Expected to be a WISKI ID for HDE-sourced gauges.}
+\item{gauge_id}{Character. WISKI ID for HDE-sourced gauges.}
 
-\item{data_type}{Character. Parameter type: \code{"flow"}, \code{"level"}, or
+\item{data_type}{Character. Parameter: \code{"flow"}, \code{"level"}, or
 \code{"rainfall"}.}
 
 \item{start_date}{Character. Start date in \code{"YYYY-MM-DD"} format.}
@@ -18,19 +17,15 @@ registry. Expected to be a WISKI ID for HDE-sourced gauges.}
 \item{end_date}{Character. End date in \code{"YYYY-MM-DD"} format.}
 }
 \value{
-A \code{data.table} with columns \code{gauge_id}, \code{datetime} (POSIXct),
-\code{value} (numeric), \code{unit} (character), \code{flag} (integer).
-Returns an empty \code{data.table} if no data is found.
+A \code{data.table} conforming to the Bronze schema (\code{timestamp},
+\code{value}, \code{supplier_flag}, \code{dataset_id}, \code{site_id}, \code{data_type}),
+or an empty \code{data.table} if no data found.
 }
 \description{
-Calls the EA Hydrology API readings endpoint for a single gauge and
-returns readings as a \code{data.table}. Internally wraps \code{\link[=find_stations]{find_stations()}}
-to resolve the gauge notation and \code{\link[=get_measures]{get_measures()}} to find the relevant
-measure notation, then calls \code{\link[=fetch_readings]{fetch_readings()}} for the date range.
-}
-\details{
-The date range is split into annual chunks via \code{\link[=make_date_chunks]{make_date_chunks()}} to
-stay within the API row limit.
+Calls the EA Hydrology API for a single gauge and returns readings
+normalised to the Bronze Parquet schema. Resolves the station and
+measure notation via \code{\link[=find_stations]{find_stations()}}, then fetches readings in annual
+chunks via \code{\link[=fetch_readings]{fetch_readings()}}.
 }
 \examples{
 \dontrun{

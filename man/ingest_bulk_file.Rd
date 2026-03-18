@@ -2,52 +2,76 @@
 % Please edit documentation in R/ingest.R
 \name{ingest_bulk_file}
 \alias{ingest_bulk_file}
-\title{Ingest a historical bulk file to partitioned Bronze Parquet}
+\title{Ingest a historical bulk file to Bronze Parquet}
 \usage{
 ingest_bulk_file(
   file_path,
-  gauge_id,
+  site_id,
+  data_type,
   output_dir,
-  file_format = c("csv", "tsv", "fixed")
+  register_path,
+  supplier = "Environment Agency",
+  category = "hydrometric",
+  source_system = "BULK_FILE",
+  file_format = c("csv", "tsv", "fixed"),
+  received_by = Sys.info()[["user"]],
+  notes = NA_character_
 )
 }
 \arguments{
-\item{file_path}{Character. Path to the raw bulk file on disk or a
-mounted FTP path.}
+\item{file_path}{Character. Path to the raw bulk file.}
 
-\item{gauge_id}{Character. Gauge identifier to tag all rows with. Used
-as the partition key in the output directory structure.}
+\item{site_id}{Character. Gauge identifier (used in the dataset ID and
+the Bronze schema \code{site_id} column).}
 
-\item{output_dir}{Character. Root Bronze output directory. A subdirectory
-\verb{gauge_id=<gauge_id>/} is created inside this path.}
+\item{data_type}{Character. Parameter: \code{"flow"}, \code{"level"}, or
+\code{"rainfall"}.}
+
+\item{output_dir}{Character. Root output directory (the \verb{hydrometric/}
+root; subdirectories are created automatically).}
+
+\item{register_path}{Character. Path to the Hydrometric Data Register CSV.}
+
+\item{supplier}{Character. Supplier name for the provenance record,
+e.g. \code{"Environment Agency"}.}
+
+\item{category}{Character. Data category from the gauge registry, e.g.
+\code{"hydrometric"}, \code{"radarH19"}, \code{"MOSES"}. Default \code{"hydrometric"}.}
+
+\item{source_system}{Character. Registry source system value used to
+derive the supplier code. Default \code{"BULK_FILE"}.}
 
 \item{file_format}{Character. One of \code{"csv"} (default), \code{"tsv"}, or
-\code{"fixed"} (fixed-width). \code{data.table::fread()} handles all three.}
+\code{"fixed"}.}
+
+\item{received_by}{Character. Custodian name for the provenance record.
+Defaults to \code{Sys.info()[["user"]]}.}
+
+\item{notes}{Character or NULL. Any unusual aspects of this delivery.}
 }
 \value{
-The processed \code{data.table} invisibly. The primary side-effect is
-writing a Parquet file to
-\verb{<output_dir>/gauge_id=<gauge_id>/bulk_<YYYYMMDD>.parquet}.
+The Bronze \code{data.table} invisibly. Side effects: writes Parquet
+and appends a provenance record to the register.
 }
 \description{
-Reads a historical bulk export file from an FTP drop or local path,
-standardises column names to the pipeline schema, parses and cleans the
-data, and writes the result as a partitioned Parquet file in the Bronze
-storage tier. Handles multiple file formats and the varying column naming
-conventions used in EA bulk exports.
+Reads a historical bulk export file, standardises column names, parses
+datetimes, applies the Bronze Parquet schema (Section 7.2 of the
+Hydrometric Data Framework), and writes to the framework folder structure.
+A provenance record is appended to the Hydrometric Data Register.
 }
 \details{
-Output is partitioned by \code{gauge_id} using Hive-style directory naming
-(\verb{gauge_id=<id>/}) for compatibility with both Arrow/DuckDB and Spark
-partition discovery.
+Output path follows Appendix C:
+\verb{<output_dir>/bronze/<SupplierCode>/<DataType>/<YYYY>/<DatasetID>.parquet}
 }
 \examples{
 \dontrun{
 ingest_bulk_file(
-  file_path   = "data/raw/EA_39001_flow_2000_2020.csv",
-  gauge_id    = "39001",
-  output_dir  = "data/fw_bronze/flow",
-  file_format = "csv"
+  file_path     = "data/raw/EA_39001_flow_2000_2020.csv",
+  site_id       = "39001",
+  data_type     = "flow",
+  output_dir    = "data/hydrometric",
+  register_path = "data/hydrometric/register/register.csv",
+  supplier      = "Environment Agency"
 )
 }
 }
