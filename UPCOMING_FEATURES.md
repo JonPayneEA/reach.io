@@ -7,7 +7,7 @@ This document tracks planned additions to **reach.io**, grouped by tier and prio
 ## High Priority
 
 ### Silver Tier Processing
-> `silver.R` ✓ **Implemented**
+> `silver.R` 🚧 **In Development** — skeleton implementation, not for operational use
 
 The Medallion Architecture is defined but only the Bronze tier is currently implemented. Silver tier processing introduces:
 
