@@ -81,7 +81,7 @@
 #' values are physically unrealistic for standard fluvial gauges. They may
 #' occur due to sensor drift, datum errors, or tidal backwater effects.
 #'
-#' Set `allow_negative = TRUE` in [apply_y_digit()] to suppress this check
+#' Set `allow_negative = TRUE` in `apply_y_digit()` to suppress this check
 #' for ultrasonic gauges or tidal reaches where bidirectional flow is expected.
 #'
 #' @param value Numeric vector of flow values (m3/s).
@@ -399,7 +399,7 @@ apply_y_digit <- function(value,
 
 #' Map UK-Flow15 Y-digit codes to framework qc_flag values
 #'
-#' Converts the Y-digit anomaly codes produced by [apply_y_digit()] into
+#' Converts the Y-digit anomaly codes produced by `apply_y_digit()` into
 #' the integer QC flag used in the Silver schema:
 #'
 #' \describe{
