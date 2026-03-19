@@ -282,7 +282,7 @@ qc_truncation_low <- function(value,
 #'
 #' A high-flow truncation occurs when the recording instrument reaches its
 #' maximum capacity, producing long runs of identical values at the high end
-#' of the flow distribution. Detection mirrors [qc_truncation_low()]: runs
+#' of the flow distribution. Detection mirrors `qc_truncation_low()`: runs
 #' of at least `truncation_min_run` consecutive identical values at or above
 #' the `truncation_high_quantile` percentile are flagged.
 #'
