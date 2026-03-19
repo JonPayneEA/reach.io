@@ -6,6 +6,14 @@
 #              (Fileni et al., 2026). Promotes Bronze Parquet
 #              records to Silver tier with QC flags attached.
 #
+# !! TRIAL / SKELETON CODE — DO NOT USE OPERATIONALLY !!
+# This file is a structural prototype intended to demonstrate
+# the intended approach and way of working for Silver tier QC.
+# Thresholds, check logic, and schema decisions have NOT been
+# validated against EA operational data and WILL change.
+# Do not apply promote_to_silver() to production datasets until
+# this notice is removed following formal review and sign-off.
+#
 # Reference:   Fileni, F. et al. (2026). UK-Flow15 Part 1:
 #              Development of a coherent national-scale 15-min
 #              flow dataset. Earth Syst. Sci. Data (preprint).
@@ -14,7 +22,7 @@
 # Flode Module: flode.io
 # Author:      [Hydrometric Data Lead]
 # Created:     2026-03-19
-# Modified:    2026-03-19 - JP: initial version
+# Modified:    2026-03-19 - JP: initial skeleton version
 # Tier:        2 (Silver)
 # Inputs:      Bronze Parquet (data_type = "Q")
 # Outputs:     Silver Parquet with qc_flag, qc_value, qc_y_code
@@ -552,6 +560,14 @@ promote_to_silver <- function(bronze_data,
                                truncation_low_quantile   = 0.1,
                                truncation_high_quantile  = 0.9,
                                write_output              = TRUE) {
+
+  # -- Trial warning -----------------------------------------------------------
+  warning(
+    "promote_to_silver() is a skeleton implementation for development purposes ",
+    "only. Thresholds and check logic have not been validated against ",
+    "operational data and will change. Do not apply to production datasets.",
+    call. = FALSE
+  )
 
   # -- Read input --------------------------------------------------------------
   if (is.character(bronze_data)) {
