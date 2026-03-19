@@ -11,11 +11,11 @@ and the [R Tool Governance standards](docs/2a_R_Code_Governance_v1_3.docx).
 
 It provides three groups of tools:
 
-- **API download tools** — query and download rainfall, flow, and level data
+- **API download tools** - query and download rainfall, flow, and level data
   from the EA Hydrology API, returned as typed S7 objects
-- **Schema and provenance tools** — generate dataset IDs, apply the Bronze
+- **Schema and provenance tools** - generate dataset IDs, apply the Bronze
   Parquet schema, and write provenance records to the Hydrometric Data Register
-- **Pipeline tools** — set up the store, build a gauge registry, ingest
+- **Pipeline tools** - set up the store, build a gauge registry, ingest
   historical data from multiple source systems, and run parallelised backfills
   and incremental syncs
 
@@ -65,13 +65,13 @@ reach.io/
 
 ---
 
-## Part 1 — API download tools
+## Part 1 - API download tools
 
 These tools query the [EA Hydrology API](https://environment.data.gov.uk/hydrology/doc/reference)
 directly. No registration or API key is required. Data is available under the
 Open Government Licence v3.0.
 
-### Step 1 — Find stations
+### Step 1 - Find stations
 
 Look up stations by WISKI ID, RLOIid, notation, name, or proximity. Results
 are returned as one row per measure, with the measure notation, parameter,
@@ -96,14 +96,14 @@ stns <- find_stations(lat = 51.5, long = -1.8, dist = 10)
 `find_stations()` returns a `data.table` with columns `label`, `notation`,
 `wiskiID`, `RLOIid`, `lat`, `long`, `easting`, `northing`, `riverName`,
 `station.notation`, `parameter`, `value_type`, and `period`. One row per
-measure — a station with flow and level measures appears twice.
+measure - a station with flow and level measures appears twice.
 
 ```r
 # Unnest to see all measures across returned stations
 stns[, .(label, wiskiID, parameter, value_type, period)]
 ```
 
-### Step 2 — Inspect available measures (optional)
+### Step 2 - Inspect available measures (optional)
 
 `find_stations()` returns measure notations directly, so `get_measures()` is
 only needed when you want to browse what is available across all stations
@@ -117,7 +117,7 @@ get_measures("flow")
 get_measures("rainfall", value_type = "all")
 ```
 
-### Step 3 — Download readings
+### Step 3 - Download readings
 
 `download_hydrology()` is the main entry point. Supply at least one station
 identifier and a date range.
@@ -137,7 +137,7 @@ identifier and a date range.
 | `"disk"` | One CSV per measure under `out_dir/<parameter>/`. |
 
 ```r
-# In-memory — returns typed S7 objects
+# In-memory - returns typed S7 objects
 result <- download_hydrology(
   parameters = c("flow", "level"),
   from_date  = "2022-01-01",
@@ -195,7 +195,7 @@ jobs as it queues requests server-side and avoids timeouts.
 
 ---
 
-## Part 2 — Schema and provenance tools
+## Part 2 - Schema and provenance tools
 
 These tools implement the Bronze tier requirements from the Hydrometric Data
 Framework. They are called internally by the pipeline tools but are also
@@ -212,7 +212,8 @@ make_dataset_id("EA", "39001", "Q")
 
 # Map from registry values to framework codes
 source_to_supplier("HDE")      # "EA"
-source_to_supplier("WISKI")    # "WISKI"
+source_to_supplier("WISKI")    # "EA"
+source_to_supplier("NRFA")     # "CEH"
 param_to_data_type("flow")     # "Q"
 param_to_data_type("level")    # "H"
 param_to_data_type("rainfall") # "P"
@@ -273,7 +274,7 @@ write_provenance_record(
 
 ---
 
-## Part 3 — Pipeline tools
+## Part 3 - Pipeline tools
 
 The pipeline tools move data from raw sources into Bronze-tier Parquet storage,
 following the framework medallion structure. The pipeline tools call the schema
@@ -386,23 +387,23 @@ and `notes`.
 
 Set environment variables before running any backfill or sync.
 
-**HDE** — EA Hydrology API, no config needed.
+**HDE** - EA Hydrology API, no config needed.
 
-**WISKI** — KiWIS REST API:
+**WISKI** - KiWIS REST API:
 
 ```r
 Sys.setenv(WISKI_BASE_URL = "https://your-wiski-instance/KiWIS/KiWIS")
 Sys.setenv(WISKI_API_KEY  = "your-key")  # omit if unauthenticated
 ```
 
-**BULK_FILE** — local or FTP file store, organised as
+**BULK_FILE** - local or FTP file store, organised as
 `<root>/<data_type>/<gauge_id>.csv`:
 
 ```r
 Sys.setenv(BULK_FILE_ROOT = "/mnt/ftp/ea_bulk")
 ```
 
-**WISKI_ALL** — Kisters `.all` export files:
+**WISKI_ALL** - Kisters `.all` export files:
 
 ```r
 Sys.setenv(WISKI_ALL_ROOT = "/mnt/wiski/exports")
@@ -563,7 +564,7 @@ log_dt <- run_incremental(
 
 Log columns: `run_at`, `gauge_id`, `watermark`, `end_date`, `status`, `rows`,
 `elapsed_s`, `error`. Status values: `SUCCESS`, `EMPTY`, `NO_NEW_DATA`, or
-`FAILED`. Each run appends to the log — the full sync history is preserved.
+`FAILED`. Each run appends to the log - the full sync history is preserved.
 
 Gauges with no existing Bronze files fall back to `default_start`
 (default `"2000-01-01"`), so `run_incremental()` is safe to run on a
@@ -573,7 +574,7 @@ partially backfilled registry.
 
 ## Medallion framework scope
 
-reach.io covers the Bronze tier only — raw ingestion from source systems with
+reach.io covers the Bronze tier only - raw ingestion from source systems with
 full provenance labelling. Silver (QC flagging, gap assessment, rating curve
 application) and Gold (approved analysis-ready products) are outside the
 current scope and require Custodian and Steward review steps that cannot be
@@ -631,7 +632,7 @@ Data downloaded via the EA Hydrology API is available under the
 `reach.io` is classified under the F&W Data and Digital Asset Governance Framework v1.2.
 All ingested data follows the **Medallion Architecture** (Bronze → Silver → Gold).
 
-- [Hydrometric Data Framework reference](inst/data-framework.md) — Bronze schema, dataset ID format, quality flags, storage structure
-- [flode Governance](https://github.com/JonPayneEA/flode/blob/master/GOVERNANCE.md) — roles, tier classification, branching, versioning
-- [Contributing](https://github.com/JonPayneEA/flode/blob/master/CONTRIBUTING.md) — coding standards, fastverse conventions, PR process
+- [Hydrometric Data Framework reference](inst/data-framework.md) - Bronze schema, dataset ID format, quality flags, storage structure
+- [flode Governance](https://github.com/JonPayneEA/flode/blob/master/GOVERNANCE.md) - roles, tier classification, branching, versioning
+- [Contributing](https://github.com/JonPayneEA/flode/blob/master/CONTRIBUTING.md) - coding standards, fastverse conventions, PR process
 
