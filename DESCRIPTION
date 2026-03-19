@@ -21,6 +21,7 @@ Imports:
     arrow,
     future,
     future.apply,
+    ggplot2,
     lubridate,
     parallel,
     S7
