@@ -7,35 +7,60 @@ This document tracks planned additions to **reach.io**, grouped by tier and prio
 ## High Priority
 
 ### Silver Tier Processing
-> `silver.R`
+> `silver.R` ✓ **Implemented**
 
-The Medallion Architecture is defined but only the Bronze tier is currently implemented. Silver tier processing will introduce:
+The Medallion Architecture is defined but only the Bronze tier is currently implemented. Silver tier processing introduces:
 
 - `promote_to_silver()` — Quality-controlled promotion of Bronze Parquet data
-- QC flagging: range checks, rate-of-change limits, spike detection
-- Unit normalisation (e.g. stage → flow via rating curves)
-- Gap detection and annotation
-- Deduplication baked into the promotion step (currently deferred to read time)
+- `silver_path()` — Framework-compliant Silver file path builder
+- QC flagging: negative values, relative spikes, absolute spikes, sudden drops,
+  recurrent fluctuations, low- and high-flow truncations
+- Unit normalisation (e.g. stage → flow via rating curves) — planned
+- Gap detection and annotation — planned
+- Deduplication baked into the promotion step (currently deferred to read time) — planned
 
-#### Data-Type-Specific QC Tests
-> `tests/testthat/test-silver.R`
+#### QC flag definitions (Silver schema)
 
-Silver QC rules and their tests should be parameterised by data type, as each has distinct physical characteristics.
+| Flag | Meaning | Assigned by |
+|------|---------|-------------|
+| 1 — Good | No anomaly detected | `promote_to_silver()` |
+| 2 — Estimated | Manually corrected or gap-filled value | Manual / downstream |
+| 3 — Suspect | Anomaly detected; value may still be plausible | `promote_to_silver()` |
+| 4 — Rejected | Value almost certainly erroneous | `promote_to_silver()` |
+
+---
+
+#### Option A — Internal QC check suite *(current implementation)*
+
+A set of automated checks applied per gauge, parameterised by data type.
+Checks are composable and threshold values are overridable.
 
 ##### Flow (Q)
 
-| Test | Logic | QC Flag |
-|------|-------|---------|
-| Non-negative (configurable) | `value < 0` where tidal/ultrasonic influence is absent | 4 (Rejected) |
-| Upper bound | `value > credible_max` (site-specific) | 3 (Suspect) |
-| Rate of change | `abs(diff(value)) / value > threshold` over 15 min | 3 (Suspect) |
-| Spike detection | Outlier relative to rolling median ± n×MAD | 3 (Suspect) |
-| Flat-lining | N consecutive identical non-zero values (stuck sensor) | 3 (Suspect) |
-| Rating extrapolation | Derived from stage outside valid rating range | `extrapolated = TRUE` |
+| Check | Logic | Y-code | QC Flag |
+|-------|-------|--------|---------|
+| Negative value | `value < 0` where tidal influence absent | 1 | 4 (Rejected) |
+| Relative spike | `(value − lag) / lag > ratio` where `lag > min_baseline` | 2 | 3 (Suspect) |
+| Absolute spike | `\|diff\| > k × MAD(diff series)` where `value > min_spike_flow` | 3 | 3 (Suspect) |
+| Drop | `(lag − value) / lag > ratio` where `lag > min_flow_for_drop` | 4 | 3 (Suspect) |
+| Fluctuation | ≥ N direction reversals in rolling window of M steps | 5 | 3 (Suspect) |
+| Truncated low | Run of ≥ N identical values at or below Q10 of series | 6 | 3 (Suspect) |
+| Truncated high | Run of ≥ N identical values at or above Q90 of series | 7 | 3 (Suspect) |
+| Rel + abs spike | Codes 2 and 3 coincide | 8 | 4 (Rejected) |
+| Drop + neg/trunc | Code 4 coincides with code 1 or 6 | 9 | 4 (Rejected) |
 
-> **Note:** Negative flow is physically valid in some settings (ultrasonic gauges, tidal reaches). The non-negative check should accept an `allow_negative` argument — defaulting to `FALSE` for standard fluvial gauges and `TRUE` where tidal or bidirectional flow is expected. Tests should cover both cases.
+> **Note on `allow_negative`:** Negative flow is physically valid in some
+> settings (ultrasonic gauges, tidal reaches). `promote_to_silver()` accepts
+> `allow_negative = TRUE` to suppress the negative-value check; tests cover
+> both cases.
 
-##### Stage / Level (H)
+The Y-digit code scheme and priority rules follow the UK-Flow15 framework
+(see Option B below). Only the traditional Y-digit checks are automated;
+the X-digit (NRFA cross-validation) and Z-digit (high-flow plausibility)
+require external reference data and are reserved for manual or
+downstream annotation.
+
+##### Stage / Level (H) — planned
 
 | Test | Logic | QC Flag |
 |------|-------|---------|
@@ -46,7 +71,7 @@ Silver QC rules and their tests should be parameterised by data type, as each ha
 | Stage–flow consistency | Level rising while flow drops (or vice versa) sustained | 3 (Suspect) |
 | Datum shift detection | Persistent step-change offset (sensor moved or recalibrated) | 3 (Suspect) / 2 (Estimated) |
 
-##### Rainfall (P)
+##### Rainfall (P) — planned
 
 | Test | Logic | QC Flag |
 |------|-------|---------|
@@ -57,14 +82,102 @@ Silver QC rules and their tests should be parameterised by data type, as each ha
 | Gauge reset handling | Negative increments from tipping bucket counter overflow | Correct or flag |
 | Temporal consistency | Rain at site while all neighbouring gauges show zero | 3 (Suspect) |
 
-##### Structural / Cross-Type Tests
+##### Rating extrapolation flag — planned
+
+Stage-derived flow values estimated beyond the valid rating curve range should
+set an `extrapolated` column to `TRUE` rather than a numeric QC flag, so
+callers can filter on this independently of the main flag.
+
+---
+
+#### Option B — UK-Flow15 three-digit XYZ code scheme *(reference framework)*
+
+> **Reference:** Fileni, F. et al. (2026). *UK-Flow15 Part 1: Development of
+> a coherent national-scale 15-min flow dataset.* Earth Syst. Sci. Data
+> (preprint). https://doi.org/10.5194/essd-2026-152
+
+The UK-Flow15 dataset uses a three-digit code `XYZ` per observation, where
+each digit captures a distinct QC dimension. This scheme could replace or
+supplement the binary `qc_flag` used in Option A, at the cost of a more
+complex schema.
+
+**X-digit — consistency with established UK products**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Sufficient agreement with all UK products |
+| 1 | Mismatch >5% vs NRFA daily values |
+| 2 | Mismatch >20% vs POT values |
+| 3 | Mismatch >20% vs AMAX values |
+| 4 | Codes 1 + 3 combined |
+| 5 | Codes 1 + 2 combined |
+
+*Requires:* NRFA daily, AMAX, and POT series per gauge. Mismatches flagged at
+5% for daily and 20% for peak series. AMAX flag takes priority over POT where
+both fire.
+
+**Y-digit — traditional automated QC (implemented in Option A)**
+
+| Code | Meaning |
+|------|---------|
+| 0 | No issues |
+| 1 | Negative value |
+| 2 | Relative spike |
+| 3 | Absolute spike |
+| 4 | Drop |
+| 5 | Fluctuation |
+| 6 | Truncated low flows |
+| 7 | Truncated high flows |
+| 8 | Codes 2 + 3 combined |
+| 9 | Code 4 + code 1 or 6 combined |
+
+**Z-digit — high-flow event plausibility**
+
+| Code | Meaning |
+|------|---------|
+| 0 | Not a high flow |
+| 1 | Unrealistically high (spurious) |
+| 2 | Exceptionally high event |
+| 3 | >0.1/yr event with no antecedent rainfall |
+| 4 | >0.1/yr event with no concurrent regional high flow |
+| 5 | Codes 3 + 4 combined |
+| 6 | Validated: antecedent rainfall AND concurrent regional high flow |
+| 7 | Code 2 + (code 3 or 4) |
+| 8 | Code 2 + code 5 |
+| 9 | Code 2 + code 6 (validated exceptionally high event) |
+
+*Requires:* catchment-average rainfall series and concurrent flow records from
+neighbouring gauges in the same hydrometric area. A fitted GEV is used to
+classify events exceeding a 0.001 annual exceedance probability.
+
+**Trade-offs vs Option A**
+
+| Aspect | Option A (current) | Option B (XYZ) |
+|--------|-------------------|----------------|
+| Schema complexity | Simple: one `qc_flag` integer | Three separate digit columns |
+| External data required | None | NRFA daily, AMAX, POT, rainfall, regional gauges |
+| Automation | Fully automated | Y automated; X and Z need external data |
+| Interoperability | reach.io native | Directly comparable to UK-Flow15 |
+| Auditability | `qc_y_code` provides equivalent Y detail | Full three-digit traceability |
+
+Option B would be the preferred approach for any national-scale or
+NRFA-aligned workflow. Option A is appropriate for operational use where
+external reference data are not routinely available.
+
+---
+
+#### Data-Type-Specific QC Tests
+> `tests/testthat/test-silver.R` ✓ **Implemented** (Flow / Y-digit)
 
 ```r
 test_that("promote_to_silver() adds all required Silver columns", { ... })
 test_that("qc_flag is never NA after promotion", { ... })
 test_that("qc_value equals value where qc_flag is Good (1)", { ... })
+test_that("qc_value is NA where qc_flag is Rejected (4)", { ... })
 test_that("negative flow flagged as Rejected when allow_negative = FALSE", { ... })
 test_that("negative flow accepted when allow_negative = TRUE", { ... })
+test_that("promote_to_silver applies checks independently per site_id", { ... })
+# Planned:
 test_that("stage outside rating range sets extrapolated = TRUE", { ... })
 test_that("extreme 15-min rainfall intensity is flagged as Suspect", { ... })
 test_that("flat-lined stage series is flagged as Suspect", { ... })
