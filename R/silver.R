@@ -81,7 +81,7 @@
 #' values are physically unrealistic for standard fluvial gauges. They may
 #' occur due to sensor drift, datum errors, or tidal backwater effects.
 #'
-#' Set `allow_negative = TRUE` in [apply_y_digit()] to suppress this check
+#' Set `allow_negative = TRUE` in `apply_y_digit()` to suppress this check
 #' for ultrasonic gauges or tidal reaches where bidirectional flow is expected.
 #'
 #' @param value Numeric vector of flow values (m3/s).
@@ -342,17 +342,17 @@ qc_truncation_high <- function(value,
 #' @param value Numeric vector of flow values, ordered by time.
 #' @param allow_negative Logical. If `TRUE`, negative values are not flagged
 #'   (appropriate for ultrasonic gauges or tidal reaches). Default `FALSE`.
-#' @param relative_spike_ratio Numeric. Forwarded to [qc_relative_spike()].
-#' @param min_baseline Numeric. Forwarded to [qc_relative_spike()].
-#' @param absolute_spike_k Numeric. Forwarded to [qc_absolute_spike()].
-#' @param min_spike_flow Numeric. Forwarded to [qc_absolute_spike()].
-#' @param drop_ratio Numeric. Forwarded to [qc_drop()].
-#' @param min_flow_for_drop Numeric. Forwarded to [qc_drop()].
-#' @param fluctuation_window Integer. Forwarded to [qc_fluctuation()].
-#' @param fluctuation_min_reversals Integer. Forwarded to [qc_fluctuation()].
+#' @param relative_spike_ratio Numeric. Forwarded to `qc_relative_spike()`.
+#' @param min_baseline Numeric. Forwarded to `qc_relative_spike()`.
+#' @param absolute_spike_k Numeric. Forwarded to `qc_absolute_spike()`.
+#' @param min_spike_flow Numeric. Forwarded to `qc_absolute_spike()`.
+#' @param drop_ratio Numeric. Forwarded to `qc_drop()`.
+#' @param min_flow_for_drop Numeric. Forwarded to `qc_drop()`.
+#' @param fluctuation_window Integer. Forwarded to `qc_fluctuation()`.
+#' @param fluctuation_min_reversals Integer. Forwarded to `qc_fluctuation()`.
 #' @param truncation_min_run Integer. Forwarded to truncation checks.
-#' @param truncation_low_quantile Numeric. Forwarded to [qc_truncation_low()].
-#' @param truncation_high_quantile Numeric. Forwarded to [qc_truncation_high()].
+#' @param truncation_low_quantile Numeric. Forwarded to `qc_truncation_low()`.
+#' @param truncation_high_quantile Numeric. Forwarded to `qc_truncation_high()`.
 #'
 #' @return Integer vector of Y-digit codes (0–9), one per observation.
 #' @noRd
@@ -399,7 +399,7 @@ apply_y_digit <- function(value,
 
 #' Map UK-Flow15 Y-digit codes to framework qc_flag values
 #'
-#' Converts the Y-digit anomaly codes produced by [apply_y_digit()] into
+#' Converts the Y-digit anomaly codes produced by `apply_y_digit()` into
 #' the integer QC flag used in the Silver schema:
 #'
 #' \describe{
