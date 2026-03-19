@@ -342,17 +342,17 @@ qc_truncation_high <- function(value,
 #' @param value Numeric vector of flow values, ordered by time.
 #' @param allow_negative Logical. If `TRUE`, negative values are not flagged
 #'   (appropriate for ultrasonic gauges or tidal reaches). Default `FALSE`.
-#' @param relative_spike_ratio Numeric. Forwarded to [qc_relative_spike()].
-#' @param min_baseline Numeric. Forwarded to [qc_relative_spike()].
-#' @param absolute_spike_k Numeric. Forwarded to [qc_absolute_spike()].
-#' @param min_spike_flow Numeric. Forwarded to [qc_absolute_spike()].
-#' @param drop_ratio Numeric. Forwarded to [qc_drop()].
-#' @param min_flow_for_drop Numeric. Forwarded to [qc_drop()].
-#' @param fluctuation_window Integer. Forwarded to [qc_fluctuation()].
-#' @param fluctuation_min_reversals Integer. Forwarded to [qc_fluctuation()].
+#' @param relative_spike_ratio Numeric. Forwarded to `qc_relative_spike()`.
+#' @param min_baseline Numeric. Forwarded to `qc_relative_spike()`.
+#' @param absolute_spike_k Numeric. Forwarded to `qc_absolute_spike()`.
+#' @param min_spike_flow Numeric. Forwarded to `qc_absolute_spike()`.
+#' @param drop_ratio Numeric. Forwarded to `qc_drop()`.
+#' @param min_flow_for_drop Numeric. Forwarded to `qc_drop()`.
+#' @param fluctuation_window Integer. Forwarded to `qc_fluctuation()`.
+#' @param fluctuation_min_reversals Integer. Forwarded to `qc_fluctuation()`.
 #' @param truncation_min_run Integer. Forwarded to truncation checks.
-#' @param truncation_low_quantile Numeric. Forwarded to [qc_truncation_low()].
-#' @param truncation_high_quantile Numeric. Forwarded to [qc_truncation_high()].
+#' @param truncation_low_quantile Numeric. Forwarded to `qc_truncation_low()`.
+#' @param truncation_high_quantile Numeric. Forwarded to `qc_truncation_high()`.
 #'
 #' @return Integer vector of Y-digit codes (0–9), one per observation.
 #' @noRd
