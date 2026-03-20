@@ -1,0 +1,201 @@
+---
+title: "Rating Curve Lifecycle"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Rating Curve Lifecycle}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+## Overview
+
+A rating curve translates a measured **stage** (water level, *h*) into **flow**
+(*Q*) using the power-law equation applied per limb:
+
+$$Q = C(h - a)^b$$
+
+Ratings move through three governance tiers — **Bronze → Silver → Gold** —
+before being applied to produce operational flow records.
+
+---
+
+## Tiers
+
+| Tier | Purpose | Mutability |
+|---|---|---|
+| Bronze | As-received from source (WISKI, consultant, model output) | Immutable once saved |
+| Silver | QC-reviewed: continuity checked, limb boundaries verified | Reviewable |
+| Gold | Formally approved for production use | Authoritative |
+
+Each tier maintains its own independent version sequence. A site can have
+Bronze v1, Silver v1, and Gold v1 simultaneously — these are distinct entries
+in the register.
+
+---
+
+## Lifecycle Steps
+
+### 1. Construction
+
+A `RatingCurve` is assembled from a table of limbs. Each limb covers a stage
+range and carries its own `C`, `a`, `b` coefficients and a `doubtful` flag
+(used to suppress plotting of extrapolated out-of-bank limbs).
+
+```
+Limb 1:  lower = 0.0 m,  upper = 0.5 m
+Limb 2:  lower = 0.5 m,  upper = 1.2 m   <- boundaries must be contiguous
+Limb 3:  lower = 1.2 m,  upper = Inf      <- doubtful = TRUE (out of bank)
+```
+
+Multiple `RatingCurve` objects with non-overlapping validity windows are
+grouped into a `RatingSet` to represent a site's rating history.
+
+---
+
+### 2. Continuity Check
+
+At each limb junction, both limbs must produce the same Q.
+`check_limb_continuity()` reports any gaps:
+
+```
+  junction h_junction Q_lower Q_upper gap_m3s gap_pct connected
+1      1|2       0.50   12.30   11.87    0.43    3.5%     FALSE
+2      2|3       1.20   48.10   48.10    0.00    0.0%      TRUE
+```
+
+A gap greater than 1% is considered a discontinuity. If one exists the rating
+is not fit for production use.
+
+---
+
+### 3. Continuity Correction
+
+`fix_limb_continuity()` resolves discontinuities by adjusting the `C`
+coefficient of each limb above the anchor (limb 1), while preserving `a` and
+`b`. Changes are propagated upward so all junctions connect cleanly.
+
+---
+
+### 4. Bronze — Save As-Received
+
+The uncorrected, original rating is saved to Bronze unchanged. This preserves
+the raw source for audit purposes.
+
+- Assigned `rating_id`: e.g. `510310_RATING_bronze_v1`
+- `status`: `Active`
+- `method_of_receipt`: e.g. `"WISKI export"`, `"consultant report"`
+- `derivation_method`: e.g. `"spot gaugings"`, `"hydraulic model"`, `"mixed"`
+- `model_or_project`: e.g. `"TUFLOW_Phase2_2023"` (if applicable)
+
+---
+
+### 5. Silver — QC Review
+
+After continuity correction and any limb boundary adjustments, the reviewed
+curve is promoted to Silver. Bronze is left untouched.
+
+- New version number scoped to the Silver tier
+- Previous Silver `Active` version auto-superseded
+- `status` of the prior version updated to `Superseded` in the register
+
+---
+
+### 6. Gold — Approval
+
+Once the Silver curve has been signed off, it is saved to Gold. This is the
+version used by `apply_rating()` to produce operational flow data.
+
+- Only one `Active` version per site per tier at any time
+- Supersession is automatic on save
+
+---
+
+### 7. Application to Level Data
+
+`apply_rating()` accepts a `Level_Daily` or `Level_15min` object and a
+`RatingCurve` or `RatingSet`. Each observation is matched to the correct
+curve by date, rated, and returned as `Flow_Daily` or `Flow_15min`. A
+`doubtful` column propagates the extrapolation flag.
+
+---
+
+### 8. Provenance Register
+
+Every save writes a row to `register/rating_register.csv`:
+
+| Field | Description |
+|---|---|
+| `rating_id` | Unique ID: `{site_id}_RATING_{tier}_v{version}` |
+| `site_id` | Station identifier |
+| `tier` | `bronze` / `silver` / `gold` |
+| `status` | `Active` or `Superseded` |
+| `version` | Integer, scoped per site + tier |
+| `valid_from` / `valid_to` | Rating validity window |
+| `n_limbs` | Number of limbs |
+| `source` | Free-text origin label from the curve |
+| `method_of_receipt` | How the file or data was received |
+| `derivation_method` | How the rating was developed (see below) |
+| `model_or_project` | Model name, project, or team attribution |
+| `saved_by` | Username |
+| `saved_at` | Timestamp |
+| `notes` | Free-text annotation |
+
+#### Derivation methods
+
+| Value | Meaning |
+|---|---|
+| `"spot gaugings"` | Fitted from field velocity-area measurements |
+| `"hydraulic model"` | Derived from HEC-RAS, ISIS, TUFLOW, etc. |
+| `"statistical model"` | Regression or statistical extrapolation |
+| `"mixed"` | Gaugings used to calibrate or constrain a model |
+
+---
+
+### 9. Physical Storage
+
+```
+<root>/
+  bronze/hydrometric/ratings/ratings.parquet   <- all sites, all bronze versions
+  silver/hydrometric/ratings/ratings.parquet   <- all sites, all silver versions
+  gold/hydrometric/ratings/ratings.parquet     <- all sites, all gold versions
+  register/rating_register.csv                 <- provenance register (all tiers)
+```
+
+One Parquet file per tier holds all sites and versions stacked by row (one row
+per limb). `site_id` + `version` is the composite key within each file.
+
+---
+
+## Summary
+
+```
+Field survey / model output
+        |
+        v
+   [RatingCurve]
+        |
+        +-- check_limb_continuity()
+        |         |
+        |         v  (if gaps found)
+        |   fix_limb_continuity()
+        |
+        +-- save_rating(tier = "bronze")   ->  bronze/hydrometric/ratings/
+        |
+        +-- save_rating(tier = "silver")   ->  silver/hydrometric/ratings/
+        |         (after QC review)
+        |
+        +-- save_rating(tier = "gold")     ->  gold/hydrometric/ratings/
+                  (after sign-off)
+                       |
+                       v
+              apply_rating(level_obj, rs)
+                       |
+                       v
+                 Flow_Daily / Flow_15min
+```
+
+See `vignette("rating-curve-lifecycle")` for worked R code covering each step.

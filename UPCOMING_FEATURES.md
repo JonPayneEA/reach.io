@@ -431,7 +431,7 @@ read_gold(
 ---
 
 ### Bronze Store Catalogue
-> `catalogue.R`
+> `catalogue.R` ✓ **Implemented**
 
 Currently there is no programmatic way to query what data exists in the store without reading raw files directly. Planned functions:
 

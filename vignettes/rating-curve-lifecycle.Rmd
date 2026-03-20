@@ -1,0 +1,358 @@
+---
+title: "Rating curve lifecycle"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Rating curve lifecycle}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Overview
+
+A rating curve translates gauge stage (water level, m) into discharge (flow,
+m³/s) using the equation:
+
+$$Q = C \cdot (h - a)^b$$
+
+where $C$ is a multiplier, $a$ is a datum offset, and $b$ is an exponent.
+Real-world curves are split into multiple **limbs**, each covering a different
+stage range (e.g. low in-channel flow, bankfull, out-of-bank). The upper limbs
+are often extrapolated beyond measured gaugings and are flagged as **doubtful**.
+
+Ratings change over time as channels shift, structures are modified, or
+resurveys are carried out. reach.io tracks this through:
+
+- **`RatingCurve`** — a single set of limbs with an optional validity window.
+- **`RatingSet`** — an ordered collection of `RatingCurve` objects covering
+  non-overlapping periods.
+
+The provenance register captures how each rating was derived via the
+`derivation_method` field:
+
+| Value | Meaning |
+|---|---|
+| `"spot gaugings"` | Fitted entirely from field velocity-area measurements |
+| `"hydraulic model"` | Derived from a hydraulic model (HEC-RAS, ISIS, TUFLOW, etc.) |
+| `"statistical model"` | Regression or statistical extrapolation |
+| `"mixed"` | Gaugings used to calibrate or constrain a model |
+
+The optional `model_or_project` field records the specific model, project, or
+team that produced the rating (e.g. `"TUFLOW_Phase2_2023"`,
+`"Flood Risk Study — Hydrology Team"`).
+
+Storage follows the same Bronze → Silver → Gold medallion tier model used for
+observation data.
+
+```
+Bronze   As-received from source (WISKI export, consultant report).
+         Immutable once saved.
+
+Silver   QC-reviewed: continuity checked, limb boundaries verified.
+         Not yet formally approved.
+
+Gold     Approved for production use. Default tier for apply_rating().
+```
+
+---
+
+## 1. Building a rating curve
+
+Construct a `RatingCurve` from a `data.table` of limb parameters. The
+constructor accepts common column name variants (`Lower.level`, `multiplier`,
+`Exponent`, etc.) so real-world exports rarely need pre-processing.
+
+```{r build}
+library(reach.io)
+library(data.table)
+
+limbs <- data.table(
+  lower    = c(0.000, 0.095, 2.000),
+  upper    = c(0.095, 2.000,   Inf),
+  C        = c(12.2495, 23.252, 23.252),
+  a        = c(-0.003, -0.098,  -0.098),
+  b        = c( 1.641,  2.706,   2.706),
+  doubtful = c(FALSE,   FALSE,   TRUE)   # upper limb = out-of-bank
+)
+
+rc <- RatingCurve(
+  limbs      = limbs,
+  valid_from = as.Date("2019-10-01"),
+  station_id = "510310",
+  source     = "WISKI"
+)
+
+rc
+```
+
+```
+<RatingCurve>
+  Station:  510310
+  Source:   WISKI
+  Valid:    2019-10-01 to open
+  Limbs:    3
+
+    #   Lower   Upper         C         a         b  Doubtful
+    1   0.000   0.095   12.2495    -0.003     1.641     FALSE
+    2   0.095   2.000   23.252    -0.098      2.706     FALSE
+    3   2.000     Inf   23.252    -0.098      2.706      TRUE
+```
+
+---
+
+## 2. Checking limb continuity
+
+At each boundary between limbs the rating equation should produce the same $Q$
+from both sides. In practice, curves fitted independently to separate gaugings
+often have a small step discontinuity.
+
+```{r check}
+check_limb_continuity(rc)
+```
+
+```
+2 of 2 junction(s) exceed the 1% continuity tolerance.
+   junction h_junction Q_lower_limb Q_upper_limb  gap_m3s  gap_pct
+      1-2       0.095       0.0412       0.0389  -0.0023     5.6%
+      2-3       2.000       1.3241       1.3241   0.0000     0.0%
+```
+
+`check_limb_continuity()` returns its result invisibly so you can capture and
+inspect it:
+
+```{r check-capture}
+continuity <- check_limb_continuity(rc, tol_pct = 1)
+continuity[connected == FALSE]
+```
+
+---
+
+## 3. Correcting continuity
+
+`fix_limb_continuity()` adjusts the $C$ parameter of each limb (propagating
+upward from the anchor limb) so that $Q$ is exactly continuous at every
+junction. The shape parameters $a$ and $b$ are never changed.
+
+```{r fix}
+rc_fixed <- fix_limb_continuity(rc)
+```
+
+```
+Adjusting C parameters (anchor = limb 1, propagating upward):
+  Limb 1 -> 2  h = 0.095 m:  C  23.252  ->  22.874  (-1.63%)
+  Limb 2 -> 3  h = 2.000 m:  C  unchanged
+```
+
+Verify the result:
+
+```{r verify}
+check_limb_continuity(rc_fixed)
+# All 2 junction(s) connect within 1%.
+```
+
+---
+
+## 4. Saving to Bronze
+
+Save the original, unmodified curve as-received. Bronze is the immutable record
+of what was supplied.
+
+```{r save-bronze}
+root <- "data/hydro"   # your store root
+
+save_rating(
+  rc,
+  root              = root,
+  tier              = "bronze",
+  saved_by          = "J.Payne",
+  method_of_receipt = "WISKI export",
+  derivation_method = "spot gaugings",
+  notes             = "WISKI export 2023-11-01, version 3.2"
+)
+# Saved RatingCurve [bronze] v1 for site '510310'
+#   -> data/hydro/bronze/hydrometric/ratings/ratings.parquet
+```
+
+---
+
+## 5. Promoting to Silver
+
+After review, save the QC-corrected curve to Silver.
+
+```{r save-silver}
+save_rating(
+  rc_fixed,
+  root              = root,
+  tier              = "silver",
+  saved_by          = "J.Payne",
+  method_of_receipt = "derived from bronze v1",
+  derivation_method = "spot gaugings",
+  notes             = "Limb 2 C corrected for continuity with fix_limb_continuity()"
+)
+# Saved RatingCurve [silver] v1 for site '510310'
+```
+
+---
+
+## 6. Approving to Gold
+
+Once formally signed off, promote to Gold. This is the version that
+`apply_rating()` will use in production. Any previously Active Gold version
+for this site is automatically marked `Superseded`.
+
+```{r save-gold}
+save_rating(
+  rc_fixed,
+  root              = root,
+  tier              = "gold",
+  saved_by          = "J.Payne",
+  method_of_receipt = "approved from silver v1",
+  derivation_method = "spot gaugings",
+  notes             = "Approved by lead hydrologist 2023-11-15"
+)
+# Saved RatingCurve [gold] v1 for site '510310'
+```
+
+If the rating was produced by a hydraulic model rather than field gaugings,
+record `derivation_method` and `model_or_project` accordingly:
+
+```{r save-gold-model}
+save_rating(
+  rc_model,
+  root              = root,
+  tier              = "gold",
+  saved_by          = "J.Payne",
+  method_of_receipt = "ISIS 2D model output, Phase 2 study",
+  derivation_method = "hydraulic model",
+  model_or_project  = "TUFLOW_Phase2_2023",
+  notes             = "Approved by lead hydrologist 2023-11-15"
+)
+```
+
+The governance register now has one row per tier, each with a unique
+`rating_id` and `status`:
+
+```{r list}
+list_ratings(root, site_id = "510310")
+```
+
+```
+<Rating register>  3 version(s)
+
+                rating_id  site_id   tier  status version valid_from valid_to  method_of_receipt derivation_method model_or_project saved_by
+1  510310_RATING_bronze_v1   510310 bronze  Active       1 2019-10-01       NA       WISKI export    spot gaugings             <NA>  J.Payne
+2  510310_RATING_silver_v1   510310 silver  Active       1 2019-10-01       NA   derived from ...    spot gaugings             <NA>  J.Payne
+3    510310_RATING_gold_v1   510310   gold  Active       1 2019-10-01       NA   approved from ...   spot gaugings             <NA>  J.Payne
+```
+
+When a second Gold version is saved later (e.g. after a resurvey), the
+previous row automatically flips to `Superseded`:
+
+```
+                rating_id  site_id   tier      status version  method_of_receipt
+1  510310_RATING_gold_v1   510310   gold  Superseded       1   approved from ...
+2  510310_RATING_gold_v2   510310   gold      Active       2   approved from ...
+```
+
+---
+
+## 7. Applying to level data
+
+Load the approved curve and apply it to a `Level_Daily` or `Level_15min`
+object. The output is a `Flow_Daily` or `Flow_15min` with an additional
+`doubtful` column flagging flows derived from extrapolated limbs.
+
+```{r apply}
+rc_gold <- load_rating("510310", root = root)   # returns RatingSet
+flow    <- apply_rating(level_obj, rc_gold)
+
+# Inspect
+head(flow@readings)
+#             dateTime       date  value measure_notation doubtful
+# 1: 2019-10-01 00:00:00 2019-10-01  0.412     rated_flow    FALSE
+# 2: 2019-10-01 00:15:00 2019-10-01  0.418     rated_flow    FALSE
+# 3: 2019-10-01 00:30:00 2019-10-01  1.853     rated_flow    FALSE
+# 4: 2019-10-01 00:45:00 2019-10-01  3.421     rated_flow     TRUE  # out-of-bank
+
+# Flows derived from the doubtful (out-of-bank) limb
+flow@readings[doubtful == TRUE]
+```
+
+---
+
+## 8. Time-varying ratings
+
+When the channel has changed — due to a flood event, maintenance works, or a
+resurvey — create a new `RatingCurve` for the new period and combine them into
+a `RatingSet`. `apply_rating()` automatically selects the correct curve for
+each observation date.
+
+```{r rating-set}
+# Original curve: valid 2019-10-01 to 2022-06-30
+rc_v1 <- RatingCurve(
+  limbs      = limbs_v1,
+  valid_from = as.Date("2019-10-01"),
+  valid_to   = as.Date("2022-06-30"),
+  station_id = "510310",
+  source     = "WISKI"
+)
+
+# Post-survey curve: valid from 2022-07-01 onwards
+rc_v2 <- RatingCurve(
+  limbs      = limbs_v2,
+  valid_from = as.Date("2022-07-01"),
+  station_id = "510310",
+  source     = "WISKI"
+)
+
+rs <- RatingSet(curves = list(rc_v1, rc_v2), station_id = "510310")
+
+# Save both to Gold in one call
+save_rating(rs, root = root, tier = "gold", saved_by = "J.Payne")
+
+# Load and apply — each observation uses the curve valid on its date
+rs_gold <- load_rating("510310", root = root)
+flow    <- apply_rating(level_obj, rs_gold)
+```
+
+Observations outside all validity windows are rated as `NA` with a warning.
+
+---
+
+## 9. Comparing tiers
+
+Load from different tiers to compare what changed between the raw and corrected
+curves:
+
+```{r compare}
+rc_bronze <- load_rating("510310", root, tier = "bronze", version = 1)
+rc_gold   <- load_rating("510310", root, tier = "gold",   version = 1)
+
+# Side-by-side continuity check
+check_limb_continuity(rc_bronze)   # junction 1-2 has a gap
+check_limb_continuity(rc_gold)     # all connected
+
+# Gold register entries only
+list_ratings(root, tier = "gold")
+```
+
+---
+
+## Directory layout
+
+`setup_hydro_store()` creates the full tree including the ratings directories:
+
+```
+<root>/
+├── bronze/hydrometric/ratings/ratings.parquet
+├── silver/hydrometric/ratings/ratings.parquet
+├── gold/hydrometric/ratings/ratings.parquet
+└── register/rating_register.csv
+```
+
+Each Parquet file holds all sites and all versions at that tier, with columns
+`site_id` and `version` as the composite key. The register CSV is the single
+audit trail across all three tiers.
