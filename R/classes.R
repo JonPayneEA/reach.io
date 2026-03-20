@@ -637,8 +637,7 @@ S7::method(disagg_to_15min, PotEvap_Daily) <- function(x) {
 
 # -- Generics and methods -----------------------------------------------------
 
-#' @rdname as_data_table
-#' @export
+#' @noRd
 S7::method(as_data_table, PotEvapData) <- function(x) x@readings
 
 
