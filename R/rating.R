@@ -349,10 +349,18 @@ RatingSet <- S7::new_class(
 #' rc    <- RatingCurve(limbs, station_id = "510310", source = "WISKI")
 #' flow  <- apply_rating(level_obj, rc)
 #' }
-apply_rating <- S7::new_generic("apply_rating", "rating")
+apply_rating <- function(level, rating, measure_notation = "rated_flow") {
+  if (S7::S7_inherits(rating, RatingCurve)) {
+    .apply_rating_curve(level, rating, measure_notation)
+  } else if (S7::S7_inherits(rating, RatingSet)) {
+    .apply_rating_set(level, rating, measure_notation)
+  } else {
+    stop("`rating` must be a RatingCurve or RatingSet.")
+  }
+}
 
-S7::method(apply_rating, RatingCurve) <- function(level, rating,
-                                                   measure_notation = "rated_flow") {
+#' @noRd
+.apply_rating_curve <- function(level, rating, measure_notation = "rated_flow") {
   if (!S7::S7_inherits(level, Level_Daily) &&
       !S7::S7_inherits(level, Level_15min)) {
     stop("`level` must be a Level_Daily or Level_15min object.")
@@ -386,8 +394,8 @@ S7::method(apply_rating, RatingCurve) <- function(level, rating,
   }
 }
 
-S7::method(apply_rating, RatingSet) <- function(level, rating,
-                                                 measure_notation = "rated_flow") {
+#' @noRd
+.apply_rating_set <- function(level, rating, measure_notation = "rated_flow") {
   if (!S7::S7_inherits(level, Level_Daily) &&
       !S7::S7_inherits(level, Level_15min)) {
     stop("`level` must be a Level_Daily or Level_15min object.")
