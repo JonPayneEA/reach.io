@@ -351,7 +351,7 @@ S7::method(as_long, HydroData) <- function(x) {
 # output is identical in structure — the class name already carries the
 # parameter and timestep information.
 
-S7::method(print, HydroData) <- function(x, ...) {
+.print_HydroData <- function(x, ...) {
   cat(sprintf(
     "<%s>\n  Date range:  %s to %s\n  Measures:    %d\n  Rows:        %s\n  Downloaded:  %s\n",
     class(x)[1L],
@@ -643,7 +643,7 @@ S7::method(as_data_table, PotEvapData) <- function(x) x@readings
 
 # -- Print method -------------------------------------------------------------
 
-S7::method(print, PotEvapData) <- function(x, ...) {
+.print_PotEvapData <- function(x, ...) {
   calc_tag <- if (S7::S7_inherits(x, PotEvap_15min)) {
     sprintf("  Disagg method: %s\n", x@disagg_method)
   } else {

@@ -621,14 +621,14 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
 # Print methods
 # =============================================================================
 
-S7::method(print, RatingCurve) <- function(x, ...) {
-  vf <- if (inherits(x@valid_from, "Date")) format(x@valid_from) else "—"
+.print_RatingCurve <- function(x, ...) {
+  vf <- if (inherits(x@valid_from, "Date")) format(x@valid_from) else "-"
   vt <- if (inherits(x@valid_to,   "Date")) format(x@valid_to)   else "open"
 
   cat(sprintf(
     "<RatingCurve>\n  Station:  %s\n  Source:   %s\n  Valid:    %s to %s\n  Limbs:    %d\n\n",
-    if (is.na(x@station_id)) "—" else x@station_id,
-    if (is.na(x@source))     "—" else x@source,
+    if (is.na(x@station_id)) "-" else x@station_id,
+    if (is.na(x@source))     "-" else x@source,
     vf, vt,
     nrow(x@limbs)
   ))
@@ -655,12 +655,12 @@ S7::method(print, RatingCurve) <- function(x, ...) {
   invisible(x)
 }
 
-S7::method(print, RatingSet) <- function(x, ...) {
-  fmt_date <- function(d) if (inherits(d, "Date")) format(d) else "—"
+.print_RatingSet <- function(x, ...) {
+  fmt_date <- function(d) if (inherits(d, "Date")) format(d) else "-"
 
   cat(sprintf(
     "<RatingSet>\n  Station:  %s\n  Curves:   %d\n\n",
-    if (is.na(x@station_id)) "—" else x@station_id,
+    if (is.na(x@station_id)) "-" else x@station_id,
     length(x@curves)
   ))
 
@@ -675,7 +675,7 @@ S7::method(print, RatingSet) <- function(x, ...) {
                 fmt_date(cv@valid_from),
                 fmt_date(cv@valid_to),
                 nrow(cv@limbs),
-                if (is.na(cv@source)) "—" else cv@source))
+                if (is.na(cv@source)) "-" else cv@source))
   }
   invisible(x)
 }

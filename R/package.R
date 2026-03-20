@@ -100,3 +100,18 @@ VALID_SOURCES <- c("HDE", "WISKI", "BULK_FILE", "WISKI_ALL")
 #' @return `x` if `!is.null(x)`, otherwise `y`.
 #' @noRd
 `%||%` <- function(x, y) if (!is.null(x)) x else y
+
+
+# -- S3 print method registration ---------------------------------------------
+#
+# S7's print.S7_object calls str() directly and never consults S7's internal
+# method table, so S7::method(print, ...) assignments are silently ignored.
+# Registering via registerS3method() puts the methods in R's own S3 dispatch
+# table where they are found before print.S7_object.
+
+.onLoad <- function(libname, pkgname) {
+  registerS3method("print", "reach.io::RatingCurve",  .print_RatingCurve,  envir = asNamespace(pkgname))
+  registerS3method("print", "reach.io::RatingSet",    .print_RatingSet,    envir = asNamespace(pkgname))
+  registerS3method("print", "reach.io::HydroData",    .print_HydroData,    envir = asNamespace(pkgname))
+  registerS3method("print", "reach.io::PotEvapData",  .print_PotEvapData,  envir = asNamespace(pkgname))
+}
