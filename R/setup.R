@@ -38,6 +38,12 @@
 #' │   ├── hydrometric/Q/  hydrometric/H/  hydrometric/P/
 #' │   ├── radarH19/P/
 #' │   └── MOSES/SM/
+#' ├── bronze/
+#' │   └── hydrometric/
+#' │       └── ratings/
+#' ├── silver/
+#' │   └── hydrometric/
+#' │       └── ratings/
 #' ├── gold/
 #' │   ├── hydrometric/
 #' │   │   ├── ratings/
@@ -149,8 +155,11 @@ setup_hydro_store <- function(
     }
   }
 
-  # Ratings — single cross-parameter directory under gold/hydrometric/
-  dirs <- c(dirs, file.path(root, "gold", "hydrometric", "ratings"))
+  # Ratings — cross-parameter directory at each tier under hydrometric/
+  # (ratings don't belong under a supplier or data-type subdir)
+  for (tier in c("bronze", "silver", "gold")) {
+    dirs <- c(dirs, file.path(root, tier, "hydrometric", "ratings"))
+  }
 
   # Register — shared across all categories
   dirs <- c(dirs, file.path(root, "register"))

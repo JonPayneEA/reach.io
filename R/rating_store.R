@@ -4,10 +4,11 @@
 #              and RatingSet objects under the governance
 #              directory structure.
 #
-#              Storage location (Gold tier, ratings):
-#                <root>/gold/hydrometric/ratings/
-#                  ratings.parquet
-#                  (single file; all sites and versions stacked)
+#              Storage location (all three tiers):
+#                <root>/bronze/hydrometric/ratings/ratings.parquet
+#                <root>/silver/hydrometric/ratings/ratings.parquet
+#                <root>/gold/hydrometric/ratings/ratings.parquet
+#                  (one file per tier; all sites and versions stacked)
 #
 #              Governance manifest:
 #                <root>/register/rating_register.csv
@@ -44,8 +45,9 @@ NULL
 # =============================================================================
 
 #' @noRd
-.rating_paths <- function(root) {
-  ratings_dir <- file.path(root, "gold", "hydrometric", "ratings")
+.rating_paths <- function(root, tier = "gold") {
+  tier        <- match.arg(tier, c("bronze", "silver", "gold"))
+  ratings_dir <- file.path(root, tier, "hydrometric", "ratings")
   list(
     ratings_dir = ratings_dir,
     pq_file     = file.path(ratings_dir, "ratings.parquet"),
@@ -53,13 +55,14 @@ NULL
   )
 }
 
-# Return the next version integer for a site_id given the register CSV.
+# Return the next version integer for a site_id + tier given the register CSV.
+# Versions are scoped per tier so bronze/silver/gold each start at 1.
 #' @noRd
-.next_rating_version <- function(site_id, reg_path) {
+.next_rating_version <- function(site_id, reg_path, tier) {
   if (!file.exists(reg_path)) return(1L)
   reg <- data.table::fread(reg_path, colClasses = "character", showProgress = FALSE)
   if (nrow(reg) == 0L || !"site_id" %in% names(reg)) return(1L)
-  rows <- reg[reg$site_id == site_id]
+  rows <- reg[reg$site_id == site_id & reg$tier == tier]
   if (nrow(rows) == 0L) return(1L)
   max(as.integer(rows$version), na.rm = TRUE) + 1L
 }
@@ -106,17 +109,26 @@ NULL
 # save_rating()
 # =============================================================================
 
-#' Save a rating curve to the Gold calibration store
+#' Save a rating curve to the hydrometric ratings store
 #'
 #' Writes a [RatingCurve] (or every curve in a [RatingSet]) into the
-#' shared `<root>/gold/hydrometric/ratings/ratings.parquet` file and
+#' shared `<root>/<tier>/hydrometric/ratings/ratings.parquet` file and
 #' appends a governance row to `<root>/register/rating_register.csv`.
 #'
-#' Each call to `save_rating()` with a [RatingCurve] is assigned the next
-#' available version number for that `station_id`. Existing versions are
-#' never overwritten — the single Parquet accumulates all sites and all
-#' versions, differentiated by `site_id`, `version`, and `valid_from` /
-#' `valid_to`.
+#' Three tiers are supported, matching the observation data lifecycle:
+#' \describe{
+#'   \item{`"bronze"`}{As-received from the source system (WISKI export,
+#'     consultant report, etc.). Immutable once saved.}
+#'   \item{`"silver"`}{QC-reviewed: continuity checked, limb boundaries
+#'     verified, but not yet formally signed off.}
+#'   \item{`"gold"`}{Approved for production use. Default tier.}
+#' }
+#'
+#' Each call is assigned the next available version number for that
+#' `station_id` **within** the target tier. Existing versions are never
+#' overwritten — the Parquet accumulates all sites and versions,
+#' differentiated by `site_id` and `version`. The register records `tier`
+#' so the full lineage (bronze → silver → gold) is traceable.
 #'
 #' The ratings directory and register are created automatically if they
 #' do not yet exist (no need to call [setup_hydro_store()] first).
@@ -126,6 +138,8 @@ NULL
 #' @param root Character. Root of the data store
 #'   (the directory that contains `bronze/`, `silver/`, `gold/`,
 #'   `register/`).
+#' @param tier Character. Storage tier: `"bronze"`, `"silver"`, or
+#'   `"gold"` (default).
 #' @param saved_by Character. Name or username of the person saving the
 #'   curve. Recorded in the register. Defaults to `Sys.info()[["user"]]`.
 #' @param notes Character. Optional free-text note appended to the register
@@ -137,27 +151,39 @@ NULL
 #'
 #' @examples
 #' \dontrun{
-#' save_rating(rc_fixed, root = "data/hydro",
-#'             saved_by = "J.Payne",
-#'             notes = "Upper limb continuity corrected with fix_limb_continuity()")
+#' # Bronze — as received from WISKI
+#' save_rating(rc_raw, root = "data/hydro", tier = "bronze",
+#'             saved_by = "J.Payne", notes = "WISKI export 2023-11-01")
+#'
+#' # Silver — after continuity check and correction
+#' rc_fixed <- fix_limb_continuity(rc_raw)
+#' save_rating(rc_fixed, root = "data/hydro", tier = "silver",
+#'             saved_by = "J.Payne", notes = "Continuity corrected")
+#'
+#' # Gold — formally approved
+#' save_rating(rc_fixed, root = "data/hydro", tier = "gold",
+#'             saved_by = "J.Payne", notes = "Approved by lead hydrologist")
 #'
 #' # Save an entire time-varying set in one call
-#' save_rating(rating_set, root = "data/hydro", saved_by = "J.Payne")
+#' save_rating(rating_set, root = "data/hydro", tier = "bronze",
+#'             saved_by = "J.Payne")
 #' }
 save_rating <- S7::new_generic("save_rating", "x")
 
 S7::method(save_rating, RatingCurve) <- function(x, root,
+                                                  tier     = "gold",
                                                   saved_by = Sys.info()[["user"]],
                                                   notes    = NA_character_) {
   if (is.na(x@station_id) || !nzchar(x@station_id)) {
     stop("`station_id` must be set on the RatingCurve before saving.")
   }
+  tier <- match.arg(tier, c("bronze", "silver", "gold"))
 
-  paths <- .rating_paths(root)
+  paths <- .rating_paths(root, tier)
   dir.create(paths$ratings_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(dirname(paths$register), recursive = TRUE, showWarnings = FALSE)
 
-  version    <- .next_rating_version(x@station_id, paths$register)
+  version    <- .next_rating_version(x@station_id, paths$register, tier)
   limbs_flat <- .curve_to_dt(x, version)
 
   # Append to or create Parquet
@@ -174,6 +200,7 @@ S7::method(save_rating, RatingCurve) <- function(x, root,
   # Append governance row to register
   reg_row <- data.table::data.table(
     site_id    = x@station_id,
+    tier       = tier,
     version    = as.integer(version),
     valid_from = if (inherits(x@valid_from, "Date")) format(x@valid_from) else NA_character_,
     valid_to   = if (inherits(x@valid_to,   "Date")) format(x@valid_to)   else NA_character_,
@@ -195,17 +222,18 @@ S7::method(save_rating, RatingCurve) <- function(x, root,
   data.table::fwrite(updated_reg, paths$register)
 
   message(sprintf(
-    "Saved RatingCurve v%d for site '%s'  ->  %s",
-    version, x@station_id, paths$pq_file
+    "Saved RatingCurve [%s] v%d for site '%s'  ->  %s",
+    tier, version, x@station_id, paths$pq_file
   ))
   invisible(paths$pq_file)
 }
 
 S7::method(save_rating, RatingSet) <- function(x, root,
+                                                tier     = "gold",
                                                 saved_by = Sys.info()[["user"]],
                                                 notes    = NA_character_) {
   paths <- vapply(x@curves, function(cv) {
-    save_rating(cv, root = root, saved_by = saved_by, notes = notes)
+    save_rating(cv, root = root, tier = tier, saved_by = saved_by, notes = notes)
   }, character(1L))
   invisible(paths)
 }
@@ -224,6 +252,8 @@ S7::method(save_rating, RatingSet) <- function(x, root,
 #' @param site_id Character. Station identifier (must match the `station_id`
 #'   used when the curve was saved).
 #' @param root Character. Root of the data store.
+#' @param tier Character. Tier to load from: `"bronze"`, `"silver"`, or
+#'   `"gold"` (default).
 #' @param version Integer or `NULL`. When `NULL` (default), all versions are
 #'   loaded and returned as a [RatingSet] ordered by version number.
 #'   When a specific integer is given, only that version is returned as a
@@ -235,16 +265,18 @@ S7::method(save_rating, RatingSet) <- function(x, root,
 #'
 #' @examples
 #' \dontrun{
-#' # All versions as a RatingSet — pass directly to apply_rating()
+#' # Gold (default) — all versions as a RatingSet for apply_rating()
 #' rs   <- load_rating("510310", root = "data/hydro")
 #' flow <- apply_rating(level_obj, rs)
 #'
-#' # Inspect one specific version
-#' rc3 <- load_rating("510310", root = "data/hydro", version = 3)
-#' check_limb_continuity(rc3)
+#' # Load from bronze to compare against gold
+#' rc_bronze <- load_rating("510310", root = "data/hydro", tier = "bronze",
+#'                          version = 1)
+#' rc_gold   <- load_rating("510310", root = "data/hydro", version = 1)
 #' }
-load_rating <- function(site_id, root, version = NULL) {
-  paths <- .rating_paths(root)
+load_rating <- function(site_id, root, tier = "gold", version = NULL) {
+  tier  <- match.arg(tier, c("bronze", "silver", "gold"))
+  paths <- .rating_paths(root, tier)
 
   if (!file.exists(paths$pq_file)) {
     stop(sprintf(
@@ -289,6 +321,8 @@ load_rating <- function(site_id, root, version = NULL) {
 #' @param root Character. Root of the data store.
 #' @param site_id Character vector or `NULL`. Filter to specific site(s).
 #'   `NULL` (default) shows all sites.
+#' @param tier Character vector or `NULL`. Filter to one or more tiers
+#'   (`"bronze"`, `"silver"`, `"gold"`). `NULL` (default) shows all tiers.
 #'
 #' @return The register `data.table`, invisibly.
 #'
@@ -298,8 +332,10 @@ load_rating <- function(site_id, root, version = NULL) {
 #' \dontrun{
 #' list_ratings("data/hydro")
 #' list_ratings("data/hydro", site_id = "510310")
+#' list_ratings("data/hydro", tier = "gold")
+#' list_ratings("data/hydro", site_id = "510310", tier = c("silver", "gold"))
 #' }
-list_ratings <- function(root, site_id = NULL) {
+list_ratings <- function(root, site_id = NULL, tier = NULL) {
   reg_path <- file.path(root, "register", "rating_register.csv")
 
   if (!file.exists(reg_path)) {
@@ -309,13 +345,16 @@ list_ratings <- function(root, site_id = NULL) {
 
   reg <- data.table::fread(reg_path, showProgress = FALSE)
 
-  if (!is.null(site_id)) {
-    reg <- reg[reg$site_id %in% site_id]
-  }
+  if (!is.null(site_id)) reg <- reg[reg$site_id %in% site_id]
+  if (!is.null(tier))    reg <- reg[reg$tier    %in% tier]
 
   if (nrow(reg) == 0L) {
-    msg <- if (!is.null(site_id)) {
-      paste0("No ratings found for site(s): ", paste(site_id, collapse = ", "))
+    parts <- c(
+      if (!is.null(site_id)) paste0("site(s): ", paste(site_id, collapse = ", ")),
+      if (!is.null(tier))    paste0("tier(s): ", paste(tier,    collapse = ", "))
+    )
+    msg <- if (length(parts)) {
+      paste0("No ratings found for ", paste(parts, collapse = "; "))
     } else {
       "Rating register is empty."
     }
@@ -324,7 +363,7 @@ list_ratings <- function(root, site_id = NULL) {
   }
 
   # Print condensed summary
-  display <- reg[, .(site_id, version, valid_from, valid_to,
+  display <- reg[, .(site_id, tier, version, valid_from, valid_to,
                      n_limbs, source, saved_by, saved_at, notes)]
 
   cat(sprintf("<Rating register>  %d version(s)\n\n", nrow(display)))
