@@ -349,40 +349,14 @@ RatingSet <- S7::new_class(
 #' rc    <- RatingCurve(limbs, station_id = "510310", source = "WISKI")
 #' flow  <- apply_rating(level_obj, rc)
 #' }
-apply_rating <- S7::new_generic("apply_rating", "rating")
-
-S7::method(apply_rating, RatingCurve) <- function(level, rating,
-                                                   measure_notation = "rated_flow") {
-  if (!S7::S7_inherits(level, Level_Daily) &&
-      !S7::S7_inherits(level, Level_15min)) {
-    stop("`level` must be a Level_Daily or Level_15min object.")
-  }
-
-  dt    <- data.table::copy(level@readings)
-  stage <- dt$value
-
-  rated <- .rate_stage(stage, rating@limbs)
-
-  n_below <- sum(is.na(rated$value) & !is.na(stage))
-  if (n_below > 0L) {
-    warning(sprintf(
-      "%d observation(s) had stage below the lowest limb boundary (%.4g m) and were rated as NA.",
-      n_below, rating@limbs$lower[1L]
-    ))
-  }
-
-  dt[, value            := rated$value]
-  dt[, doubtful         := rated$doubtful]
-  dt[, measure_notation := measure_notation]
-
-  if (S7::S7_inherits(level, Level_Daily)) {
-    Flow_Daily(readings  = dt,
-               from_date = level@from_date,
-               to_date   = level@to_date)
+#' @export
+apply_rating <- function(level, rating, measure_notation = "rated_flow") {
+  if (S7::S7_inherits(rating, RatingCurve)) {
+    .apply_rating_curve(level, rating, measure_notation)
+  } else if (S7::S7_inherits(rating, RatingSet)) {
+    .apply_rating_set(level, rating, measure_notation)
   } else {
-    Flow_15min(readings  = dt,
-               from_date = level@from_date,
-               to_date   = level@to_date)
+    stop("`rating` must be a RatingCurve or RatingSet.")
   }
 }
 
