@@ -1,0 +1,336 @@
+---
+title: "Ingesting hydrometric data to Bronze"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Ingesting hydrometric data to Bronze}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Overview
+
+The Bronze tier is the immutable raw-data foundation of the reach.io store.
+Every observation enters the pipeline here, stamped with provenance metadata
+and written to a partitioned Parquet file. Nothing in Bronze is ever
+overwritten — corrections and QC happen at Silver and Gold.
+
+This vignette covers the full sequence from an empty disk to a populated
+Bronze store:
+
+```
+1. setup_hydro_store()     — create the directory tree
+2. build_gauge_registry()  — build the gauge lookup table
+3. run_backfill()          — bulk ingest via the registry   (standard path)
+   ingest_bulk_file()      — ingest a single bulk export    (alternative)
+   download_hydrology()    — exploratory API download       (optional)
+```
+
+---
+
+## 1. Create the directory structure
+
+`setup_hydro_store()` builds the full Bronze / Silver / Gold / Register tree
+in one call. It is safe to re-run — existing directories are left untouched.
+
+```{r setup-store}
+library(reach.io)
+
+root <- "data/hydrometric"   # change to your chosen store root
+
+setup_hydro_store(root)
+```
+
+```
+  Created: data/hydrometric/bronze/hydrometric/EA/Q
+  Created: data/hydrometric/bronze/hydrometric/EA/H
+  Created: data/hydrometric/bronze/hydrometric/EA/P
+  Created: data/hydrometric/bronze/hydrometric/WISKI/Q
+  Created: data/hydrometric/bronze/hydrometric/WISKI/H
+  Created: data/hydrometric/bronze/hydrometric/NRFA/Q
+  Created: data/hydrometric/bronze/hydrometric/ratings
+  Created: data/hydrometric/silver/hydrometric/Q
+  ...
+  Created: data/hydrometric/gold/hydrometric/ratings
+  Created: data/hydrometric/register
+
+Store setup complete under 'data/hydrometric':
+  22 directories created, 0 already existed.
+```
+
+If you only need a subset of the default suppliers or data types, pass a
+custom `categories` list:
+
+```{r setup-store-custom}
+# Hydrometric-only store; EA and WISKI sources; flow and level only
+setup_hydro_store(
+  root,
+  categories = list(
+    hydrometric = list(
+      suppliers  = c("EA", "WISKI"),
+      data_types = c("Q", "H")
+    )
+  )
+)
+```
+
+---
+
+## 2. Build the gauge registry
+
+The registry (`gauge_registry.parquet`) is the single source of truth for
+every gauge in the pipeline. It records the source system for each gauge so
+that the router knows whether to call the EA Hydrology API (HDE), WISKI, or
+read from a bulk export file.
+
+Prepare a CSV with at minimum these columns:
+
+| Column | Description | Example |
+|---|---|---|
+| `gauge_id` | Unique gauge identifier | `"39001"` |
+| `source_system` | `"HDE"`, `"WISKI"`, `"BULK_FILE"`, or `"WISKI_ALL"` | `"HDE"` |
+| `data_type` | `"flow"`, `"level"`, or `"rainfall"` | `"flow"` |
+| `category` | `"hydrometric"`, `"radarH19"`, or `"MOSES"` | `"hydrometric"` |
+| `catchment` | Catchment name (free text) | `"Thames at Kingston"` |
+| `ea_site_ref` | EA station reference | `"39001"` |
+
+```{r build-registry}
+build_gauge_registry(
+  input_csv   = "gauge_list.csv",       # your prepared CSV
+  output_path = file.path(root, "register")
+)
+```
+
+```
+Validated 142 gauges.
+  source_system breakdown:
+    HDE       : 98
+    WISKI     : 31
+    BULK_FILE : 13
+
+Written: data/hydrometric/register/gauge_registry.parquet
+```
+
+`build_gauge_registry()` adds three pipeline columns automatically:
+`active` (default `TRUE`), `backfill_done` (default `FALSE`), and `notes`.
+Set `active = FALSE` in your CSV to exclude tidal or decommissioned gauges
+before they reach the router.
+
+---
+
+## 3. Standard path: registry-driven backfill
+
+`run_backfill()` reads the registry, dispatches each active gauge to the
+correct source system, writes Parquet to Bronze, and logs every outcome.
+It runs gauges in parallel — one worker per available core by default.
+
+```{r backfill}
+run_backfill(
+  registry_path = file.path(root, "register", "gauge_registry.parquet"),
+  output_dir    = root,
+  start_date    = "2015-01-01",
+  end_date      = "2024-12-31",
+  register_path = file.path(root, "register", "hydrometric_data_register.csv"),
+  log_path      = "logs/backfill_2015_2024.csv"
+)
+```
+
+```
+Backfill started: 142 active gauges  |  8 workers  |  2015-01-01 to 2024-12-31
+[========================================] 142/142 complete
+
+  SUCCESS : 138 gauges  (97.2%)
+  EMPTY   :   2 gauges  (1.4%)   — no data returned for date range
+  FAILED  :   2 gauges  (1.4%)   — see logs/backfill_2015_2024.csv
+
+Store populated: data/hydrometric/bronze/
+```
+
+Written files follow the partitioned layout
+`bronze/<category>/<supplier>/<data_type>/<YYYY>/<dataset_id>.parquet`:
+
+```
+bronze/
+└── hydrometric/
+    ├── EA/
+    │   ├── Q/
+    │   │   ├── 2015/  EA_39001_Q_20250115.parquet
+    │   │   ├── 2016/  EA_39001_Q_20250115.parquet
+    │   │   └── ...
+    │   └── H/
+    │       └── ...
+    └── WISKI/
+        └── Q/
+            └── ...
+```
+
+### Inspect the log
+
+```{r inspect-log}
+library(data.table)
+
+log <- fread("logs/backfill_2015_2024.csv")
+
+# Failed gauges with their error messages
+log[status == "FAILED", .(gauge_id, error, elapsed_s)]
+
+# Slow fetches (>60 s)
+log[elapsed_s > 60, .(gauge_id, status, rows, elapsed_s)]
+```
+
+### Retry failed gauges
+
+```{r retry}
+run_backfill(
+  registry_path = file.path(root, "register", "gauge_registry.parquet"),
+  output_dir    = root,
+  start_date    = "2015-01-01",
+  end_date      = "2024-12-31",
+  register_path = file.path(root, "register", "hydrometric_data_register.csv"),
+  log_path      = "logs/backfill_2015_2024.csv",
+  failed_only   = TRUE       # only gauges logged as FAILED previously
+)
+```
+
+### Limit parallelism
+
+On shared servers or when the EA API is under load, reduce the worker count:
+
+```{r backfill-workers}
+run_backfill(
+  registry_path = file.path(root, "register", "gauge_registry.parquet"),
+  output_dir    = root,
+  start_date    = "2024-01-01",
+  end_date      = "2024-12-31",
+  register_path = file.path(root, "register", "hydrometric_data_register.csv"),
+  log_path      = "logs/backfill_2024.csv",
+  n_workers     = 4L
+)
+```
+
+---
+
+## 4. Alternative: ingest a single bulk export file
+
+Use `ingest_bulk_file()` for one-off historical loads from a file already
+on disk (e.g. a WISKI `.all` export or an EA bulk CSV), or for any gauge
+not covered by the registry.
+
+```{r ingest-bulk}
+ingest_bulk_file(
+  file_path     = "raw/EA_39001_flow_2000_2014.csv",
+  site_id       = "39001",
+  data_type     = "flow",
+  output_dir    = root,
+  register_path = file.path(root, "register", "hydrometric_data_register.csv"),
+  supplier      = "Environment Agency",
+  source_system = "BULK_FILE",
+  received_by   = "J.Payne",
+  notes         = "Pre-backfill historical load 2000–2014"
+)
+```
+
+```
+Parsed 525,960 rows from EA_39001_flow_2000_2014.csv
+Written: data/hydrometric/bronze/hydrometric/EA/Q/2000/EA_39001_Q_20260319.parquet
+         ...
+         data/hydrometric/bronze/hydrometric/EA/Q/2014/EA_39001_Q_20260319.parquet
+Register updated: data/hydrometric/register/hydrometric_data_register.csv
+```
+
+`ingest_bulk_file()` accepts `"csv"`, `"tsv"`, and `"fixed"` file formats
+and automatically maps common column name variants (`Date`, `DateTime`,
+`Value`, `Quality`, etc.) to the Bronze schema.
+
+---
+
+## 5. Optional: exploratory API download
+
+Before committing to a full backfill, use `download_hydrology()` to pull a
+short window into memory and inspect what the API returns.
+
+```{r download-explore}
+# Synchronous pull — data returned as a list of data.tables
+result <- download_hydrology(
+  parameters  = c("flow", "level"),
+  from_date   = "2023-01-01",
+  to_date     = "2023-03-31",
+  method      = "sync",
+  output      = "memory",
+  period_name = "15min",
+  wiski_ids   = "39001"
+)
+
+head(result$flow)
+result$summary
+```
+
+Use `method = "batch"` for large requests — the API queues the job
+asynchronously and `download_hydrology()` polls until it is ready:
+
+```{r download-batch}
+# Batch — suitable for multi-year or multi-gauge pulls
+download_hydrology(
+  parameters  = c("flow", "rainfall"),
+  from_date   = "2010-01-01",
+  to_date     = "2023-12-31",
+  method      = "batch",
+  output      = "disk",
+  out_dir     = "scratch/api_pull",
+  max_wait_s  = 900
+)
+```
+
+---
+
+## 6. Check the provenance register
+
+Every ingested dataset — whether from a backfill, a bulk file, or a direct
+API pull written to disk — creates a row in the register CSV:
+
+```{r register}
+register <- fread(
+  file.path(root, "register", "hydrometric_data_register.csv")
+)
+
+# All flow datasets ingested this year
+register[data_type == "Q" & date_received >= "2026-01-01",
+         .(dataset_id, site_id, time_period_start, time_period_end,
+           method_of_receipt, received_by)]
+```
+
+Key columns to know:
+
+| Column | Description |
+|---|---|
+| `dataset_id` | Unique Bronze ID — join key to every Parquet row |
+| `tier` | Always `"Bronze"` at this stage |
+| `supplier` | Data provider |
+| `site_id` | Gauge identifier |
+| `data_type` | `Q`, `H`, or `P` |
+| `time_period_start` / `_end` | Date range covered |
+| `temporal_resolution` | `"15min"` or `"daily"` |
+| `method_of_receipt` | `"API pull"`, `"bulk file"`, etc. |
+| `received_by` | Custodian who ran the ingest |
+| `file_path` | Full path to the Parquet on disk |
+
+---
+
+## Bronze schema
+
+All Parquet files written to Bronze share this schema:
+
+| Column | Type | Description |
+|---|---|---|
+| `timestamp` | POSIXct UTC | Observation datetime |
+| `value` | float64 | Observed value (m³/s, mm, m) as received |
+| `supplier_flag` | character | Quality code from supplier, or `NA` |
+| `dataset_id` | character | Bronze dataset ID; join key to register |
+| `site_id` | character | Supplier site identifier |
+| `data_type` | character | `Q`, `H`, `P`, `SM`, or `SWE` |
+
+No QC has been applied at this tier. `supplier_flag` carries whatever quality
+code came from the source system. QC happens at Silver.
