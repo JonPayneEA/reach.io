@@ -11,7 +11,7 @@ download_hydrology(
   method = c("sync", "batch"),
   output = c("memory", "disk"),
   out_dir = NULL,
-  period_name = "daily",
+  period_name = NULL,
   value_type = NULL,
   observation_type = NULL,
   wiski_ids = NULL,
