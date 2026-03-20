@@ -142,8 +142,19 @@ NULL
 #'   `"gold"` (default).
 #' @param saved_by Character. Name or username of the person saving the
 #'   curve. Recorded in the register. Defaults to `Sys.info()[["user"]]`.
+#' @param method_of_receipt Character. How the rating was obtained, e.g.
+#'   `"WISKI export"`, `"consultant report"`, `"manual entry"`. Recorded
+#'   in the register. Defaults to `NA`.
 #' @param notes Character. Optional free-text note appended to the register
 #'   row (e.g. `"Post-survey 2023 refit — upper limb revised"`).
+#'
+#' @section Provenance register:
+#' Every saved curve gets a unique `rating_id` of the form
+#' `{site_id}_RATING_{tier}_v{version}` (e.g. `510310_RATING_gold_v2`).
+#' The register also records a `status` column. When a new version is saved,
+#' any previously `"Active"` version for the same site and tier is
+#' automatically updated to `"Superseded"`, so `list_ratings()` always
+#' shows which version is currently in use.
 #'
 #' @return The path(s) to the written Parquet file(s), invisibly.
 #'
@@ -153,27 +164,31 @@ NULL
 #' \dontrun{
 #' # Bronze — as received from WISKI
 #' save_rating(rc_raw, root = "data/hydro", tier = "bronze",
-#'             saved_by = "J.Payne", notes = "WISKI export 2023-11-01")
+#'             saved_by = "J.Payne", method_of_receipt = "WISKI export",
+#'             notes = "WISKI export 2023-11-01")
 #'
 #' # Silver — after continuity check and correction
 #' rc_fixed <- fix_limb_continuity(rc_raw)
 #' save_rating(rc_fixed, root = "data/hydro", tier = "silver",
-#'             saved_by = "J.Payne", notes = "Continuity corrected")
+#'             saved_by = "J.Payne", method_of_receipt = "derived from bronze v1",
+#'             notes = "Continuity corrected")
 #'
-#' # Gold — formally approved
+#' # Gold — formally approved; previous Gold version auto-superseded
 #' save_rating(rc_fixed, root = "data/hydro", tier = "gold",
-#'             saved_by = "J.Payne", notes = "Approved by lead hydrologist")
+#'             saved_by = "J.Payne", method_of_receipt = "approved from silver v1",
+#'             notes = "Approved by lead hydrologist")
 #'
 #' # Save an entire time-varying set in one call
 #' save_rating(rating_set, root = "data/hydro", tier = "bronze",
-#'             saved_by = "J.Payne")
+#'             saved_by = "J.Payne", method_of_receipt = "WISKI export")
 #' }
 save_rating <- S7::new_generic("save_rating", "x")
 
 S7::method(save_rating, RatingCurve) <- function(x, root,
-                                                  tier     = "gold",
-                                                  saved_by = Sys.info()[["user"]],
-                                                  notes    = NA_character_) {
+                                                  tier               = "gold",
+                                                  saved_by           = Sys.info()[["user"]],
+                                                  method_of_receipt  = NA_character_,
+                                                  notes              = NA_character_) {
   if (is.na(x@station_id) || !nzchar(x@station_id)) {
     stop("`station_id` must be set on the RatingCurve before saving.")
   }
@@ -184,38 +199,52 @@ S7::method(save_rating, RatingCurve) <- function(x, root,
   dir.create(dirname(paths$register), recursive = TRUE, showWarnings = FALSE)
 
   version    <- .next_rating_version(x@station_id, paths$register, tier)
+  rating_id  <- sprintf("%s_RATING_%s_v%d", x@station_id, tier, version)
   limbs_flat <- .curve_to_dt(x, version)
 
   # Append to or create Parquet
   if (file.exists(paths$pq_file)) {
-    existing <- data.table::as.data.table(
-      arrow::read_parquet(paths$pq_file)
-    )
+    existing <- data.table::as.data.table(arrow::read_parquet(paths$pq_file))
     combined <- data.table::rbindlist(list(existing, limbs_flat), fill = TRUE)
   } else {
     combined <- limbs_flat
   }
   arrow::write_parquet(combined, paths$pq_file)
 
-  # Append governance row to register
+  # Build new register row
   reg_row <- data.table::data.table(
-    site_id    = x@station_id,
-    tier       = tier,
-    version    = as.integer(version),
-    valid_from = if (inherits(x@valid_from, "Date")) format(x@valid_from) else NA_character_,
-    valid_to   = if (inherits(x@valid_to,   "Date")) format(x@valid_to)   else NA_character_,
-    n_limbs    = nrow(x@limbs),
-    source     = if (is.na(x@source)) NA_character_ else x@source,
-    saved_by   = as.character(saved_by),
-    saved_at   = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-    file_path  = paths$pq_file,
-    notes      = as.character(notes)
+    rating_id         = rating_id,
+    site_id           = x@station_id,
+    tier              = tier,
+    status            = "Active",
+    version           = as.integer(version),
+    valid_from        = if (inherits(x@valid_from, "Date")) format(x@valid_from) else NA_character_,
+    valid_to          = if (inherits(x@valid_to,   "Date")) format(x@valid_to)   else NA_character_,
+    n_limbs           = nrow(x@limbs),
+    source            = if (is.na(x@source)) NA_character_ else x@source,
+    method_of_receipt = as.character(method_of_receipt),
+    saved_by          = as.character(saved_by),
+    saved_at          = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
+    file_path         = paths$pq_file,
+    notes             = as.character(notes)
   )
 
   if (file.exists(paths$register)) {
     existing_reg <- data.table::fread(paths$register, colClasses = "character",
                                       showProgress = FALSE)
-    updated_reg  <- data.table::rbindlist(list(existing_reg, reg_row), fill = TRUE)
+    # Supersede any previously Active version for this site + tier
+    if ("status" %in% names(existing_reg)) {
+      n_superseded <- sum(existing_reg$site_id == x@station_id &
+                          existing_reg$tier    == tier          &
+                          existing_reg$status  == "Active")
+      existing_reg[site_id == x@station_id & tier == tier & status == "Active",
+                   status := "Superseded"]
+      if (n_superseded > 0L) {
+        message(sprintf("  Superseded %d previously Active version(s) at [%s] for site '%s'.",
+                        n_superseded, tier, x@station_id))
+      }
+    }
+    updated_reg <- data.table::rbindlist(list(existing_reg, reg_row), fill = TRUE)
   } else {
     updated_reg <- reg_row
   }
@@ -229,11 +258,13 @@ S7::method(save_rating, RatingCurve) <- function(x, root,
 }
 
 S7::method(save_rating, RatingSet) <- function(x, root,
-                                                tier     = "gold",
-                                                saved_by = Sys.info()[["user"]],
-                                                notes    = NA_character_) {
+                                                tier              = "gold",
+                                                saved_by          = Sys.info()[["user"]],
+                                                method_of_receipt = NA_character_,
+                                                notes             = NA_character_) {
   paths <- vapply(x@curves, function(cv) {
-    save_rating(cv, root = root, tier = tier, saved_by = saved_by, notes = notes)
+    save_rating(cv, root = root, tier = tier, saved_by = saved_by,
+                method_of_receipt = method_of_receipt, notes = notes)
   }, character(1L))
   invisible(paths)
 }
@@ -362,9 +393,12 @@ list_ratings <- function(root, site_id = NULL, tier = NULL) {
     return(invisible(reg))
   }
 
-  # Print condensed summary
-  display <- reg[, .(site_id, tier, version, valid_from, valid_to,
-                     n_limbs, source, saved_by, saved_at, notes)]
+  # Print condensed summary — lead with identity and status columns
+  core_cols    <- c("rating_id", "site_id", "tier", "status", "version",
+                    "valid_from", "valid_to", "n_limbs", "source",
+                    "method_of_receipt", "saved_by", "saved_at", "notes")
+  present_cols <- intersect(core_cols, names(reg))
+  display      <- reg[, ..present_cols]
 
   cat(sprintf("<Rating register>  %d version(s)\n\n", nrow(display)))
   print(display)

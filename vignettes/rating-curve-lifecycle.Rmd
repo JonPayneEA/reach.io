@@ -151,10 +151,11 @@ root <- "data/hydro"   # your store root
 
 save_rating(
   rc,
-  root     = root,
-  tier     = "bronze",
-  saved_by = "J.Payne",
-  notes    = "WISKI export 2023-11-01, version 3.2"
+  root              = root,
+  tier              = "bronze",
+  saved_by          = "J.Payne",
+  method_of_receipt = "WISKI export",
+  notes             = "WISKI export 2023-11-01, version 3.2"
 )
 # Saved RatingCurve [bronze] v1 for site '510310'
 #   -> data/hydro/bronze/hydrometric/ratings/ratings.parquet
@@ -169,10 +170,11 @@ After review, save the QC-corrected curve to Silver.
 ```{r save-silver}
 save_rating(
   rc_fixed,
-  root     = root,
-  tier     = "silver",
-  saved_by = "J.Payne",
-  notes    = "Limb 2 C corrected for continuity with fix_limb_continuity()"
+  root              = root,
+  tier              = "silver",
+  saved_by          = "J.Payne",
+  method_of_receipt = "derived from bronze v1",
+  notes             = "Limb 2 C corrected for continuity with fix_limb_continuity()"
 )
 # Saved RatingCurve [silver] v1 for site '510310'
 ```
@@ -182,20 +184,23 @@ save_rating(
 ## 6. Approving to Gold
 
 Once formally signed off, promote to Gold. This is the version that
-`apply_rating()` will use in production.
+`apply_rating()` will use in production. Any previously Active Gold version
+for this site is automatically marked `Superseded`.
 
 ```{r save-gold}
 save_rating(
   rc_fixed,
-  root     = root,
-  tier     = "gold",
-  saved_by = "J.Payne",
-  notes    = "Approved by lead hydrologist 2023-11-15"
+  root              = root,
+  tier              = "gold",
+  saved_by          = "J.Payne",
+  method_of_receipt = "approved from silver v1",
+  notes             = "Approved by lead hydrologist 2023-11-15"
 )
 # Saved RatingCurve [gold] v1 for site '510310'
 ```
 
-The governance register now has one row per tier for this version:
+The governance register now has one row per tier, each with a unique
+`rating_id` and `status`:
 
 ```{r list}
 list_ratings(root, site_id = "510310")
@@ -204,10 +209,19 @@ list_ratings(root, site_id = "510310")
 ```
 <Rating register>  3 version(s)
 
-   site_id   tier version valid_from valid_to n_limbs source saved_by   saved_at
-1.  510310 bronze       1 2019-10-01       NA       3  WISKI  J.Payne 2023-11-01
-2.  510310 silver       1 2019-10-01       NA       3  WISKI  J.Payne 2023-11-01
-3.  510310   gold       1 2019-10-01       NA       3  WISKI  J.Payne 2023-11-15
+                rating_id  site_id   tier  status version valid_from valid_to  method_of_receipt saved_by
+1  510310_RATING_bronze_v1   510310 bronze  Active       1 2019-10-01       NA       WISKI export  J.Payne
+2  510310_RATING_silver_v1   510310 silver  Active       1 2019-10-01       NA   derived from ...  J.Payne
+3    510310_RATING_gold_v1   510310   gold  Active       1 2019-10-01       NA   approved from ...  J.Payne
+```
+
+When a second Gold version is saved later (e.g. after a resurvey), the
+previous row automatically flips to `Superseded`:
+
+```
+                rating_id  site_id   tier      status version  method_of_receipt
+1  510310_RATING_gold_v1   510310   gold  Superseded       1   approved from ...
+2  510310_RATING_gold_v2   510310   gold      Active       2   approved from ...
 ```
 
 ---
