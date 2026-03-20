@@ -169,9 +169,9 @@ NULL
 #' Level gauge data requires rating equations and is not currently
 #' handled. Convert level to flow before passing data to this function.
 #'
-#' @param x_data A [HydroData] or [PotEvapData] object, **or** a list of
+#' @param x_data A `HydroData` or `PotEvapData` object, **or** a list of
 #'   such objects, contributing to the X axis.
-#' @param y_data A [HydroData] or [PotEvapData] object, **or** a list of
+#' @param y_data A `HydroData` or `PotEvapData` object, **or** a list of
 #'   such objects, contributing to the Y axis.
 #' @param catchment_area_km2 Numeric scalar. Catchment area in km².
 #'   Required when any source is rainfall or potential evaporation (both

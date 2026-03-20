@@ -9,8 +9,7 @@ setup_hydro_store(
   categories = list(hydrometric = list(suppliers = c("EA", "WISKI", "NRFA"), data_types =
     c("Q", "H", "P")), radarH19 = list(suppliers = "MO", data_types = "P"), MOSES =
     list(suppliers = "MO", data_types = "SM")),
-  gold_purposes = list(hydrometric = list(Q = c("calibration", "FFA"), P =
-    c("catchment_average"))),
+  gold_purposes = list(hydrometric = list(Q = c("FFA"), P = c("catchment_average"))),
   verbose = TRUE
 )
 }
@@ -59,9 +58,16 @@ where category is one of \code{"hydrometric"}, \code{"radarH19"}, or \code{"MOSE
 │   ├── hydrometric/Q/  hydrometric/H/  hydrometric/P/
 │   ├── radarH19/P/
 │   └── MOSES/SM/
+├── bronze/
+│   └── hydrometric/
+│       └── ratings/
+├── silver/
+│   └── hydrometric/
+│       └── ratings/
 ├── gold/
 │   ├── hydrometric/
-│   │   ├── Q/calibration/  Q/FFA/
+│   │   ├── ratings/
+│   │   ├── Q/FFA/
 │   │   └── P/catchment_average/
 │   ├── radarH19/P/
 │   └── MOSES/SM/
