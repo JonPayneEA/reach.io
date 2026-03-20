@@ -36,7 +36,9 @@ NULL
 
 #' @noRd
 .unit_divisor <- function(output_units) {
-  switch(output_units, m3 = 1, Ml = 1e3, Gl = 1e6)
+  switch(output_units, m3 = 1, Ml = 1e3, Gl = 1e6,
+    stop(sprintf("Unknown output_units '%s'. Must be one of: m3, Ml, Gl.", output_units))
+  )
 }
 
 # Cumulative sum that treats NA as 0 contribution (no data = no volume added)

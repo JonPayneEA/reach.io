@@ -54,6 +54,19 @@
 
 # S7 generics (print, as_data_table, as_long) are defined in classes.R
 #' @import S7
+#'
+## usethis namespace: start
+#' @importFrom data.table :=
+#' @importFrom data.table .BY
+#' @importFrom data.table .EACHI
+#' @importFrom data.table .GRP
+#' @importFrom data.table .I
+#' @importFrom data.table .N
+#' @importFrom data.table .NGRP
+#' @importFrom data.table .SD
+#' @importFrom data.table data.table
+## usethis namespace: end
+NULL
 
 # -- Package-level constants --------------------------------------------------
 

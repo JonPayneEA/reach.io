@@ -210,6 +210,16 @@ RatingCurve <- S7::new_class(
       return("`limbs$doubtful` must be logical.")
     }
 
+    if (any(!is.finite(dt$C) | !is.finite(dt$a) | !is.finite(dt$b))) {
+      return("`limbs` columns C, a, and b must all be finite (no NA, NaN, or Inf).")
+    }
+    if (any(dt$C <= 0)) {
+      return("`limbs$C` must be positive (> 0).")
+    }
+    if (any(dt$b <= 0)) {
+      return("`limbs$b` must be positive (> 0).")
+    }
+
     if (any(dt$lower >= dt$upper, na.rm = TRUE)) {
       return("Each limb's `lower` must be strictly less than its `upper`.")
     }
@@ -390,7 +400,9 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
                from_date = level@from_date,
                to_date   = level@to_date)
   } else {
-    stop("`rating` must be a RatingCurve or RatingSet.")
+    Flow_15min(readings  = dt,
+               from_date = level@from_date,
+               to_date   = level@to_date)
   }
 }
 
