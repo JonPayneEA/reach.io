@@ -448,10 +448,9 @@ PotEvapData <- S7::new_class(
     constructor = function(readings,
                            source_name = NA_character_,
                            from_date   = NA_character_,
-                           to_date     = NA_character_,
-                           ...) {
+                           to_date     = NA_character_) {
       dt <- data.table::as.data.table(readings)
-      base_args <- list(
+      S7::new_object(
         S7::S7_object(),
         readings    = dt,
         period_name = period_name_fixed,
@@ -461,8 +460,6 @@ PotEvapData <- S7::new_class(
         n_rows      = nrow(dt),
         created_at  = Sys.time()
       )
-      dots <- list(...)
-      do.call(S7::new_object, c(base_args, dots))
     }
   )
 }
