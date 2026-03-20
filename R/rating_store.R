@@ -29,6 +29,13 @@
 #                doubtful   lgl   Extrapolation flag
 #                source     chr   Origin label
 #
+#              Register-only provenance fields:
+#                derivation_method chr  How the rating was developed:
+#                                        "spot gaugings", "hydraulic model",
+#                                        "statistical model", "mixed", or
+#                                        free text
+#                model_or_project  chr  Model name, project, or team (free text)
+#
 # Flode Module: flode.io
 # Author:      JP
 # Created:     2026-03-19
@@ -145,6 +152,15 @@ NULL
 #' @param method_of_receipt Character. How the rating was obtained, e.g.
 #'   `"WISKI export"`, `"consultant report"`, `"manual entry"`. Recorded
 #'   in the register. Defaults to `NA`.
+#' @param derivation_method Character. How the rating was developed.
+#'   Suggested values: `"spot gaugings"` (field measurements only),
+#'   `"hydraulic model"` (e.g. HEC-RAS, ISIS, TUFLOW), `"statistical model"`,
+#'   or `"mixed"` (gaugings calibrated to a model). Free text is also
+#'   accepted. Defaults to `NA`.
+#' @param model_or_project Character. Name of the hydraulic model, statistical
+#'   framework, project, or team that produced the rating (free text).
+#'   Useful when the same site has ratings from different sources over time.
+#'   Defaults to `NA`.
 #' @param notes Character. Optional free-text note appended to the register
 #'   row (e.g. `"Post-survey 2023 refit — upper limb revised"`).
 #'
@@ -165,22 +181,34 @@ NULL
 #' # Bronze — as received from WISKI
 #' save_rating(rc_raw, root = "data/hydro", tier = "bronze",
 #'             saved_by = "J.Payne", method_of_receipt = "WISKI export",
+#'             derivation_method = "spot gaugings",
 #'             notes = "WISKI export 2023-11-01")
 #'
 #' # Silver — after continuity check and correction
 #' rc_fixed <- fix_limb_continuity(rc_raw)
 #' save_rating(rc_fixed, root = "data/hydro", tier = "silver",
 #'             saved_by = "J.Payne", method_of_receipt = "derived from bronze v1",
+#'             derivation_method = "spot gaugings",
 #'             notes = "Continuity corrected")
 #'
-#' # Gold — formally approved; previous Gold version auto-superseded
+#' # Gold — modelled rating from a hydraulic model project
+#' save_rating(rc_model, root = "data/hydro", tier = "gold",
+#'             saved_by = "J.Payne", method_of_receipt = "ISIS 2D model output",
+#'             derivation_method = "hydraulic model",
+#'             model_or_project  = "TUFLOW_Phase2_2023",
+#'             notes = "Approved by lead hydrologist")
+#'
+#' # Gold — mixed: field gaugings calibrated against hydraulic model
 #' save_rating(rc_fixed, root = "data/hydro", tier = "gold",
 #'             saved_by = "J.Payne", method_of_receipt = "approved from silver v1",
+#'             derivation_method = "mixed",
+#'             model_or_project  = "Flood Risk Assessment 2023, Hydrology Team",
 #'             notes = "Approved by lead hydrologist")
 #'
 #' # Save an entire time-varying set in one call
 #' save_rating(rating_set, root = "data/hydro", tier = "bronze",
-#'             saved_by = "J.Payne", method_of_receipt = "WISKI export")
+#'             saved_by = "J.Payne", method_of_receipt = "WISKI export",
+#'             derivation_method = "spot gaugings")
 #' }
 save_rating <- S7::new_generic("save_rating", "x")
 
@@ -188,6 +216,8 @@ S7::method(save_rating, RatingCurve) <- function(x, root,
                                                   tier               = "gold",
                                                   saved_by           = Sys.info()[["user"]],
                                                   method_of_receipt  = NA_character_,
+                                                  derivation_method  = NA_character_,
+                                                  model_or_project   = NA_character_,
                                                   notes              = NA_character_) {
   if (is.na(x@station_id) || !nzchar(x@station_id)) {
     stop("`station_id` must be set on the RatingCurve before saving.")
@@ -223,6 +253,8 @@ S7::method(save_rating, RatingCurve) <- function(x, root,
     n_limbs           = nrow(x@limbs),
     source            = if (is.na(x@source)) NA_character_ else x@source,
     method_of_receipt = as.character(method_of_receipt),
+    derivation_method = as.character(derivation_method),
+    model_or_project  = as.character(model_or_project),
     saved_by          = as.character(saved_by),
     saved_at          = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
     file_path         = paths$pq_file,
@@ -261,10 +293,15 @@ S7::method(save_rating, RatingSet) <- function(x, root,
                                                 tier              = "gold",
                                                 saved_by          = Sys.info()[["user"]],
                                                 method_of_receipt = NA_character_,
+                                                derivation_method = NA_character_,
+                                                model_or_project  = NA_character_,
                                                 notes             = NA_character_) {
   paths <- vapply(x@curves, function(cv) {
     save_rating(cv, root = root, tier = tier, saved_by = saved_by,
-                method_of_receipt = method_of_receipt, notes = notes)
+                method_of_receipt = method_of_receipt,
+                derivation_method = derivation_method,
+                model_or_project  = model_or_project,
+                notes             = notes)
   }, character(1L))
   invisible(paths)
 }
@@ -396,7 +433,8 @@ list_ratings <- function(root, site_id = NULL, tier = NULL) {
   # Print condensed summary — lead with identity and status columns
   core_cols    <- c("rating_id", "site_id", "tier", "status", "version",
                     "valid_from", "valid_to", "n_limbs", "source",
-                    "method_of_receipt", "saved_by", "saved_at", "notes")
+                    "method_of_receipt", "derivation_method", "model_or_project",
+                    "saved_by", "saved_at", "notes")
   present_cols <- intersect(core_cols, names(reg))
   display      <- reg[, ..present_cols]
 

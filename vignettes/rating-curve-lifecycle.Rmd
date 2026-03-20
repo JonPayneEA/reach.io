@@ -30,6 +30,20 @@ resurveys are carried out. reach.io tracks this through:
 - **`RatingSet`** — an ordered collection of `RatingCurve` objects covering
   non-overlapping periods.
 
+The provenance register captures how each rating was derived via the
+`derivation_method` field:
+
+| Value | Meaning |
+|---|---|
+| `"spot gaugings"` | Fitted entirely from field velocity-area measurements |
+| `"hydraulic model"` | Derived from a hydraulic model (HEC-RAS, ISIS, TUFLOW, etc.) |
+| `"statistical model"` | Regression or statistical extrapolation |
+| `"mixed"` | Gaugings used to calibrate or constrain a model |
+
+The optional `model_or_project` field records the specific model, project, or
+team that produced the rating (e.g. `"TUFLOW_Phase2_2023"`,
+`"Flood Risk Study — Hydrology Team"`).
+
 Storage follows the same Bronze → Silver → Gold medallion tier model used for
 observation data.
 
@@ -155,6 +169,7 @@ save_rating(
   tier              = "bronze",
   saved_by          = "J.Payne",
   method_of_receipt = "WISKI export",
+  derivation_method = "spot gaugings",
   notes             = "WISKI export 2023-11-01, version 3.2"
 )
 # Saved RatingCurve [bronze] v1 for site '510310'
@@ -174,6 +189,7 @@ save_rating(
   tier              = "silver",
   saved_by          = "J.Payne",
   method_of_receipt = "derived from bronze v1",
+  derivation_method = "spot gaugings",
   notes             = "Limb 2 C corrected for continuity with fix_limb_continuity()"
 )
 # Saved RatingCurve [silver] v1 for site '510310'
@@ -194,9 +210,26 @@ save_rating(
   tier              = "gold",
   saved_by          = "J.Payne",
   method_of_receipt = "approved from silver v1",
+  derivation_method = "spot gaugings",
   notes             = "Approved by lead hydrologist 2023-11-15"
 )
 # Saved RatingCurve [gold] v1 for site '510310'
+```
+
+If the rating was produced by a hydraulic model rather than field gaugings,
+record `derivation_method` and `model_or_project` accordingly:
+
+```{r save-gold-model}
+save_rating(
+  rc_model,
+  root              = root,
+  tier              = "gold",
+  saved_by          = "J.Payne",
+  method_of_receipt = "ISIS 2D model output, Phase 2 study",
+  derivation_method = "hydraulic model",
+  model_or_project  = "TUFLOW_Phase2_2023",
+  notes             = "Approved by lead hydrologist 2023-11-15"
+)
 ```
 
 The governance register now has one row per tier, each with a unique
@@ -209,10 +242,10 @@ list_ratings(root, site_id = "510310")
 ```
 <Rating register>  3 version(s)
 
-                rating_id  site_id   tier  status version valid_from valid_to  method_of_receipt saved_by
-1  510310_RATING_bronze_v1   510310 bronze  Active       1 2019-10-01       NA       WISKI export  J.Payne
-2  510310_RATING_silver_v1   510310 silver  Active       1 2019-10-01       NA   derived from ...  J.Payne
-3    510310_RATING_gold_v1   510310   gold  Active       1 2019-10-01       NA   approved from ...  J.Payne
+                rating_id  site_id   tier  status version valid_from valid_to  method_of_receipt derivation_method model_or_project saved_by
+1  510310_RATING_bronze_v1   510310 bronze  Active       1 2019-10-01       NA       WISKI export    spot gaugings             <NA>  J.Payne
+2  510310_RATING_silver_v1   510310 silver  Active       1 2019-10-01       NA   derived from ...    spot gaugings             <NA>  J.Payne
+3    510310_RATING_gold_v1   510310   gold  Active       1 2019-10-01       NA   approved from ...   spot gaugings             <NA>  J.Payne
 ```
 
 When a second Gold version is saved later (e.g. after a resurvey), the
