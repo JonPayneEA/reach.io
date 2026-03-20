@@ -40,7 +40,8 @@
 #' │   └── MOSES/SM/
 #' ├── gold/
 #' │   ├── hydrometric/
-#' │   │   ├── Q/calibration/  Q/FFA/
+#' │   │   ├── ratings/
+#' │   │   ├── Q/FFA/
 #' │   │   └── P/catchment_average/
 #' │   ├── radarH19/P/
 #' │   └── MOSES/SM/
@@ -102,7 +103,7 @@ setup_hydro_store <- function(
     ),
     gold_purposes = list(
       hydrometric = list(
-        Q = c("calibration", "FFA"),
+        Q = c("FFA"),
         P = c("catchment_average")
       )
     ),
@@ -147,6 +148,9 @@ setup_hydro_store <- function(
       }
     }
   }
+
+  # Ratings — single cross-parameter directory under gold/hydrometric/
+  dirs <- c(dirs, file.path(root, "gold", "hydrometric", "ratings"))
 
   # Register — shared across all categories
   dirs <- c(dirs, file.path(root, "register"))

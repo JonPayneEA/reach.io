@@ -4,9 +4,10 @@
 #              and RatingSet objects under the governance
 #              directory structure.
 #
-#              Storage location (Gold tier, calibration):
-#                <root>/gold/hydrometric/Q/calibration/
-#                  <site_id>_ratings.parquet
+#              Storage location (Gold tier, ratings):
+#                <root>/gold/hydrometric/ratings/
+#                  ratings.parquet
+#                  (single file; all sites and versions stacked)
 #
 #              Governance manifest:
 #                <root>/register/rating_register.csv
@@ -43,12 +44,12 @@ NULL
 # =============================================================================
 
 #' @noRd
-.rating_paths <- function(root, site_id) {
+.rating_paths <- function(root) {
+  ratings_dir <- file.path(root, "gold", "hydrometric", "ratings")
   list(
-    calib_dir = file.path(root, "gold", "hydrometric", "Q", "calibration"),
-    pq_file   = file.path(root, "gold", "hydrometric", "Q", "calibration",
-                          paste0(site_id, "_ratings.parquet")),
-    register  = file.path(root, "register", "rating_register.csv")
+    ratings_dir = ratings_dir,
+    pq_file     = file.path(ratings_dir, "ratings.parquet"),
+    register    = file.path(root, "register", "rating_register.csv")
   )
 }
 
@@ -107,16 +108,17 @@ NULL
 
 #' Save a rating curve to the Gold calibration store
 #'
-#' Writes a [RatingCurve] (or every curve in a [RatingSet]) to the
-#' site's Parquet file under `<root>/gold/hydrometric/Q/calibration/`
-#' and appends a governance row to `<root>/register/rating_register.csv`.
+#' Writes a [RatingCurve] (or every curve in a [RatingSet]) into the
+#' shared `<root>/gold/hydrometric/ratings/ratings.parquet` file and
+#' appends a governance row to `<root>/register/rating_register.csv`.
 #'
 #' Each call to `save_rating()` with a [RatingCurve] is assigned the next
 #' available version number for that `station_id`. Existing versions are
-#' never overwritten — the Parquet accumulates all versions for the site,
-#' differentiated by `version` and `valid_from` / `valid_to`.
+#' never overwritten — the single Parquet accumulates all sites and all
+#' versions, differentiated by `site_id`, `version`, and `valid_from` /
+#' `valid_to`.
 #'
-#' The calibration directory and register are created automatically if they
+#' The ratings directory and register are created automatically if they
 #' do not yet exist (no need to call [setup_hydro_store()] first).
 #'
 #' @param x A [RatingCurve] or [RatingSet]. The curve's `station_id` slot
@@ -151,8 +153,8 @@ S7::method(save_rating, RatingCurve) <- function(x, root,
     stop("`station_id` must be set on the RatingCurve before saving.")
   }
 
-  paths <- .rating_paths(root, x@station_id)
-  dir.create(paths$calib_dir, recursive = TRUE, showWarnings = FALSE)
+  paths <- .rating_paths(root)
+  dir.create(paths$ratings_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(dirname(paths$register), recursive = TRUE, showWarnings = FALSE)
 
   version    <- .next_rating_version(x@station_id, paths$register)
@@ -215,9 +217,9 @@ S7::method(save_rating, RatingSet) <- function(x, root,
 
 #' Load rating curve(s) from the Gold calibration store
 #'
-#' Reads the site's Parquet file and reconstructs either one [RatingCurve]
-#' (when `version` is specified) or a [RatingSet] containing every stored
-#' version (default).
+#' Reads the shared ratings Parquet, filters to `site_id`, and reconstructs
+#' either one [RatingCurve] (when `version` is specified) or a [RatingSet]
+#' containing every stored version for that site (default).
 #'
 #' @param site_id Character. Station identifier (must match the `station_id`
 #'   used when the curve was saved).
@@ -242,16 +244,21 @@ S7::method(save_rating, RatingSet) <- function(x, root,
 #' check_limb_continuity(rc3)
 #' }
 load_rating <- function(site_id, root, version = NULL) {
-  paths <- .rating_paths(root, site_id)
+  paths <- .rating_paths(root)
 
   if (!file.exists(paths$pq_file)) {
     stop(sprintf(
-      "No rating file found for site '%s'.\n  Expected: %s",
-      site_id, paths$pq_file
+      "No ratings Parquet found.\n  Expected: %s",
+      paths$pq_file
     ))
   }
 
   dt <- data.table::as.data.table(arrow::read_parquet(paths$pq_file))
+  dt <- dt[dt$site_id == site_id]
+
+  if (nrow(dt) == 0L) {
+    stop(sprintf("No ratings found for site '%s'.", site_id))
+  }
 
   if (!is.null(version)) {
     v  <- as.integer(version)
