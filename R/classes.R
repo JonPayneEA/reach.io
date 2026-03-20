@@ -637,21 +637,8 @@ S7::method(disagg_to_15min, PotEvap_Daily) <- function(x) {
 
 # -- Generics and methods -----------------------------------------------------
 
-#' Extract the readings data.table from a PotEvapData object
-#'
-#' Returns the inner `data.table` from any `PotEvapData`-derived object.
-#'
-#' @param x A [PotEvap_Daily], [PotEvap_Hourly], or [PotEvap_15min] object.
-#'
-#' @return A `data.table` of readings.
-#'
+#' @rdname as_data_table
 #' @export
-#'
-#' @examples
-#' \dontrun{
-#' pe <- PotEvap_Daily(readings = daily_dt, source_name = "MORECS")
-#' dt <- as_data_table(pe)
-#' }
 S7::method(as_data_table, PotEvapData) <- function(x) x@readings
 
 
