@@ -158,7 +158,7 @@ setup_hydro_store <- function(
   # Ratings — cross-parameter directory at each tier under hydrometric/
   # (ratings don't belong under a supplier or data-type subdir)
   for (tier in c("bronze", "silver", "gold")) {
-    dirs <- c(dirs, file.path(root, tier, "hydrometric", "ratings"))
+    dirs <- c(dirs, file.path(root, tier, "hydrometric", supplier, "ratings"))
   }
 
   # Register — shared across all categories
