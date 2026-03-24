@@ -200,7 +200,7 @@ find_stations <- function(names     = NULL,
     default = pd_raw   # keep raw value for any other period
   )]
 
-  dt[parameter %in% c("rainfall", "flow", "level")]
+  return(dt[parameter %in% c("rainfall", "flow", "level")])
 }
 
 
@@ -248,7 +248,7 @@ find_stations <- function(names     = NULL,
 get_measures <- function(parameter   = c("rainfall", "flow", "level"),
                          period_name = NULL,
                          value_type  = NULL,
-                         limit       = 2000) {
+                         limit       = 5000) {
 
   parameter <- match.arg(parameter)
   config    <- PARAMETER_CONFIG[[parameter]]
@@ -282,6 +282,6 @@ get_measures <- function(parameter   = c("rainfall", "flow", "level"),
   }
 
   dt <- data.table::as.data.table(items)
-  dt[, parameter := parameter]
-  dt
+  dt[, parameter := parameter][]
+  return(dt)
 }

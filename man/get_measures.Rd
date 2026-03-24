@@ -8,7 +8,7 @@ get_measures(
   parameter = c("rainfall", "flow", "level"),
   period_name = NULL,
   value_type = NULL,
-  limit = 2000
+  limit = 5000
 )
 }
 \arguments{
