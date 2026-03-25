@@ -31,6 +31,17 @@
 #' with a Delta write via `sparklyr` or the Databricks REST API without
 #' changing any other logic.
 #'
+#' @section Windows file-locking:
+#' Arrow memory-maps Parquet files on Windows when reading, keeping a file
+#' handle open. Writing back to the same path while that map is live causes
+#' **Windows error 1224** ("The requested operation cannot be performed on a
+#' file with a user-mapped section open"). This function avoids the issue by
+#' writing to a temporary `.tmp` file and then using `file.rename()` to
+#' atomically replace the target — the rename only happens after the read map
+#' is released. If you observe the error despite this, check that no other
+#' process (e.g. an open R session or file explorer preview) is holding the
+#' registry file open.
+#'
 #' @param input_csv Character. Path to the raw gauge list CSV. Must contain
 #'   columns: `gauge_id`, `source_system`, `data_type`, `category`,
 #'   `catchment`, `ea_site_ref`.
