@@ -31,6 +31,17 @@
 #' with a Delta write via `sparklyr` or the Databricks REST API without
 #' changing any other logic.
 #'
+#' @section Windows file-locking:
+#' Arrow memory-maps Parquet files on Windows when reading, keeping a file
+#' handle open. Writing back to the same path while that map is live causes
+#' **Windows error 1224** ("The requested operation cannot be performed on a
+#' file with a user-mapped section open"). This function avoids the issue by
+#' writing to a temporary `.tmp` file and then using `file.rename()` to
+#' atomically replace the target — the rename only happens after the read map
+#' is released. If you observe the error despite this, check that no other
+#' process (e.g. an open R session or file explorer preview) is holding the
+#' registry file open.
+#'
 #' @param input_csv Character. Path to the raw gauge list CSV. Must contain
 #'   columns: `gauge_id`, `source_system`, `data_type`, `category`,
 #'   `catchment`, `ea_site_ref`.
@@ -140,8 +151,13 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
   }
 
   # -- Write as Parquet (Delta-compatible) ------------------------------------
+  # Write to a temp file then rename so that on Windows the read_parquet()
+  # memory-map above is fully released before we touch the target path.
+  # file.rename() is atomic on both Windows and POSIX.
   dir.create(output_path, recursive = TRUE, showWarnings = FALSE)
-  arrow::write_parquet(registry_dt, registry_path)
+  tmp_path <- paste0(registry_path, ".tmp")
+  arrow::write_parquet(registry_dt, tmp_path)
+  file.rename(tmp_path, registry_path)
 
   invisible(registry_dt)
 }

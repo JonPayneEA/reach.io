@@ -29,8 +29,12 @@ The registry \code{data.table} invisibly (full merged registry when
 Reads a raw gauge list CSV, validates it, adds pipeline metadata columns,
 and writes the result as a Parquet file that every other pipeline tool reads
 from. Must be run before any backfill starts.
+<<<<<<< HEAD
 }
 \details{
+=======
+
+>>>>>>> f0fd916ed76171caed831b9cb95b73edf4846bbe
 By default (\code{overwrite = TRUE}) the existing registry is replaced. Set
 \code{overwrite = FALSE} to merge new gauges into an existing registry: gauges
 already present (matched on \code{gauge_id}) are left untouched, and only new
@@ -41,6 +45,19 @@ In a live Databricks environment the \code{write_parquet()} call can be replaced
 with a Delta write via \code{sparklyr} or the Databricks REST API without
 changing any other logic.
 }
+\section{Windows file-locking}{
+
+Arrow memory-maps Parquet files on Windows when reading, keeping a file
+handle open. Writing back to the same path while that map is live causes
+\strong{Windows error 1224} ("The requested operation cannot be performed on a
+file with a user-mapped section open"). This function avoids the issue by
+writing to a temporary \code{.tmp} file and then using \code{file.rename()} to
+atomically replace the target — the rename only happens after the read map
+is released. If you observe the error despite this, check that no other
+process (e.g. an open R session or file explorer preview) is holding the
+registry file open.
+}
+
 \examples{
 \dontrun{
 # First-time build

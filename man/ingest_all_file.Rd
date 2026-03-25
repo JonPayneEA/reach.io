@@ -35,11 +35,21 @@ re-parsing.}
 \code{gauge_registry.parquet} file. When supplied, every station discovered
 in the \code{.all} file is added to the registry if not already present, with
 \code{source_system = "WISKI_ALL"}, \code{live = FALSE}, and \code{backfill_done = TRUE}.
+<<<<<<< HEAD
 The registry is created if the path does not yet exist.}
 }
 \value{
 A \code{data.table} log with columns \code{gauge_id}, \code{dataset_id}, \code{rows},
 and \code{out_file}, one row per station written. Returned invisibly.
+=======
+The registry is created if the path does not yet exist. Writes use a
+write-to-temp-then-rename pattern to avoid Windows error 1224 (Arrow
+memory-maps the file on read, blocking a direct overwrite on Windows).}
+}
+\value{
+A \code{data.table} log with columns \code{gauge_id}, \code{dataset_id}, \code{rows}, and
+\code{out_file}, one row per station written. Returned invisibly.
+>>>>>>> f0fd916ed76171caed831b9cb95b73edf4846bbe
 }
 \description{
 Parses a WISKI/Kisters \code{.all} export file and writes per-station data to
@@ -86,7 +96,7 @@ log_dt <- ingest_all_file(
 )
 
 # Ingest multiple files covering different periods
-for (f in list.files("data/wiski", pattern = "\\\\.all$", full.names = TRUE)) {
+for (f in list.files("data/wiski", pattern = "\\.all$", full.names = TRUE)) {
   ingest_all_file(f, output_dir = "data/fw_bronze/flow")
 }
 
