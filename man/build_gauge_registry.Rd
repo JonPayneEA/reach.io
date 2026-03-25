@@ -4,7 +4,7 @@
 \alias{build_gauge_registry}
 \title{Build the master gauge registry Parquet table}
 \usage{
-build_gauge_registry(input_csv, output_path)
+build_gauge_registry(input_csv, output_path, overwrite = TRUE)
 }
 \arguments{
 \item{input_csv}{Character. Path to the raw gauge list CSV. Must contain
@@ -15,27 +15,57 @@ columns: \code{gauge_id}, \code{source_system}, \code{data_type}, \code{category
 \item{output_path}{Character. Directory to write the registry Parquet file
 into. Created if it does not exist. The file is written as
 \code{gauge_registry.parquet} inside this directory.}
+
+\item{overwrite}{Logical. If \code{TRUE} (default), replace any existing
+registry. If \code{FALSE}, merge new gauges into the existing registry,
+preserving metadata for gauges already registered.}
 }
 \value{
-The registry \code{data.table} invisibly. The primary side-effect is
-writing \verb{<output_path>/gauge_registry.parquet} to disk.
+The registry \code{data.table} invisibly (full merged registry when
+\code{overwrite = FALSE}). The primary side-effect is writing
+\verb{<output_path>/gauge_registry.parquet} to disk.
 }
 \description{
-One-off setup tool that reads a raw gauge list CSV supplied by the EA,
-validates it, adds pipeline metadata columns, and writes the result as a
-Parquet file that every other pipeline tool reads from. Must be run before
-any backfill starts.
-}
-\details{
+Reads a raw gauge list CSV, validates it, adds pipeline metadata columns,
+and writes the result as a Parquet file that every other pipeline tool reads
+from. Must be run before any backfill starts.
+
+By default (\code{overwrite = TRUE}) the existing registry is replaced. Set
+\code{overwrite = FALSE} to merge new gauges into an existing registry: gauges
+already present (matched on \code{gauge_id}) are left untouched, and only new
+rows are appended. This lets you update the gauge list CSV without losing
+\code{backfill_done} status or other metadata already written for existing gauges.
+
 In a live Databricks environment the \code{write_parquet()} call can be replaced
 with a Delta write via \code{sparklyr} or the Databricks REST API without
 changing any other logic.
 }
+\section{Windows file-locking}{
+
+Arrow memory-maps Parquet files on Windows when reading, keeping a file
+handle open. Writing back to the same path while that map is live causes
+\strong{Windows error 1224} ("The requested operation cannot be performed on a
+file with a user-mapped section open"). This function avoids the issue by
+writing to a temporary \code{.tmp} file and then using \code{file.rename()} to
+atomically replace the target — the rename only happens after the read map
+is released. If you observe the error despite this, check that no other
+process (e.g. an open R session or file explorer preview) is holding the
+registry file open.
+}
+
 \examples{
 \dontrun{
+# First-time build
 registry_dt <- build_gauge_registry(
   input_csv   = "data/ea_gauge_list.csv",
   output_path = "data/fw_bronze/gauge_registry"
+)
+
+# Add new gauges without overwriting existing metadata
+registry_dt <- build_gauge_registry(
+  input_csv   = "data/ea_gauge_list_v2.csv",
+  output_path = "data/fw_bronze/gauge_registry",
+  overwrite   = FALSE
 )
 }
 }

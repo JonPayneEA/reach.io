@@ -317,7 +317,9 @@
 #'   `gauge_registry.parquet` file. When supplied, every station discovered
 #'   in the `.all` file is added to the registry if not already present, with
 #'   `source_system = "WISKI_ALL"`, `live = FALSE`, and `backfill_done = TRUE`.
-#'   The registry is created if the path does not yet exist.
+#'   The registry is created if the path does not yet exist. Writes use a
+#'   write-to-temp-then-rename pattern to avoid Windows error 1224 (Arrow
+#'   memory-maps the file on read, blocking a direct overwrite on Windows).
 #'
 #' @return A `data.table` log with columns `gauge_id`, `dataset_id`, `rows`,
 #'   and `out_file`, one row per station written. Returned invisibly.
@@ -458,7 +460,9 @@ ingest_all_file <- function(path,
     ))
   }
 
-  arrow::write_parquet(registry, registry_path)
+  tmp_path <- paste0(registry_path, ".tmp")
+  arrow::write_parquet(registry, tmp_path)
+  file.rename(tmp_path, registry_path)
   invisible(NULL)
 }
 
