@@ -224,7 +224,7 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
 #'
 #' Reads the `source_system` field of a one-row registry `data.table` and
 #' dispatches to [fetch_from_hde()], [fetch_from_wiski()],
-#' [fetch_from_bulk_file()], or [fetch_from_wiski_all()]. Fetch errors are
+#' or [fetch_from_wiski_all()]. Fetch errors are
 #' caught and returned as `NULL` with a warning so the caller can log and
 #' continue.
 #'

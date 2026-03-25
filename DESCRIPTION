@@ -8,7 +8,7 @@ Description: A hydrometric data pipeline toolkit for the Environment Agency
     Provides tools to query and download rainfall, flow, and water level data
     via synchronous and batch methods; build and maintain a master gauge
     registry; route gauge fetches to the correct source system (HDE, WISKI,
-    or bulk file); ingest historical bulk files into partitioned Parquet
+    or WISKI .all exports); ingest historical data into partitioned Parquet
     (Bronze tier); and orchestrate parallelised backfills across thousands
     of gauges with per-gauge logging and failure recovery.
 License: MIT + file LICENSE

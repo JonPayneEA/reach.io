@@ -280,8 +280,8 @@ download_hydrology(
 
 ## 6. Check the provenance register
 
-Every ingested dataset — whether from a backfill, a bulk file, or a direct
-API pull written to disk — creates a row in the register CSV:
+Every ingested dataset — whether from a backfill, a WISKI .all import, or a
+direct API pull written to disk — creates a row in the register CSV:
 
 ```{r register}
 register <- fread(

@@ -4,7 +4,7 @@
 
 **reach.io** is an R package providing hydrometric data pipeline tools for the
 [Environment Agency Hydrology API](https://environment.data.gov.uk/hydrology/doc/reference).
-It covers the full journey from raw API/bulk-file sources through to Bronze-tier
+It covers the full journey from raw API and WISKI .all sources through to Bronze-tier
 Parquet storage, following the Hydrometric Data Framework v1.3 and R Tool
 Governance standards.
 
@@ -71,8 +71,8 @@ Bronze paths follow: `bronze/<CATEGORY>/<SUPPLIER>/<DATA_TYPE>/<YYYY>/<dataset_i
 
 Data is routed from three source systems:
 - **HDE** — EA Hydrology API (primary)
-- **WISKI** — Older EA system for some gauges
-- **Bulk file** — Historical bulk downloads
+- **WISKI** — KiWIS REST API (draft — not yet operational)
+- **WISKI_ALL** — WISKI .all export files (default bulk import method)
 
 The `router.R` functions (`route_gauge()`, `fetch_from_hde()`, etc.) dispatch
 to the correct source.
