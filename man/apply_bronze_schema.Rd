@@ -34,8 +34,8 @@ Default \code{"value"}.}
 flag column in \code{dt}. NULL produces NA for all rows.}
 
 \item{period}{Character or NA. Temporal resolution of the series, e.g.
-\code{"15min"}, \code{"hourly"}, \code{"daily"}. Stored verbatim in the \code{period}
-column. Default \code{NA_character_}.}
+\code{"15min"}, \code{"hourly"}, \code{"daily"}. Stored verbatim in the \code{period} column.
+Default \code{NA_character_}.}
 }
 \value{
 A \code{data.table} conforming to the Bronze schema.
@@ -60,10 +60,8 @@ sub-daily series separately.}
 \item{\code{dataset_id}}{character. Bronze dataset ID. Join key to register.}
 \item{\code{site_id}}{character. Supplier site identifier.}
 \item{\code{data_type}}{character. Framework code: Q, H, P, SM, SWE.}
-\item{\code{period}}{character. Temporal resolution: \code{"15min"}, \code{"hourly"},
-\code{"daily"}, or \code{NA}. Essential for distinguishing instantaneous series
-(where timestamp carries full HH:MM:SS) from daily aggregates (where
-timestamp is always midnight UTC).}
+\item{\code{period}}{character. Temporal resolution of the series, e.g.
+\code{"15min"}, \code{"hourly"}, \code{"daily"}. \code{NA} when unknown.}
 }
 }
 \examples{
