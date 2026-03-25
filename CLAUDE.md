@@ -27,8 +27,7 @@ reach.io/
 │   ├── batch.R         # submit_batch(), poll_batch(), run_batch()
 │   ├── output.R        # handle_output()
 │   ├── registry.R      # build_gauge_registry()
-│   ├── router.R        # fetch_from_hde/wiski/bulk_file/wiski_all(), route_gauge()
-│   ├── ingest.R        # ingest_bulk_file()
+│   ├── router.R        # fetch_from_hde/wiski/wiski_all(), route_gauge()
 │   ├── ingest_all.R    # ingest_all_file(), fetch_from_wiski_all()
 │   ├── backfill.R      # run_backfill()
 │   ├── incremental.R   # run_incremental()
@@ -104,7 +103,6 @@ regardless of which store tier data comes from.
 ### Pipeline
 - `build_gauge_registry(csv_path)` — Build master gauge registry from CSV
 - `route_gauge(gauge_id)` — Determine source system for a gauge
-- `ingest_bulk_file(path, ...)` — Ingest historical bulk file to Bronze
 - `run_backfill(registry, ...)` — Parallelised backfill across all gauges
 - `run_incremental(registry, ...)` — Incremental sync (run via external scheduler)
 

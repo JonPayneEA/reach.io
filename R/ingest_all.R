@@ -292,6 +292,13 @@
 #'
 #' The temp directory is removed on completion unless `keep_tmp = TRUE`.
 #'
+#' Because `.all` files contain an arbitrary set of stations not known in
+#' advance, passing `registry_path` will auto-register every discovered
+#' station into the gauge registry after ingestion, with
+#' `source_system = "WISKI_ALL"`, `live = FALSE`, and `backfill_done = TRUE`.
+#' Only stations not already in the registry are added; existing entries are
+#' left untouched.
+#'
 #' Output schema: `gauge_id` (character), `datetime` (POSIXct, UTC),
 #' `value` (numeric), `unit` (character), `flag` (integer).
 #'
@@ -306,9 +313,14 @@
 #' @param keep_tmp Logical. Keep intermediate Parquet files after pass 2?
 #'   Default `FALSE`. Set `TRUE` for debugging or to re-run pass 2 without
 #'   re-parsing.
+#' @param registry_path Character or `NULL`. Path to an existing
+#'   `gauge_registry.parquet` file. When supplied, every station discovered
+#'   in the `.all` file is added to the registry if not already present, with
+#'   `source_system = "WISKI_ALL"`, `live = FALSE`, and `backfill_done = TRUE`.
+#'   The registry is created if the path does not yet exist.
 #'
-#' @return A `data.table` log with columns `gauge_id`, `rows`, and
-#'   `out_file`, one row per station written. Returned invisibly.
+#' @return A `data.table` log with columns `gauge_id`, `dataset_id`, `rows`,
+#'   and `out_file`, one row per station written. Returned invisibly.
 #'
 #' @export
 #'
@@ -318,6 +330,13 @@
 #' log_dt <- ingest_all_file(
 #'   path       = "data/wiski/2008_2010.all",
 #'   output_dir = "data/fw_bronze/flow"
+#' )
+#'
+#' # Ingest and auto-register discovered stations into the gauge registry
+#' log_dt <- ingest_all_file(
+#'   path          = "data/wiski/2008_2010.all",
+#'   output_dir    = "data/fw_bronze/flow",
+#'   registry_path = "data/fw_bronze/gauge_registry/gauge_registry.parquet"
 #' )
 #'
 #' # Ingest multiple files covering different periods
@@ -340,35 +359,107 @@ ingest_all_file <- function(path,
                             register_path = file.path(output_dir, "register",
                                                       "hydrometric_data_register.csv"),
                             chunk_size    = 50000L,
-                            keep_tmp      = FALSE) {
-  
+                            keep_tmp      = FALSE,
+                            registry_path = NULL) {
+
   if (!file.exists(path)) stop("File not found: ", path)
-  
+
   run_date <- Sys.Date()
   tmp_dir  <- file.path(
     output_dir,
     paste0(".tmp_", tools::file_path_sans_ext(basename(path)))
   )
-  
+
   message(sprintf("Pass 1: parsing %s", basename(path)))
   .parse_all_blocks(path, tmp_dir, chunk_size)
-  
+
   message("Pass 2: merging to Bronze Parquet")
   log_dt <- .merge_all_parquets(tmp_dir, output_dir, run_date,
                                 register_path, category)
-  
+
   if (!keep_tmp) {
     unlink(tmp_dir, recursive = TRUE)
     message("Temp files removed.")
   }
-  
+
   message(sprintf(
     "Ingest complete: %d station(s), %s total rows.",
     nrow(log_dt),
     format(sum(log_dt$rows), big.mark = ",")
   ))
-  
+
+  # -- Auto-register discovered stations into the gauge registry --------------
+  if (!is.null(registry_path)) {
+    .register_wiski_all_gauges(log_dt, registry_path, category, run_date)
+  }
+
   invisible(log_dt)
+}
+
+
+# -- Registry helper ----------------------------------------------------------
+
+#' Auto-register stations discovered from a .all ingest into the gauge registry
+#'
+#' Internal. Called by [ingest_all_file()] when `registry_path` is supplied.
+#' Adds new stations (not already in the registry) with
+#' `source_system = "WISKI_ALL"`, `live = FALSE`, and `backfill_done = TRUE`.
+#'
+#' @param log_dt data.table returned by `.merge_all_parquets()`.
+#' @param registry_path Character. Path to `gauge_registry.parquet`.
+#' @param category Character. Data category for the new rows.
+#' @param run_date Date. Ingestion date used as `date_added`.
+#'
+#' @return Invisibly NULL.
+#' @noRd
+.register_wiski_all_gauges <- function(log_dt, registry_path, category,
+                                       run_date) {
+
+  reg_dir <- dirname(registry_path)
+  dir.create(reg_dir, recursive = TRUE, showWarnings = FALSE)
+
+  # Build candidate rows from ingest log
+  new_rows <- data.table::data.table(
+    gauge_id      = log_dt$gauge_id,
+    source_system = "WISKI_ALL",
+    data_type     = NA_character_,   # .all files may hold multiple; left as NA
+    category      = category,
+    catchment     = NA_character_,
+    ea_site_ref   = NA_character_,
+    active        = TRUE,
+    live          = FALSE,           # historical dump, not a live feed
+    date_added    = run_date,
+    backfill_done = TRUE,            # just ingested
+    notes         = NA_character_
+  )
+
+  if (file.exists(registry_path)) {
+    existing <- data.table::as.data.table(arrow::read_parquet(registry_path))
+
+    # Ensure backward compatibility with registries built before `live` existed
+    if (!"live" %in% names(existing)) existing[, live := TRUE]
+
+    new_ids  <- new_rows$gauge_id[!new_rows$gauge_id %in% existing$gauge_id]
+    to_add   <- new_rows[gauge_id %in% new_ids]
+    registry <- data.table::rbindlist(
+      list(existing, to_add),
+      use.names = TRUE, fill = TRUE
+    )
+    message(sprintf(
+      "Registry: %d new WISKI_ALL station(s) registered (%d already present).",
+      nrow(to_add),
+      nrow(existing[source_system == "WISKI_ALL"])
+    ))
+  } else {
+    registry <- new_rows
+    message(sprintf(
+      "Registry created with %d WISKI_ALL station(s): %s",
+      nrow(registry), registry_path
+    ))
+  }
+
+  arrow::write_parquet(registry, registry_path)
+  invisible(NULL)
 }
 
 

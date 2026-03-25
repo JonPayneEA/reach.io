@@ -2,8 +2,8 @@
 # Tool:        Source Router
 # Description: Dispatches gauge fetches to the correct source
 #              system and normalises output to the Bronze
-#              Parquet schema. Supports HDE, WISKI, BULK_FILE,
-#              and WISKI_ALL source systems.
+#              Parquet schema. Supports HDE, WISKI, and WISKI_ALL
+#              source systems.
 # Flode Module: flode.io
 # Author:      [Hydrometric Data Lead]
 # Created:     2026-02-01
@@ -181,72 +181,6 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
 }
 
 
-# -- Bulk file fetch ----------------------------------------------------------
-
-#' Fetch data from a bulk file
-#'
-#' Locates the bulk export file for the gauge under `BULK_FILE_ROOT` and
-#' delegates to [ingest_bulk_file()] to read and normalise. The date range
-#' is applied as a post-ingest filter. File root is read from the
-#' environment variable `BULK_FILE_ROOT`.
-#'
-#' @inheritParams fetch_from_hde
-#'
-#' @return A `data.table` conforming to the Bronze schema, or an empty
-#'   `data.table` if no file found.
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' Sys.setenv(BULK_FILE_ROOT = "/mnt/ftp/ea_bulk")
-#' fetch_from_bulk_file("39001", "rainfall", "2000-01-01", "2020-12-31")
-#' }
-fetch_from_bulk_file <- function(gauge_id, data_type, start_date, end_date) {
-
-  message(sprintf("  [BULK] %s | %s", gauge_id, data_type))
-
-  bulk_root <- Sys.getenv("BULK_FILE_ROOT", unset = NA_character_)
-  if (is.na(bulk_root)) stop("[BULK_FILE] BULK_FILE_ROOT environment variable not set.")
-
-  search_dir <- file.path(bulk_root, data_type)
-  candidates <- list.files(search_dir,
-                           pattern     = sprintf("^%s\\.(csv|tsv|txt)$", gauge_id),
-                           full.names  = TRUE,
-                           ignore.case = TRUE)
-
-  if (length(candidates) == 0L) {
-    warning(sprintf("[BULK_FILE] No file found for gauge_id %s in %s",
-                    gauge_id, search_dir))
-    return(data.table::data.table())
-  }
-
-  file_path   <- candidates[1L]
-  file_format <- tolower(tools::file_ext(file_path))
-  if (file_format == "txt") file_format <- "csv"
-
-  # Ingest to a temp location then read back and filter
-  tmp_dir       <- tempfile()
-  tmp_register  <- file.path(tmp_dir, "register.csv")
-  on.exit(unlink(tmp_dir, recursive = TRUE))
-
-  bronze_dt <- ingest_bulk_file(
-    file_path     = file_path,
-    site_id       = gauge_id,
-    data_type     = data_type,
-    output_dir    = tmp_dir,
-    register_path = tmp_register,
-    file_format   = file_format
-  )
-
-  if (nrow(bronze_dt) == 0L) return(bronze_dt)
-
-  from_ts <- as.POSIXct(start_date, tz = "UTC")
-  to_ts   <- as.POSIXct(end_date,   tz = "UTC")
-  bronze_dt[timestamp >= from_ts & timestamp <= to_ts]
-}
-
-
 # -- Router -------------------------------------------------------------------
 
 #' Route a single gauge fetch to the correct source system
@@ -291,9 +225,6 @@ route_gauge <- function(gauge_row, start_date, end_date) {
                       gauge_row$gauge_id, gauge_row$data_type,
                       start_date, end_date),
       "WISKI"     = fetch_from_wiski(
-                      gauge_row$gauge_id, gauge_row$data_type,
-                      start_date, end_date),
-      "BULK_FILE" = fetch_from_bulk_file(
                       gauge_row$gauge_id, gauge_row$data_type,
                       start_date, end_date),
       "WISKI_ALL" = fetch_from_wiski_all(
