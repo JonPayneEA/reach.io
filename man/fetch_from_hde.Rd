@@ -18,15 +18,23 @@ fetch_from_hde(gauge_id, data_type, start_date, end_date)
 }
 \value{
 A \code{data.table} conforming to the Bronze schema (\code{timestamp},
-\code{value}, \code{supplier_flag}, \code{dataset_id}, \code{site_id}, \code{data_type}),
-or an empty \code{data.table} if no data found.
+\code{value}, \code{supplier_flag}, \code{dataset_id}, \code{site_id}, \code{data_type},
+\code{period}), or an empty \code{data.table} if no data found.
+
+\code{timestamp} carries full sub-daily precision (HH:MM:SS UTC) for
+instantaneous 15-minute measures. For daily aggregate measures (mean, max,
+min) \code{timestamp} is midnight UTC and \code{period} is \code{"daily"} — the EA
+Hydrology API readings endpoint does not expose the time-of-occurrence for
+daily aggregates (e.g. the clock time at which the daily peak flow
+occurred). Derive time-of-peak from the sub-daily instantaneous series if
+required.
 }
 \description{
 Calls the EA Hydrology API for a single gauge and returns readings
 normalised to the Bronze Parquet schema. Resolves the station and
-measure notation via \code{\link[=find_stations]{find_stations()}}, selecting the measure that matches
-\code{PARAMETER_CONFIG} (e.g. 15-minute instantaneous flow), then fetches
-readings in annual chunks via \code{\link[=fetch_readings]{fetch_readings()}}.
+measure notation via \code{\link[=find_stations]{find_stations()}}, selecting the measure that
+matches \code{PARAMETER_CONFIG} (e.g. 15-minute instantaneous flow), then
+fetches readings in annual chunks via \code{\link[=fetch_readings]{fetch_readings()}}.
 }
 \examples{
 \dontrun{

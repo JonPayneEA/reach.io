@@ -211,6 +211,38 @@
       grepl("rain",            raw_param, ignore.case = TRUE), "P",
       default = "Q"  # fallback; log for review
     )
+
+    # Detect temporal resolution — try ts_name metadata first (faster), then
+    # fall back to estimating from the median timestep.
+    # WISKI ts_name examples: "Mean 15min (Mrt0)", "Daily Mean (Mrt0)",
+    # "Hourly Mean (Mrt0)", "15 Min Instantaneous"
+    raw_ts_name <- if ("ts_name" %in% names(dt)) dt$ts_name[1L] else NA_character_
+    period_str  <- data.table::fcase(
+      grepl("15.?min",                  raw_ts_name, ignore.case = TRUE), "15min",
+      grepl("hourly|1.?hour|60.?min",   raw_ts_name, ignore.case = TRUE), "hourly",
+      grepl("daily|day",                raw_ts_name, ignore.case = TRUE), "daily",
+      default = NA_character_
+    )
+
+    if (is.na(period_str) && nrow(dt) > 1L) {
+      # Estimate from median gap between sorted timestamps (seconds).
+      # Guards: filter out zero-gaps (duplicates) before taking median.
+      ts_sorted <- sort(unique(dt$timestamp))
+      if (length(ts_sorted) > 1L) {
+        gaps <- as.numeric(diff(ts_sorted), units = "secs")
+        gaps <- gaps[gaps > 0]
+        if (length(gaps) > 0) {
+          med_gap <- stats::median(gaps, na.rm = TRUE)
+          period_str <- data.table::fcase(
+            med_gap <= 960,   "15min",
+            med_gap <= 3900,  "hourly",
+            med_gap <= 90000, "daily",
+            default           = "unknown"
+          )
+        }
+      }
+    }
+    period_str <- period_str %||% "unknown"
     
     # Build a minimal pre-schema data.table for apply_bronze_schema()
     pre_dt <- data.table::data.table(
@@ -233,13 +265,14 @@
       data_type         = data_type,
       timestamp_col     = "datetime",
       value_col         = "value",
-      supplier_flag_col = "supplier_flag"
+      supplier_flag_col = "supplier_flag",
+      period            = period_str
     )
-    
+
     out_file <- bronze_path(output_dir, category, supplier_code, data_type, dataset_id)
     dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)
     arrow::write_parquet(bronze_dt, out_file)
-    
+
     write_provenance_record(
       register_path       = register_path,
       dataset_id          = dataset_id,
@@ -249,7 +282,7 @@
       data_type           = data_type,
       time_period_start   = as.character(min(as.Date(bronze_dt$timestamp))),
       time_period_end     = as.character(max(as.Date(bronze_dt$timestamp))),
-      temporal_resolution = "unknown",
+      temporal_resolution = period_str,
       method_of_receipt   = "WISKI .all export",
       file_path           = out_file
     )

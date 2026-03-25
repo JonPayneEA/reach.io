@@ -28,9 +28,19 @@ column from \code{\link[=get_measures]{get_measures()}}, e.g.
 quality-controlled data, \code{"Measured"} for raw. \code{NULL} returns both.}
 }
 \value{
-A \code{data.table} of readings with columns \code{dateTime}, \code{date},
-\code{value}, \code{quality}, \code{completeness}, and \code{measure_notation}. Returns
-an empty \code{data.table} if no readings exist for the period.
+A \code{data.table} of readings with columns \code{dateTime} (POSIXct UTC),
+\code{date} (Date), \code{value}, \code{quality}, \code{completeness}, and
+\code{measure_notation}. Returns an empty \code{data.table} if no readings exist
+for the period.
+
+\code{dateTime} preserves full sub-daily precision (HH:MM:SS) for instantaneous
+15-min and hourly measures. For daily aggregate measures (mean, max, min)
+\code{dateTime} is midnight UTC — the EA API does not expose the time-of-occurrence
+for daily aggregates through the readings endpoint.
+
+ISO 8601 datetime strings from the API (including \code{Z} / \code{+00:00} suffixes)
+are parsed explicitly with a fixed format to ensure consistent behaviour on all
+platforms, including Windows.
 }
 \description{
 Calls \verb{/hydrology/id/measures/\{measure\}/readings} and returns the result

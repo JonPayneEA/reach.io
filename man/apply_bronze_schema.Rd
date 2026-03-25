@@ -11,7 +11,8 @@ apply_bronze_schema(
   data_type,
   timestamp_col = "dateTime",
   value_col = "value",
-  supplier_flag_col = NULL
+  supplier_flag_col = NULL,
+  period = NA_character_
 )
 }
 \arguments{
@@ -31,6 +32,10 @@ Default \code{"value"}.}
 
 \item{supplier_flag_col}{Character or NULL. Name of the supplier quality
 flag column in \code{dt}. NULL produces NA for all rows.}
+
+\item{period}{Character or NA. Temporal resolution of the series, e.g.
+\code{"15min"}, \code{"hourly"}, \code{"daily"}. Stored verbatim in the \code{period}
+column. Default \code{NA_character_}.}
 }
 \value{
 A \code{data.table} conforming to the Bronze schema.
@@ -44,12 +49,21 @@ schema is dropped.
 \details{
 Mandatory output columns:
 \describe{
-\item{\code{timestamp}}{POSIXct UTC. Observation datetime.}
+\item{\code{timestamp}}{POSIXct UTC. Full observation datetime, including
+sub-daily time for instantaneous readings (15-min, hourly). For daily
+aggregates (mean, max, min) the time component is midnight UTC — the
+time-of-occurrence (e.g. time of peak flow) is not available from the
+EA Hydrology API readings endpoint and must be derived from the
+sub-daily series separately.}
 \item{\code{value}}{float64. Observed value as received.}
 \item{\code{supplier_flag}}{character. Quality code from supplier, or NA.}
 \item{\code{dataset_id}}{character. Bronze dataset ID. Join key to register.}
 \item{\code{site_id}}{character. Supplier site identifier.}
 \item{\code{data_type}}{character. Framework code: Q, H, P, SM, SWE.}
+\item{\code{period}}{character. Temporal resolution: \code{"15min"}, \code{"hourly"},
+\code{"daily"}, or \code{NA}. Essential for distinguishing instantaneous series
+(where timestamp carries full HH:MM:SS) from daily aggregates (where
+timestamp is always midnight UTC).}
 }
 }
 \examples{
@@ -61,7 +75,8 @@ bronze_dt <- apply_bronze_schema(
   data_type     = "Q",
   timestamp_col = "dateTime",
   value_col     = "value",
-  supplier_flag_col = "quality"
+  supplier_flag_col = "quality",
+  period        = "15min"
 )
 }
 }

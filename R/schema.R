@@ -138,12 +138,19 @@ param_to_data_type <- function(parameter) {
 #'
 #' Mandatory output columns:
 #' \describe{
-#'   \item{`timestamp`}{POSIXct UTC. Observation datetime.}
+#'   \item{`timestamp`}{POSIXct UTC. Full observation datetime, including
+#'     sub-daily time for instantaneous readings (15-min, hourly). For daily
+#'     aggregates (mean, max, min) the time component is midnight UTC — the
+#'     time-of-occurrence (e.g. time of peak flow) is not available from the
+#'     EA Hydrology API readings endpoint and must be derived from the
+#'     sub-daily series separately.}
 #'   \item{`value`}{float64. Observed value as received.}
 #'   \item{`supplier_flag`}{character. Quality code from supplier, or NA.}
 #'   \item{`dataset_id`}{character. Bronze dataset ID. Join key to register.}
 #'   \item{`site_id`}{character. Supplier site identifier.}
 #'   \item{`data_type`}{character. Framework code: Q, H, P, SM, SWE.}
+#'   \item{`period`}{character. Temporal resolution of the series, e.g.
+#'     `"15min"`, `"hourly"`, `"daily"`. `NA` when unknown.}
 #' }
 #'
 #' @param dt A `data.table` of raw readings.
@@ -156,6 +163,9 @@ param_to_data_type <- function(parameter) {
 #'   Default `"value"`.
 #' @param supplier_flag_col Character or NULL. Name of the supplier quality
 #'   flag column in `dt`. NULL produces NA for all rows.
+#' @param period Character or NA. Temporal resolution of the series, e.g.
+#'   `"15min"`, `"hourly"`, `"daily"`. Stored verbatim in the `period` column.
+#'   Default `NA_character_`.
 #'
 #' @return A `data.table` conforming to the Bronze schema.
 #'
@@ -170,7 +180,8 @@ param_to_data_type <- function(parameter) {
 #'   data_type     = "Q",
 #'   timestamp_col = "dateTime",
 #'   value_col     = "value",
-#'   supplier_flag_col = "quality"
+#'   supplier_flag_col = "quality",
+#'   period        = "15min"
 #' )
 #' }
 apply_bronze_schema <- function(dt,
@@ -179,7 +190,8 @@ apply_bronze_schema <- function(dt,
                                 data_type,
                                 timestamp_col     = "dateTime",
                                 value_col         = "value",
-                                supplier_flag_col = NULL) {
+                                supplier_flag_col = NULL,
+                                period            = NA_character_) {
 
   if (!timestamp_col %in% names(dt)) {
     stop(sprintf("timestamp column '%s' not found in dt.", timestamp_col))
@@ -206,7 +218,8 @@ apply_bronze_schema <- function(dt,
     supplier_flag = supplier_flag,
     dataset_id    = dataset_id,
     site_id       = site_id,
-    data_type     = data_type
+    data_type     = data_type,
+    period        = as.character(period)
   )
 }
 
