@@ -104,7 +104,7 @@ setup_hydro_store <- function(
       ),
       MOSES = list(
         suppliers  = "MO",
-        data_types = "SM"
+        data_types = c("SM", "PE")
       )
     ),
     gold_purposes = list(
