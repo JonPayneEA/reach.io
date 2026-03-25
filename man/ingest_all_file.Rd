@@ -40,8 +40,8 @@ write-to-temp-then-rename pattern to avoid Windows error 1224 (Arrow
 memory-maps the file on read, blocking a direct overwrite on Windows).}
 }
 \value{
-A \code{data.table} log with columns \code{gauge_id}, \code{dataset_id}, \code{rows}, and
-\code{out_file}, one row per station written. Returned invisibly.
+A \code{data.table} log with columns \code{gauge_id}, \code{dataset_id}, \code{rows},
+and \code{out_file}, one row per station written. Returned invisibly.
 }
 \description{
 Parses a WISKI/Kisters \code{.all} export file and writes per-station data to
@@ -88,7 +88,7 @@ log_dt <- ingest_all_file(
 )
 
 # Ingest multiple files covering different periods
-for (f in list.files("data/wiski", pattern = "\\.all$", full.names = TRUE)) {
+for (f in list.files("data/wiski", pattern = "\\\\.all$", full.names = TRUE)) {
   ingest_all_file(f, output_dir = "data/fw_bronze/flow")
 }
 

@@ -29,7 +29,8 @@ The registry \code{data.table} invisibly (full merged registry when
 Reads a raw gauge list CSV, validates it, adds pipeline metadata columns,
 and writes the result as a Parquet file that every other pipeline tool reads
 from. Must be run before any backfill starts.
-
+}
+\details{
 By default (\code{overwrite = TRUE}) the existing registry is replaced. Set
 \code{overwrite = FALSE} to merge new gauges into an existing registry: gauges
 already present (matched on \code{gauge_id}) are left untouched, and only new

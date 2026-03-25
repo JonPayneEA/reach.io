@@ -21,12 +21,19 @@ A \code{data.table} conforming to the Bronze schema, or an empty
 \code{data.table} if no data found.
 }
 \description{
-Calls the KiWIS REST API \code{getTimeseriesValues} endpoint. Connection
-details are read from environment variables \code{WISKI_BASE_URL} and
-optionally \code{WISKI_API_KEY}.
+\strong{DRAFT — not yet operational.} The EA WISKI API is not currently
+available. This function is implemented against the KiWIS REST API
+specification (\code{getTimeseriesValues} endpoint) as documented in the
+Kisters KiWIS QueryServices reference, and will be activated once the
+endpoint is accessible. Calling it now raises an error.
+}
+\details{
+When live, connection details will be read from environment variables
+\code{WISKI_BASE_URL} and optionally \code{WISKI_API_KEY}.
 }
 \examples{
 \dontrun{
+# Not yet operational — WISKI API endpoint not available
 Sys.setenv(WISKI_BASE_URL = "https://wiski.example.com/KiWIS/KiWIS")
 fetch_from_wiski("12345678", "level", "2020-01-01", "2020-12-31")
 }
