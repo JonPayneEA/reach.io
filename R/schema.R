@@ -35,11 +35,12 @@ SUPPLIER_CODES <- c(
 # SWE = snow water equivalent
 #' @noRd
 DATA_TYPE_CODES <- c(
-  flow     = "Q",
-  level    = "H",
-  rainfall = "P",
+  flow          = "Q",
+  level         = "H",
+  rainfall      = "P",
   soil_moisture = "SM",
-  snow     = "SWE"
+  snow          = "SWE",
+  pe            = "PE"
 )
 
 
