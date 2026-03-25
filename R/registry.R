@@ -140,8 +140,13 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
   }
 
   # -- Write as Parquet (Delta-compatible) ------------------------------------
+  # Write to a temp file then rename so that on Windows the read_parquet()
+  # memory-map above is fully released before we touch the target path.
+  # file.rename() is atomic on both Windows and POSIX.
   dir.create(output_path, recursive = TRUE, showWarnings = FALSE)
-  arrow::write_parquet(registry_dt, registry_path)
+  tmp_path <- paste0(registry_path, ".tmp")
+  arrow::write_parquet(registry_dt, tmp_path)
+  file.rename(tmp_path, registry_path)
 
   invisible(registry_dt)
 }

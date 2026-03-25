@@ -458,7 +458,9 @@ ingest_all_file <- function(path,
     ))
   }
 
-  arrow::write_parquet(registry, registry_path)
+  tmp_path <- paste0(registry_path, ".tmp")
+  arrow::write_parquet(registry, tmp_path)
+  file.rename(tmp_path, registry_path)
   invisible(NULL)
 }
 
