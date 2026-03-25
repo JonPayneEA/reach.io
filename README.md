@@ -52,8 +52,7 @@ reach.io/
 │   ├── batch.R        # submit_batch(), poll_batch(), run_batch()
 │   ├── output.R       # handle_output()
 │   ├── registry.R     # build_gauge_registry()
-│   ├── router.R       # fetch_from_hde/wiski/bulk_file/wiski_all(), route_gauge()
-│   ├── ingest.R       # ingest_bulk_file()
+│   ├── router.R       # fetch_from_hde/wiski/wiski_all(), route_gauge()
 │   ├── ingest_all.R   # ingest_all_file(), fetch_from_wiski_all()
 │   ├── backfill.R     # run_backfill()
 │   └── incremental.R  # run_incremental()
@@ -296,12 +295,10 @@ gauge_registry.parquet   ← single source of truth
        │
        ├── Set env vars for source systems
        │
-       ├── [optional] ingest_bulk_file()   ← BULK_FILE gauges
-       ├── [optional] ingest_all_file()    ← WISKI_ALL gauges
+       ├── [optional] ingest_all_file()    ← WISKI_ALL .all files
        │
        ├── route_gauge() ──► fetch_from_hde()
-       │                ──► fetch_from_wiski()
-       │                ──► fetch_from_bulk_file()
+       │                ──► fetch_from_wiski()   (draft — API not yet available)
        │                ──► fetch_from_wiski_all()
        │
        ├── run_backfill()    ← one-off historical load
@@ -367,7 +364,7 @@ Run once. Reads the raw gauge list CSV, validates it, and writes
 | Column | Description |
 |--------|-------------|
 | `gauge_id` | Unique gauge identifier |
-| `source_system` | One of `HDE`, `WISKI`, `BULK_FILE`, `WISKI_ALL` |
+| `source_system` | One of `HDE`, `WISKI`, `WISKI_ALL` |
 | `data_type` | `flow`, `level`, or `rainfall` |
 | `category` | One of `hydrometric`, `radarH19`, `MOSES` |
 | `catchment` | Catchment name |
@@ -380,8 +377,11 @@ build_gauge_registry(
 )
 ```
 
-The registry gains metadata columns: `active`, `date_added`, `backfill_done`,
-and `notes`.
+The registry gains metadata columns: `active`, `live`, `date_added`,
+`backfill_done`, and `notes`. Set `live = FALSE` in your CSV for gauges that
+are historical-only and should not be included in incremental syncs. Pass
+`overwrite = FALSE` to merge new gauges into an existing registry without
+losing metadata for gauges already registered.
 
 ### 3. Configure source system connections
 
@@ -396,59 +396,38 @@ Sys.setenv(WISKI_BASE_URL = "https://your-wiski-instance/KiWIS/KiWIS")
 Sys.setenv(WISKI_API_KEY  = "your-key")  # omit if unauthenticated
 ```
 
-**BULK_FILE** - local or FTP file store, organised as
-`<root>/<data_type>/<gauge_id>.csv`:
-
-```r
-Sys.setenv(BULK_FILE_ROOT = "/mnt/ftp/ea_bulk")
-```
-
 **WISKI_ALL** - Kisters `.all` export files:
 
 ```r
 Sys.setenv(WISKI_ALL_ROOT = "/mnt/wiski/exports")
 ```
 
-### 4. Ingest historical bulk and .all files
+### 4. Ingest WISKI .all export files
 
-For gauges whose full history exists as flat files rather than being
-accessible via live API calls.
-
-**Bulk CSV files** (`source_system = "BULK_FILE"`):
-
-```r
-ingest_bulk_file(
-  file_path     = "data/raw/EA_39001_flow_2000_2020.csv",
-  site_id       = "39001",
-  data_type     = "flow",
-  category      = "hydrometric",
-  output_dir    = "data/hydrometric",
-  register_path = "data/hydrometric/register/register.csv",
-  supplier      = "Environment Agency"
-)
-```
-
-Input column names mapped automatically:
-
-| Input name(s) | Bronze column |
-|---------------|---------------|
-| `Date`, `date`, `timestamp`, `DateTime` | `timestamp` |
-| `Value`, `Measurement` | `value` |
-| `Quality`, `QualityCode` | `supplier_flag` |
-
-**WISKI .all export files** (`source_system = "WISKI_ALL"`):
+WISKI `.all` files are the default bulk import method for EA WISKI data.
+Because the content of a `.all` file is not known until it is parsed,
+the gauge list CSV approach does not apply. Instead, pass `registry_path`
+to `ingest_all_file()` and every discovered station is auto-registered
+into the gauge registry with `source_system = "WISKI_ALL"`,
+`live = FALSE`, and `backfill_done = TRUE`.
 
 ```r
-# Single file
+# Ingest and auto-register discovered stations
 ingest_all_file(
-  path       = "data/wiski/2008_2010.all",
-  output_dir = "data/hydrometric",
-  category   = "hydrometric"
+  path          = "data/wiski/2008_2010.all",
+  output_dir    = "data/hydrometric",
+  category      = "hydrometric",
+  registry_path = "data/hydrometric/register/gauge_registry.parquet"
 )
 
 # Multiple files covering different periods
 for (f in list.files("data/wiski", pattern = "\\.all$", full.names = TRUE)) {
-  ingest_all_file(f, output_dir = "data/hydrometric", category = "hydrometric")
+  ingest_all_file(
+    f,
+    output_dir    = "data/hydrometric",
+    category      = "hydrometric",
+    registry_path = "data/hydrometric/register/gauge_registry.parquet"
+  )
 }
 ```
 
@@ -597,7 +576,7 @@ automated.
 | `httr` | EA API and KiWIS HTTP requests |
 | `future` | Parallel worker setup |
 | `future.apply` | `future_lapply()` for backfill and incremental sync |
-| `lubridate` | Multi-format datetime parsing in bulk file ingest |
+| `lubridate` | Multi-format datetime parsing |
 | `parallel` | `detectCores()` default for `n_workers` |
 | `S7` | Typed classes for downloaded hydrometric data |
 

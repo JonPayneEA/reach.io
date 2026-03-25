@@ -21,7 +21,7 @@ fetch failed.
 \description{
 Reads the \code{source_system} field of a one-row registry \code{data.table} and
 dispatches to \code{\link[=fetch_from_hde]{fetch_from_hde()}}, \code{\link[=fetch_from_wiski]{fetch_from_wiski()}},
-\code{\link[=fetch_from_bulk_file]{fetch_from_bulk_file()}}, or \code{\link[=fetch_from_wiski_all]{fetch_from_wiski_all()}}. Fetch errors are
+or \code{\link[=fetch_from_wiski_all]{fetch_from_wiski_all()}}. Fetch errors are
 caught and returned as \code{NULL} with a warning so the caller can log and
 continue.
 }

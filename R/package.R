@@ -44,7 +44,6 @@
 #' - [bronze_path()] -- construct the Bronze file path (Appendix C layout)
 #' - [write_provenance_record()] -- append a provenance record to the register
 #' - [route_gauge()] -- dispatch a gauge fetch to the correct source system
-#' - [ingest_bulk_file()] -- ingest historical bulk files to partitioned Parquet
 #' - [ingest_all_file()] -- ingest WISKI .all exports to partitioned Parquet
 #' - [run_backfill()] -- parallelised backfill orchestrator with logging
 #' - [run_incremental()] -- incremental sync from high watermark per gauge
@@ -97,7 +96,7 @@ PARAMETER_CONFIG <- list(
 
 # Valid source systems recognised by the pipeline router
 #' @noRd
-VALID_SOURCES <- c("HDE", "WISKI", "BULK_FILE", "WISKI_ALL")
+VALID_SOURCES <- c("HDE", "WISKI", "WISKI_ALL")
 
 # -- Null-coalescing operator -------------------------------------------------
 

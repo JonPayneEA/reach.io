@@ -2,8 +2,8 @@
 # Tool:        Source Router
 # Description: Dispatches gauge fetches to the correct source
 #              system and normalises output to the Bronze
-#              Parquet schema. Supports HDE, WISKI, BULK_FILE,
-#              and WISKI_ALL source systems.
+#              Parquet schema. Supports HDE, WISKI, and WISKI_ALL
+#              source systems.
 # Flode Module: flode.io
 # Author:      [Hydrometric Data Lead]
 # Created:     2026-02-01
@@ -20,8 +20,9 @@
 #'
 #' Calls the EA Hydrology API for a single gauge and returns readings
 #' normalised to the Bronze Parquet schema. Resolves the station and
-#' measure notation via [find_stations()], then fetches readings in annual
-#' chunks via [fetch_readings()].
+#' measure notation via [find_stations()], selecting the measure that matches
+#' `PARAMETER_CONFIG` (e.g. 15-minute instantaneous flow), then fetches
+#' readings in annual chunks via [fetch_readings()].
 #'
 #' @param gauge_id Character. WISKI ID for HDE-sourced gauges.
 #' @param data_type Character. Parameter: `"flow"`, `"level"`, or
@@ -50,10 +51,28 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
     return(data.table::data.table())
   }
 
-  measures_dt <- stn[parameter == data_type]
+  # Filter to the correct parameter, period, and value_type from PARAMETER_CONFIG
+  # so we reliably get e.g. 15-min instantaneous flow rather than daily mean
+  config <- PARAMETER_CONFIG[[data_type]]
+
+  measures_dt <- stn[parameter == data_type &
+                     period    == config$default_period]
+  if (!is.null(config$value_type)) {
+    measures_dt <- measures_dt[value_type == config$value_type]
+  }
+
   if (nrow(measures_dt) == 0) {
-    warning(sprintf("[HDE] No %s measures found for gauge_id: %s",
-                    data_type, gauge_id))
+    # Warn with what IS available so the user can diagnose missing resolutions
+    available <- stn[parameter == data_type,
+                     paste(period, value_type, sep = "/")]
+    warning(sprintf(
+      "[HDE] No %s %s %s measure found for gauge_id: %s. Available: %s",
+      config$default_period,
+      config$value_type %||% "(any)",
+      data_type,
+      gauge_id,
+      if (length(available)) paste(available, collapse = ", ") else "none"
+    ))
     return(data.table::data.table())
   }
 
@@ -108,9 +127,14 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
 
 #' Fetch data from WISKI / KiWIS
 #'
-#' Calls the KiWIS REST API `getTimeseriesValues` endpoint. Connection
-#' details are read from environment variables `WISKI_BASE_URL` and
-#' optionally `WISKI_API_KEY`.
+#' **DRAFT — not yet operational.** The EA WISKI API is not currently
+#' available. This function is implemented against the KiWIS REST API
+#' specification (`getTimeseriesValues` endpoint) as documented in the
+#' Kisters KiWIS QueryServices reference, and will be activated once the
+#' endpoint is accessible. Calling it now raises an error.
+#'
+#' When live, connection details will be read from environment variables
+#' `WISKI_BASE_URL` and optionally `WISKI_API_KEY`.
 #'
 #' @inheritParams fetch_from_hde
 #'
@@ -121,10 +145,22 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
 #'
 #' @examples
 #' \dontrun{
+#' # Not yet operational — WISKI API endpoint not available
 #' Sys.setenv(WISKI_BASE_URL = "https://wiski.example.com/KiWIS/KiWIS")
 #' fetch_from_wiski("12345678", "level", "2020-01-01", "2020-12-31")
 #' }
 fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
+
+  stop(
+    "[WISKI] fetch_from_wiski() is a draft function and is not yet ",
+    "operational. The EA WISKI API endpoint is not currently available. ",
+    "Use source_system = 'WISKI_ALL' to ingest data from .all export files."
+  )
+
+  # -- Draft implementation against KiWIS QueryServices specification ---------
+  # Reference: Kisters KiWIS REST API, getTimeseriesValues endpoint.
+  # To be activated once WISKI_BASE_URL is accessible.
+  # nocov start
 
   message(sprintf("  [WISKI] %s | %s | %s to %s",
                   gauge_id, data_type, start_date, end_date))
@@ -178,72 +214,7 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
     value_col         = "value",
     supplier_flag_col = "supplier_flag"
   )
-}
-
-
-# -- Bulk file fetch ----------------------------------------------------------
-
-#' Fetch data from a bulk file
-#'
-#' Locates the bulk export file for the gauge under `BULK_FILE_ROOT` and
-#' delegates to [ingest_bulk_file()] to read and normalise. The date range
-#' is applied as a post-ingest filter. File root is read from the
-#' environment variable `BULK_FILE_ROOT`.
-#'
-#' @inheritParams fetch_from_hde
-#'
-#' @return A `data.table` conforming to the Bronze schema, or an empty
-#'   `data.table` if no file found.
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' Sys.setenv(BULK_FILE_ROOT = "/mnt/ftp/ea_bulk")
-#' fetch_from_bulk_file("39001", "rainfall", "2000-01-01", "2020-12-31")
-#' }
-fetch_from_bulk_file <- function(gauge_id, data_type, start_date, end_date) {
-
-  message(sprintf("  [BULK] %s | %s", gauge_id, data_type))
-
-  bulk_root <- Sys.getenv("BULK_FILE_ROOT", unset = NA_character_)
-  if (is.na(bulk_root)) stop("[BULK_FILE] BULK_FILE_ROOT environment variable not set.")
-
-  search_dir <- file.path(bulk_root, data_type)
-  candidates <- list.files(search_dir,
-                           pattern     = sprintf("^%s\\.(csv|tsv|txt)$", gauge_id),
-                           full.names  = TRUE,
-                           ignore.case = TRUE)
-
-  if (length(candidates) == 0L) {
-    warning(sprintf("[BULK_FILE] No file found for gauge_id %s in %s",
-                    gauge_id, search_dir))
-    return(data.table::data.table())
-  }
-
-  file_path   <- candidates[1L]
-  file_format <- tolower(tools::file_ext(file_path))
-  if (file_format == "txt") file_format <- "csv"
-
-  # Ingest to a temp location then read back and filter
-  tmp_dir       <- tempfile()
-  tmp_register  <- file.path(tmp_dir, "register.csv")
-  on.exit(unlink(tmp_dir, recursive = TRUE))
-
-  bronze_dt <- ingest_bulk_file(
-    file_path     = file_path,
-    site_id       = gauge_id,
-    data_type     = data_type,
-    output_dir    = tmp_dir,
-    register_path = tmp_register,
-    file_format   = file_format
-  )
-
-  if (nrow(bronze_dt) == 0L) return(bronze_dt)
-
-  from_ts <- as.POSIXct(start_date, tz = "UTC")
-  to_ts   <- as.POSIXct(end_date,   tz = "UTC")
-  bronze_dt[timestamp >= from_ts & timestamp <= to_ts]
+  # nocov end
 }
 
 
@@ -253,7 +224,7 @@ fetch_from_bulk_file <- function(gauge_id, data_type, start_date, end_date) {
 #'
 #' Reads the `source_system` field of a one-row registry `data.table` and
 #' dispatches to [fetch_from_hde()], [fetch_from_wiski()],
-#' [fetch_from_bulk_file()], or [fetch_from_wiski_all()]. Fetch errors are
+#' or [fetch_from_wiski_all()]. Fetch errors are
 #' caught and returned as `NULL` with a warning so the caller can log and
 #' continue.
 #'
@@ -291,9 +262,6 @@ route_gauge <- function(gauge_row, start_date, end_date) {
                       gauge_row$gauge_id, gauge_row$data_type,
                       start_date, end_date),
       "WISKI"     = fetch_from_wiski(
-                      gauge_row$gauge_id, gauge_row$data_type,
-                      start_date, end_date),
-      "BULK_FILE" = fetch_from_bulk_file(
                       gauge_row$gauge_id, gauge_row$data_type,
                       start_date, end_date),
       "WISKI_ALL" = fetch_from_wiski_all(

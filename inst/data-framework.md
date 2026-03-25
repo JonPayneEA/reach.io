@@ -36,7 +36,7 @@ Supplier data
 
 `reach.io` owns the Bronze ingestion pipeline. Its role is to:
 
-1. Pull or read supplier data (HDE API, WISKI API, bulk files)
+1. Pull or read supplier data (HDE API, WISKI .all exports)
 2. Assign a unique **dataset ID** using the standard format
 3. Write a **provenance record** to the Hydrometric Data Register
 4. Store data in the Bronze layer as **Parquet** — read-only after ingestion
@@ -207,7 +207,7 @@ hydrometric/
 
 | Function | Tier | Role |
 |---|---|---|
-| `download_hydrology()` | Bronze | Main entry point — pull data from HDE / WISKI / bulk file |
+| `download_hydrology()` | Bronze | Main entry point — pull data from HDE / WISKI / WISKI .all |
 | `apply_bronze_schema()` | Bronze | Enforce mandatory 6-column schema |
 | `make_dataset_id()` | Bronze | Generate standardised dataset ID |
 | `write_provenance_record()` | Bronze | Append to Hydrometric Data Register |

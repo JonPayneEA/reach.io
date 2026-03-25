@@ -23,9 +23,9 @@ Bronze store:
 
 ```
 1. setup_hydro_store()     — create the directory tree
-2. build_gauge_registry()  — build the gauge lookup table
+2. build_gauge_registry()  — build the gauge lookup table   (HDE / WISKI)
+   ingest_all_file()       — ingest WISKI .all exports      (WISKI_ALL path)
 3. run_backfill()          — bulk ingest via the registry   (standard path)
-   ingest_bulk_file()      — ingest a single bulk export    (alternative)
    download_hydrology()    — exploratory API download       (optional)
 ```
 
@@ -84,14 +84,14 @@ setup_hydro_store(
 The registry (`gauge_registry.parquet`) is the single source of truth for
 every gauge in the pipeline. It records the source system for each gauge so
 that the router knows whether to call the EA Hydrology API (HDE), WISKI, or
-read from a bulk export file.
+read from a WISKI `.all` export.
 
 Prepare a CSV with at minimum these columns:
 
 | Column | Description | Example |
 |---|---|---|
 | `gauge_id` | Unique gauge identifier | `"39001"` |
-| `source_system` | `"HDE"`, `"WISKI"`, `"BULK_FILE"`, or `"WISKI_ALL"` | `"HDE"` |
+| `source_system` | `"HDE"`, `"WISKI"`, or `"WISKI_ALL"` | `"HDE"` |
 | `data_type` | `"flow"`, `"level"`, or `"rainfall"` | `"flow"` |
 | `category` | `"hydrometric"`, `"radarH19"`, or `"MOSES"` | `"hydrometric"` |
 | `catchment` | Catchment name (free text) | `"Thames at Kingston"` |
@@ -105,19 +105,45 @@ build_gauge_registry(
 ```
 
 ```
-Validated 142 gauges.
-  source_system breakdown:
-    HDE       : 98
-    WISKI     : 31
-    BULK_FILE : 13
-
-Written: data/hydrometric/register/gauge_registry.parquet
+Registry written: 129 gauges -> data/hydrometric/register
 ```
 
-`build_gauge_registry()` adds three pipeline columns automatically:
-`active` (default `TRUE`), `backfill_done` (default `FALSE`), and `notes`.
-Set `active = FALSE` in your CSV to exclude tidal or decommissioned gauges
-before they reach the router.
+`build_gauge_registry()` adds pipeline metadata columns automatically:
+`active` (default `TRUE`), `live` (default `TRUE`), `backfill_done` (default
+`FALSE`), and `notes`. Set `active = FALSE` in your CSV to exclude tidal or
+decommissioned gauges from all processing. Set `live = FALSE` for gauges that
+are historical-only and should not be included in incremental syncs.
+
+Re-running with a new CSV will replace the registry by default. Pass
+`overwrite = FALSE` to add only new gauges and preserve existing metadata
+(including `backfill_done` status):
+
+```{r build-registry-merge}
+build_gauge_registry(
+  input_csv   = "gauge_list_v2.csv",
+  output_path = file.path(root, "register"),
+  overwrite   = FALSE
+)
+```
+
+### WISKI .all files: auto-registration
+
+WISKI `.all` exports contain station data for an arbitrary set of gauges not
+known in advance. The normal CSV-driven registry workflow does not apply here.
+Instead, pass `registry_path` to `ingest_all_file()` and it will register
+every discovered station automatically after ingestion:
+
+```{r ingest-all-register}
+ingest_all_file(
+  path          = "data/wiski/2000_2010.all",
+  output_dir    = root,
+  registry_path = file.path(root, "register", "gauge_registry.parquet")
+)
+```
+
+Discovered stations are added with `source_system = "WISKI_ALL"`,
+`live = FALSE` (historical dump, not a live feed), and `backfill_done = TRUE`.
+Stations already in the registry are left untouched.
 
 ---
 
@@ -213,41 +239,7 @@ run_backfill(
 
 ---
 
-## 4. Alternative: ingest a single bulk export file
-
-Use `ingest_bulk_file()` for one-off historical loads from a file already
-on disk (e.g. a WISKI `.all` export or an EA bulk CSV), or for any gauge
-not covered by the registry.
-
-```{r ingest-bulk}
-ingest_bulk_file(
-  file_path     = "raw/EA_39001_flow_2000_2014.csv",
-  site_id       = "39001",
-  data_type     = "flow",
-  output_dir    = root,
-  register_path = file.path(root, "register", "hydrometric_data_register.csv"),
-  supplier      = "Environment Agency",
-  source_system = "BULK_FILE",
-  received_by   = "J.Payne",
-  notes         = "Pre-backfill historical load 2000–2014"
-)
-```
-
-```
-Parsed 525,960 rows from EA_39001_flow_2000_2014.csv
-Written: data/hydrometric/bronze/hydrometric/EA/Q/2000/EA_39001_Q_20260319.parquet
-         ...
-         data/hydrometric/bronze/hydrometric/EA/Q/2014/EA_39001_Q_20260319.parquet
-Register updated: data/hydrometric/register/hydrometric_data_register.csv
-```
-
-`ingest_bulk_file()` accepts `"csv"`, `"tsv"`, and `"fixed"` file formats
-and automatically maps common column name variants (`Date`, `DateTime`,
-`Value`, `Quality`, etc.) to the Bronze schema.
-
----
-
-## 5. Optional: exploratory API download
+## 4. Optional: exploratory API download
 
 Before committing to a full backfill, use `download_hydrology()` to pull a
 short window into memory and inspect what the API returns.
@@ -288,8 +280,8 @@ download_hydrology(
 
 ## 6. Check the provenance register
 
-Every ingested dataset — whether from a backfill, a bulk file, or a direct
-API pull written to disk — creates a row in the register CSV:
+Every ingested dataset — whether from a backfill, a WISKI .all import, or a
+direct API pull written to disk — creates a row in the register CSV:
 
 ```{r register}
 register <- fread(

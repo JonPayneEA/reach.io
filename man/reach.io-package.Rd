@@ -50,7 +50,6 @@ data sources through to partitioned Parquet Bronze storage.
 \item \code{\link[=bronze_path]{bronze_path()}} -- construct the Bronze file path (Appendix C layout)
 \item \code{\link[=write_provenance_record]{write_provenance_record()}} -- append a provenance record to the register
 \item \code{\link[=route_gauge]{route_gauge()}} -- dispatch a gauge fetch to the correct source system
-\item \code{\link[=ingest_bulk_file]{ingest_bulk_file()}} -- ingest historical bulk files to partitioned Parquet
 \item \code{\link[=ingest_all_file]{ingest_all_file()}} -- ingest WISKI .all exports to partitioned Parquet
 \item \code{\link[=run_backfill]{run_backfill()}} -- parallelised backfill orchestrator with logging
 \item \code{\link[=run_incremental]{run_incremental()}} -- incremental sync from high watermark per gauge

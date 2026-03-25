@@ -23,7 +23,6 @@ SUPPLIER_CODES <- c(
   HDE       = "EA",
   WISKI     = "WISKI",
   WISKI_ALL = "WISKI",
-  BULK_FILE = "EA",
   NRFA      = "NRFA",
   MO        = "MO",
   CEH       = "CEH"

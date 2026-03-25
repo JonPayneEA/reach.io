@@ -4,7 +4,7 @@
 
 **reach.io** is an R package providing hydrometric data pipeline tools for the
 [Environment Agency Hydrology API](https://environment.data.gov.uk/hydrology/doc/reference).
-It covers the full journey from raw API/bulk-file sources through to Bronze-tier
+It covers the full journey from raw API and WISKI .all sources through to Bronze-tier
 Parquet storage, following the Hydrometric Data Framework v1.3 and R Tool
 Governance standards.
 
@@ -27,8 +27,7 @@ reach.io/
 │   ├── batch.R         # submit_batch(), poll_batch(), run_batch()
 │   ├── output.R        # handle_output()
 │   ├── registry.R      # build_gauge_registry()
-│   ├── router.R        # fetch_from_hde/wiski/bulk_file/wiski_all(), route_gauge()
-│   ├── ingest.R        # ingest_bulk_file()
+│   ├── router.R        # fetch_from_hde/wiski/wiski_all(), route_gauge()
 │   ├── ingest_all.R    # ingest_all_file(), fetch_from_wiski_all()
 │   ├── backfill.R      # run_backfill()
 │   ├── incremental.R   # run_incremental()
@@ -72,8 +71,8 @@ Bronze paths follow: `bronze/<CATEGORY>/<SUPPLIER>/<DATA_TYPE>/<YYYY>/<dataset_i
 
 Data is routed from three source systems:
 - **HDE** — EA Hydrology API (primary)
-- **WISKI** — Older EA system for some gauges
-- **Bulk file** — Historical bulk downloads
+- **WISKI** — KiWIS REST API (draft — not yet operational)
+- **WISKI_ALL** — WISKI .all export files (default bulk import method)
 
 The `router.R` functions (`route_gauge()`, `fetch_from_hde()`, etc.) dispatch
 to the correct source.
@@ -104,7 +103,6 @@ regardless of which store tier data comes from.
 ### Pipeline
 - `build_gauge_registry(csv_path)` — Build master gauge registry from CSV
 - `route_gauge(gauge_id)` — Determine source system for a gauge
-- `ingest_bulk_file(path, ...)` — Ingest historical bulk file to Bronze
 - `run_backfill(registry, ...)` — Parallelised backfill across all gauges
 - `run_incremental(registry, ...)` — Incremental sync (run via external scheduler)
 

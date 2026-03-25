@@ -17,10 +17,15 @@
 
 #' Build the master gauge registry Parquet table
 #'
-#' One-off setup tool that reads a raw gauge list CSV supplied by the EA,
-#' validates it, adds pipeline metadata columns, and writes the result as a
-#' Parquet file that every other pipeline tool reads from. Must be run before
-#' any backfill starts.
+#' Reads a raw gauge list CSV, validates it, adds pipeline metadata columns,
+#' and writes the result as a Parquet file that every other pipeline tool reads
+#' from. Must be run before any backfill starts.
+#'
+#' By default (`overwrite = TRUE`) the existing registry is replaced. Set
+#' `overwrite = FALSE` to merge new gauges into an existing registry: gauges
+#' already present (matched on `gauge_id`) are left untouched, and only new
+#' rows are appended. This lets you update the gauge list CSV without losing
+#' `backfill_done` status or other metadata already written for existing gauges.
 #'
 #' In a live Databricks environment the `write_parquet()` call can be replaced
 #' with a Delta write via `sparklyr` or the Databricks REST API without
@@ -33,20 +38,32 @@
 #' @param output_path Character. Directory to write the registry Parquet file
 #'   into. Created if it does not exist. The file is written as
 #'   `gauge_registry.parquet` inside this directory.
+#' @param overwrite Logical. If `TRUE` (default), replace any existing
+#'   registry. If `FALSE`, merge new gauges into the existing registry,
+#'   preserving metadata for gauges already registered.
 #'
-#' @return The registry `data.table` invisibly. The primary side-effect is
-#'   writing `<output_path>/gauge_registry.parquet` to disk.
+#' @return The registry `data.table` invisibly (full merged registry when
+#'   `overwrite = FALSE`). The primary side-effect is writing
+#'   `<output_path>/gauge_registry.parquet` to disk.
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
+#' # First-time build
 #' registry_dt <- build_gauge_registry(
 #'   input_csv   = "data/ea_gauge_list.csv",
 #'   output_path = "data/fw_bronze/gauge_registry"
 #' )
+#'
+#' # Add new gauges without overwriting existing metadata
+#' registry_dt <- build_gauge_registry(
+#'   input_csv   = "data/ea_gauge_list_v2.csv",
+#'   output_path = "data/fw_bronze/gauge_registry",
+#'   overwrite   = FALSE
+#' )
 #' }
-build_gauge_registry <- function(input_csv, output_path) {
+build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
 
   # -- Read raw gauge list supplied by EA -------------------------------------
   raw_dt <- data.table::fread(input_csv)
@@ -83,22 +100,48 @@ build_gauge_registry <- function(input_csv, output_path) {
 
   # -- Add registry metadata columns (modify in place) ------------------------
   raw_dt[, active        := TRUE]
+  raw_dt[, live          := TRUE]
   raw_dt[, date_added    := Sys.Date()]
   raw_dt[, backfill_done := FALSE]
   raw_dt[, notes         := NA_character_]
 
   # Select and order columns explicitly so the schema is stable regardless
   # of what extra columns the input CSV contains
-  registry_dt <- raw_dt[, .(gauge_id, source_system, data_type, category,
-                             catchment, ea_site_ref,
-                             active, date_added, backfill_done, notes)]
+  new_dt <- raw_dt[, .(gauge_id, source_system, data_type, category,
+                        catchment, ea_site_ref,
+                        active, live, date_added, backfill_done, notes)]
+
+  # -- Merge with existing registry if overwrite = FALSE ----------------------
+  registry_path <- file.path(output_path, "gauge_registry.parquet")
+
+  if (!overwrite && file.exists(registry_path)) {
+    existing_dt <- data.table::as.data.table(arrow::read_parquet(registry_path))
+
+    # Ensure existing registry has a `live` column (backward compatibility)
+    if (!"live" %in% names(existing_dt)) {
+      existing_dt[, live := TRUE]
+    }
+
+    # Add only gauges not already in the registry
+    new_ids   <- new_dt$gauge_id[!new_dt$gauge_id %in% existing_dt$gauge_id]
+    added_dt  <- new_dt[gauge_id %in% new_ids]
+    registry_dt <- data.table::rbindlist(
+      list(existing_dt, added_dt),
+      use.names = TRUE, fill = TRUE
+    )
+    message(sprintf(
+      "Merge mode: %d new gauge(s) added, %d existing preserved -> %s",
+      nrow(added_dt), nrow(existing_dt), output_path
+    ))
+  } else {
+    registry_dt <- new_dt
+    message(sprintf("Registry written: %d gauges -> %s",
+                    nrow(registry_dt), output_path))
+  }
 
   # -- Write as Parquet (Delta-compatible) ------------------------------------
   dir.create(output_path, recursive = TRUE, showWarnings = FALSE)
-  arrow::write_parquet(registry_dt,
-                       file.path(output_path, "gauge_registry.parquet"))
+  arrow::write_parquet(registry_dt, registry_path)
 
-  message(sprintf("Registry written: %d gauges -> %s",
-                  nrow(registry_dt), output_path))
   invisible(registry_dt)
 }
