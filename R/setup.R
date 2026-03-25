@@ -95,7 +95,7 @@ setup_hydro_store <- function(
     root,
     categories = list(
       hydrometric = list(
-        suppliers  = c("EA", "WISKI", "NRFA"),
+        suppliers  = c("EA", "WISKI", "NRFA", "rating_curves"),
         data_types = c("Q", "H", "P")
       ),
       radarH19 = list(

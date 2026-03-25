@@ -24,8 +24,9 @@ or an empty \code{data.table} if no data found.
 \description{
 Calls the EA Hydrology API for a single gauge and returns readings
 normalised to the Bronze Parquet schema. Resolves the station and
-measure notation via \code{\link[=find_stations]{find_stations()}}, then fetches readings in annual
-chunks via \code{\link[=fetch_readings]{fetch_readings()}}.
+measure notation via \code{\link[=find_stations]{find_stations()}}, selecting the measure that matches
+\code{PARAMETER_CONFIG} (e.g. 15-minute instantaneous flow), then fetches
+readings in annual chunks via \code{\link[=fetch_readings]{fetch_readings()}}.
 }
 \examples{
 \dontrun{

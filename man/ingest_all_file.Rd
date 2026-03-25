@@ -10,7 +10,8 @@ ingest_all_file(
   category = "hydrometric",
   register_path = file.path(output_dir, "register", "hydrometric_data_register.csv"),
   chunk_size = 50000L,
-  keep_tmp = FALSE
+  keep_tmp = FALSE,
+  registry_path = NULL
 )
 }
 \arguments{
@@ -29,10 +30,16 @@ large disks.}
 \item{keep_tmp}{Logical. Keep intermediate Parquet files after pass 2?
 Default \code{FALSE}. Set \code{TRUE} for debugging or to re-run pass 2 without
 re-parsing.}
+
+\item{registry_path}{Character or \code{NULL}. Path to an existing
+\code{gauge_registry.parquet} file. When supplied, every station discovered
+in the \code{.all} file is added to the registry if not already present, with
+\code{source_system = "WISKI_ALL"}, \code{live = FALSE}, and \code{backfill_done = TRUE}.
+The registry is created if the path does not yet exist.}
 }
 \value{
-A \code{data.table} log with columns \code{gauge_id}, \code{rows}, and
-\code{out_file}, one row per station written. Returned invisibly.
+A \code{data.table} log with columns \code{gauge_id}, \code{dataset_id}, \code{rows},
+and \code{out_file}, one row per station written. Returned invisibly.
 }
 \description{
 Parses a WISKI/Kisters \code{.all} export file and writes per-station data to
@@ -53,6 +60,13 @@ pipeline schema, and writes the final Bronze output.
 
 The temp directory is removed on completion unless \code{keep_tmp = TRUE}.
 
+Because \code{.all} files contain an arbitrary set of stations not known in
+advance, passing \code{registry_path} will auto-register every discovered
+station into the gauge registry after ingestion, with
+\code{source_system = "WISKI_ALL"}, \code{live = FALSE}, and \code{backfill_done = TRUE}.
+Only stations not already in the registry are added; existing entries are
+left untouched.
+
 Output schema: \code{gauge_id} (character), \code{datetime} (POSIXct, UTC),
 \code{value} (numeric), \code{unit} (character), \code{flag} (integer).
 }
@@ -62,6 +76,13 @@ Output schema: \code{gauge_id} (character), \code{datetime} (POSIXct, UTC),
 log_dt <- ingest_all_file(
   path       = "data/wiski/2008_2010.all",
   output_dir = "data/fw_bronze/flow"
+)
+
+# Ingest and auto-register discovered stations into the gauge registry
+log_dt <- ingest_all_file(
+  path          = "data/wiski/2008_2010.all",
+  output_dir    = "data/fw_bronze/flow",
+  registry_path = "data/fw_bronze/gauge_registry/gauge_registry.parquet"
 )
 
 # Ingest multiple files covering different periods
