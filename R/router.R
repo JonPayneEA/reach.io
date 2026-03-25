@@ -108,9 +108,14 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
 
 #' Fetch data from WISKI / KiWIS
 #'
-#' Calls the KiWIS REST API `getTimeseriesValues` endpoint. Connection
-#' details are read from environment variables `WISKI_BASE_URL` and
-#' optionally `WISKI_API_KEY`.
+#' **DRAFT — not yet operational.** The EA WISKI API is not currently
+#' available. This function is implemented against the KiWIS REST API
+#' specification (`getTimeseriesValues` endpoint) as documented in the
+#' Kisters KiWIS QueryServices reference, and will be activated once the
+#' endpoint is accessible. Calling it now raises an error.
+#'
+#' When live, connection details will be read from environment variables
+#' `WISKI_BASE_URL` and optionally `WISKI_API_KEY`.
 #'
 #' @inheritParams fetch_from_hde
 #'
@@ -121,10 +126,22 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
 #'
 #' @examples
 #' \dontrun{
+#' # Not yet operational — WISKI API endpoint not available
 #' Sys.setenv(WISKI_BASE_URL = "https://wiski.example.com/KiWIS/KiWIS")
 #' fetch_from_wiski("12345678", "level", "2020-01-01", "2020-12-31")
 #' }
 fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
+
+  stop(
+    "[WISKI] fetch_from_wiski() is a draft function and is not yet ",
+    "operational. The EA WISKI API endpoint is not currently available. ",
+    "Use source_system = 'WISKI_ALL' to ingest data from .all export files."
+  )
+
+  # -- Draft implementation against KiWIS QueryServices specification ---------
+  # Reference: Kisters KiWIS REST API, getTimeseriesValues endpoint.
+  # To be activated once WISKI_BASE_URL is accessible.
+  # nocov start
 
   message(sprintf("  [WISKI] %s | %s | %s to %s",
                   gauge_id, data_type, start_date, end_date))
@@ -178,6 +195,7 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
     value_col         = "value",
     supplier_flag_col = "supplier_flag"
   )
+  # nocov end
 }
 
 
