@@ -20,8 +20,9 @@
 #'
 #' Calls the EA Hydrology API for a single gauge and returns readings
 #' normalised to the Bronze Parquet schema. Resolves the station and
-#' measure notation via [find_stations()], then fetches readings in annual
-#' chunks via [fetch_readings()].
+#' measure notation via [find_stations()], selecting the measure that matches
+#' `PARAMETER_CONFIG` (e.g. 15-minute instantaneous flow), then fetches
+#' readings in annual chunks via [fetch_readings()].
 #'
 #' @param gauge_id Character. WISKI ID for HDE-sourced gauges.
 #' @param data_type Character. Parameter: `"flow"`, `"level"`, or
@@ -50,10 +51,28 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
     return(data.table::data.table())
   }
 
-  measures_dt <- stn[parameter == data_type]
+  # Filter to the correct parameter, period, and value_type from PARAMETER_CONFIG
+  # so we reliably get e.g. 15-min instantaneous flow rather than daily mean
+  config <- PARAMETER_CONFIG[[data_type]]
+
+  measures_dt <- stn[parameter == data_type &
+                     period    == config$default_period]
+  if (!is.null(config$value_type)) {
+    measures_dt <- measures_dt[value_type == config$value_type]
+  }
+
   if (nrow(measures_dt) == 0) {
-    warning(sprintf("[HDE] No %s measures found for gauge_id: %s",
-                    data_type, gauge_id))
+    # Warn with what IS available so the user can diagnose missing resolutions
+    available <- stn[parameter == data_type,
+                     paste(period, value_type, sep = "/")]
+    warning(sprintf(
+      "[HDE] No %s %s %s measure found for gauge_id: %s. Available: %s",
+      config$default_period,
+      config$value_type %||% "(any)",
+      data_type,
+      gauge_id,
+      if (length(available)) paste(available, collapse = ", ") else "none"
+    ))
     return(data.table::data.table())
   }
 
