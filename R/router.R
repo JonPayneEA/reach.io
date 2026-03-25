@@ -101,8 +101,20 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
 
   dt <- data.table::rbindlist(chunk_list, fill = TRUE)
 
-  # Determine timestamp column — full datetime preferred over date only
-  ts_col <- if ("dateTime" %in% names(dt)) "dateTime" else "date"
+  # Prefer dateTime (full sub-daily timestamp) over date (date only).
+  # For instantaneous 15-min/hourly measures, dateTime carries HH:MM:SS.
+  # For daily aggregate measures (mean, max, min), dateTime is midnight UTC
+  # and no time-of-occurrence (e.g. time of peak flow) is available from
+  # the HDE readings endpoint — derive it from the 15-min series if needed.
+  has_datetime <- "dateTime" %in% names(dt) &&
+                  any(!is.na(dt[["dateTime"]]))
+  ts_col <- if (has_datetime) "dateTime" else {
+    warning(sprintf(
+      "[HDE] No valid dateTime in response for %s — falling back to date-only timestamps.",
+      gauge_id
+    ))
+    "date"
+  }
   flag_col <- if ("quality" %in% names(dt)) "quality" else NULL
 
   dataset_id <- make_dataset_id(
@@ -118,7 +130,8 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
     data_type         = param_to_data_type(data_type),
     timestamp_col     = ts_col,
     value_col         = "value",
-    supplier_flag_col = flag_col
+    supplier_flag_col = flag_col,
+    period            = config$default_period
   )
 }
 

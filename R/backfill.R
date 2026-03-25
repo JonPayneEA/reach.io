@@ -153,6 +153,15 @@ run_backfill <- function(registry_path,
           dir.create(dirname(out_file), recursive = TRUE, showWarnings = FALSE)
           arrow::write_parquet(data_dt, out_file)
 
+          # Temporal resolution: read from the period column written by
+          # apply_bronze_schema(), or derive from PARAMETER_CONFIG if absent.
+          # The period column is present on all freshly-ingested datasets;
+          # fall back to config for any pre-existing files that lack it.
+          period_col <- if ("period" %in% names(data_dt))
+            data_dt$period[1L]
+          else
+            PARAMETER_CONFIG[[gauge$data_type]]$default_period %||% "unknown"
+
           # Provenance record
           write_provenance_record(
             register_path       = register_path,
@@ -163,7 +172,7 @@ run_backfill <- function(registry_path,
             data_type           = dt_code,
             time_period_start   = start_date,
             time_period_end     = end_date,
-            temporal_resolution = "unknown",
+            temporal_resolution = period_col %||% "unknown",
             method_of_receipt   = gauge$source_system %||% "unknown",
             file_path           = out_file
           )

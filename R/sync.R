@@ -76,9 +76,29 @@ fetch_readings <- function(measure_notation,
 
   # Parse date columns to proper R types for correct downstream filtering
   # e.g. dt[date >= as.Date("2022-06-01")]
-  if ("date"     %in% names(dt)) dt[, date     := as.Date(date)]
-  if ("dateTime" %in% names(dt)) dt[, dateTime := as.POSIXct(dateTime,
-                                                    tz = "UTC")]
+  if ("date" %in% names(dt)) dt[, date := as.Date(date)]
+
+  if ("dateTime" %in% names(dt)) {
+    ts_raw <- dt[["dateTime"]]
+    if (is.character(ts_raw)) {
+      # The EA API returns ISO 8601 datetimes, e.g. "2022-01-01T00:15:00" or
+      # "2022-01-01T00:15:00Z". R's as.POSIXct() without a format argument
+      # does not reliably parse the T-separator or Z suffix on all platforms
+      # (particularly Windows). Strip the trailing Z / +HH:MM offset and use
+      # an explicit format so all 15-min sub-daily times are preserved.
+      ts_clean <- sub("(Z|[+-]\\d{2}:\\d{2})$", "", ts_raw)
+      dt[, dateTime := as.POSIXct(ts_clean,
+                                   format = "%Y-%m-%dT%H:%M:%S",
+                                   tz     = "UTC")]
+    } else if (inherits(ts_raw, "POSIXct")) {
+      # httr / jsonlite may auto-parse dateTime to POSIXct using the local
+      # system timezone. Force the tzone attribute to UTC without shifting
+      # the underlying numeric value — EA API timestamps are always UTC.
+      attr(ts_raw, "tzone") <- "UTC"
+      data.table::set(dt, j = "dateTime", value = ts_raw)
+    }
+  }
+
   dt
 }
 
