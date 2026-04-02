@@ -667,6 +667,191 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
   invisible(x)
 }
 
+# =============================================================================
+# apply_inverse_rating()
+# =============================================================================
+
+# Vectorised inverse rating: given a numeric vector of flow values q and a
+# limbs data.table, returns a numeric vector of stage values h.
+#
+#   - NA or negative q         -> NA
+#   - q within a limb          -> h = (q / C)^(1/b) + a
+#   - q in a discontinuity gap -> junction stage (upper boundary of lower limb)
+#   - q above highest limb     -> extrapolate using the last limb
+#' @noRd
+.invert_stage <- function(q, limbs) {
+  nl <- nrow(limbs)
+  n  <- length(q)
+  h  <- rep(NA_real_, n)
+
+  # Q at the lower and upper boundary of each limb, evaluated from that limb's
+  # own equation.  Upper boundary of the last limb is Inf.
+  q_lower <- pmax(limbs$C * pmax(limbs$lower - limbs$a, 0)^limbs$b, 0)
+  q_upper <- ifelse(
+    is.finite(limbs$upper),
+    limbs$C * pmax(limbs$upper - limbs$a, 0)^limbs$b,
+    Inf
+  )
+  q_lower[is.nan(q_lower)] <- 0
+  q_upper[is.nan(q_upper)] <- 0
+
+  valid <- !is.na(q) & q >= 0
+
+  for (idx in which(valid)) {
+    qi <- q[idx]
+
+    # First limb whose upper-boundary Q >= qi
+    i <- which(q_upper >= qi)[1L]
+    if (is.na(i)) i <- nl  # above all limbs: extrapolate using last limb
+
+    if (i > 1L && qi < q_lower[i]) {
+      # Falls in a discontinuity gap between limbs i-1 and i
+      h[idx] <- limbs$upper[i - 1L]
+    } else if (qi <= 0) {
+      h[idx] <- limbs$lower[1L]
+    } else {
+      h[idx] <- (qi / limbs$C[i])^(1 / limbs$b[i]) + limbs$a[i]
+    }
+  }
+
+  h
+}
+
+#' @noRd
+.apply_inverse_rating_curve <- function(flow, rating,
+                                        measure_notation = "rated_level") {
+  if (!S7::S7_inherits(flow, Flow_Daily) &&
+      !S7::S7_inherits(flow, Flow_15min)) {
+    stop("`flow` must be a Flow_Daily or Flow_15min object.")
+  }
+
+  dt <- data.table::copy(flow@readings)
+
+  h <- .invert_stage(dt$value, rating@limbs)
+
+  dt[, value            := h]
+  dt[, measure_notation := measure_notation]
+  if ("doubtful" %in% names(dt)) dt[, doubtful := NULL]
+
+  if (S7::S7_inherits(flow, Flow_Daily)) {
+    Level_Daily(readings  = dt,
+                from_date = flow@from_date,
+                to_date   = flow@to_date)
+  } else {
+    Level_15min(readings  = dt,
+                from_date = flow@from_date,
+                to_date   = flow@to_date)
+  }
+}
+
+#' @noRd
+.apply_inverse_rating_set <- function(flow, rating,
+                                      measure_notation = "rated_level") {
+  if (!S7::S7_inherits(flow, Flow_Daily) &&
+      !S7::S7_inherits(flow, Flow_15min)) {
+    stop("`flow` must be a Flow_Daily or Flow_15min object.")
+  }
+
+  dt  <- data.table::copy(flow@readings)
+  q   <- dt$value
+  n   <- nrow(dt)
+  h   <- rep(NA_real_, n)
+
+  curve_idx <- .find_valid_curve(dt$date, rating)
+
+  n_unmatched <- sum(is.na(curve_idx))
+  if (n_unmatched > 0L) {
+    warning(sprintf(
+      "%d observation(s) fall outside all RatingCurve validity windows and were inverted as NA.",
+      n_unmatched
+    ))
+  }
+
+  for (i in seq_along(rating@curves)) {
+    rows <- which(curve_idx == i)
+    if (length(rows) == 0L) next
+    h[rows] <- .invert_stage(q[rows], rating@curves[[i]]@limbs)
+  }
+
+  dt[, value            := h]
+  dt[, measure_notation := measure_notation]
+  if ("doubtful" %in% names(dt)) dt[, doubtful := NULL]
+
+  if (S7::S7_inherits(flow, Flow_Daily)) {
+    Level_Daily(readings  = dt,
+                from_date = flow@from_date,
+                to_date   = flow@to_date)
+  } else {
+    Level_15min(readings  = dt,
+                from_date = flow@from_date,
+                to_date   = flow@to_date)
+  }
+}
+
+#' Convert rated discharge back to stage using an inverse rating curve
+#'
+#' Applies the inverse of the stage-discharge equation
+#' \eqn{Q = C(h - a)^b}, solving for \eqn{h}:
+#'
+#' \deqn{h = \left(\frac{Q}{C}\right)^{1/b} + a}
+#'
+#' to each observation in a [Flow_Daily] or [Flow_15min] object and returns a
+#' [Level_Daily] or [Level_15min] object of the same period.
+#'
+#' When `rating` is a [RatingSet], each observation is matched to the
+#' applicable [RatingCurve] by date, exactly as [apply_rating()] does for the
+#' forward direction.
+#'
+#' **Discontinuity gaps:** Where consecutive limbs do not meet at their shared
+#' boundary (i.e. `check_limb_continuity()` reports a non-zero gap), a flow
+#' value that falls inside the gap is mapped to the junction stage
+#' (the upper boundary of the lower limb). Use [fix_limb_continuity()] to
+#' remove gaps before inverting if this behaviour is undesirable.
+#'
+#' @param flow A [Flow_Daily] or [Flow_15min] object.
+#' @param rating A [RatingCurve] or [RatingSet].
+#' @param measure_notation Character scalar placed in the `measure_notation`
+#'   column of the output. Defaults to `"rated_level"`.
+#'
+#' @return A [Level_Daily] or [Level_15min] object matching the timestep of
+#'   `flow`. Stage values are in metres. Flow values of `NA` or below zero
+#'   are returned as `NA`.
+#'
+#' @seealso [apply_rating()] for the forward direction;
+#'   [check_limb_continuity()] to inspect gaps before inverting.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' limbs <- data.table::data.table(
+#'   lower    = c(0.00, 0.50),
+#'   upper    = c(0.50,  Inf),
+#'   C        = c(12.25, 23.25),
+#'   a        = c(-0.003, -0.098),
+#'   b        = c(1.641, 2.706),
+#'   doubtful = c(FALSE, TRUE)
+#' )
+#' rc    <- RatingCurve(limbs, station_id = "510310", source = "WISKI")
+#' flow  <- apply_rating(level_obj, rc)
+#' level <- apply_inverse_rating(flow, rc)
+#' }
+apply_inverse_rating <- function(flow, rating,
+                                 measure_notation = "rated_level") {
+  if (S7::S7_inherits(rating, RatingCurve)) {
+    .apply_inverse_rating_curve(flow, rating, measure_notation)
+  } else if (S7::S7_inherits(rating, RatingSet)) {
+    .apply_inverse_rating_set(flow, rating, measure_notation)
+  } else {
+    stop("`rating` must be a RatingCurve or RatingSet.")
+  }
+}
+
+
+# =============================================================================
+# Print methods
+# =============================================================================
+
 .print_RatingSet <- function(x, ...) {
   fmt_date <- function(d) if (inherits(d, "Date")) format(d) else "-"
 
