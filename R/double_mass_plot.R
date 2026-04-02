@@ -41,9 +41,20 @@ NULL
   )
 }
 
-# Cumulative sum that treats NA as 0 contribution (no data = no volume added)
-#' @noRd
-.cumsumNA <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
+#' Cumulative sum treating NA as zero contribution
+#'
+#' Replacement for \code{cumsum()} that treats \code{NA} values as contributing
+#' zero to the running total rather than propagating \code{NA} through all
+#' subsequent values. Useful for accumulating rainfall or volume series where
+#' missing timesteps should not reset the cumulative total.
+#'
+#' @param x A numeric vector.
+#' @return A numeric vector of the same length as \code{x}.
+#' @export
+#' @examples
+#' cumsum_na(c(1, NA, 3))  # returns c(1, 1, 4)
+#' cumsum_na(c(NA, NA))    # returns c(0, 0)
+cumsum_na <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
 
 # Auto-generate a readable axis label from a list of objects
 #' @noRd
@@ -283,8 +294,8 @@ double_mass_plot <- function(x_data,
     stop("No overlapping timestamps between X and Y data sources.")
   }
 
-  aligned[, cum_x := .cumsumNA(x_val)]
-  aligned[, cum_y := .cumsumNA(y_val)]
+  aligned[, cum_x := cumsum_na(x_val)]
+  aligned[, cum_y := cumsum_na(y_val)]
 
   # -- Auto labels and subtitle
   if (is.null(label_x)) label_x <- .axis_label(x_data, output_units)
