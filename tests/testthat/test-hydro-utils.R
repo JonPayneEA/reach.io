@@ -202,3 +202,148 @@ test_that("format_for_pdm errors on missing value column", {
 test_that("format_for_pdm errors on non-data.frame input", {
   expect_error(format_for_pdm(list(dateTime = 1, value = 1), "flow"), "data.frame")
 })
+
+
+# =============================================================================
+# format_for_fmp()
+# =============================================================================
+
+# Helper: make a small Flow_15min object with known values
+make_flow_15min_fmp <- function(values, start = as.POSIXct("2024-01-01 09:00:00", tz = "UTC")) {
+  n  <- length(values)
+  dt <- data.table(
+    dateTime         = start + (seq_len(n) - 1L) * 900L,
+    date             = as.Date(start),
+    value            = values,
+    measure_notation = "test_flow"
+  )
+  Flow_15min(readings = dt, from_date = "2024-01-01", to_date = "2024-01-02")
+}
+
+test_that("format_for_fmp: single site produces 4 header rows + n data rows", {
+  flow  <- make_flow_15min_fmp(c(12.5, 12.6, 12.4))
+  lines <- format_for_fmp(list(Bruton = flow))
+  expect_length(lines, 4L + 3L)
+})
+
+test_that("format_for_fmp: Row 4 is 'Time,<ied_ref>'", {
+  flow  <- make_flow_15min_fmp(c(10, 11))
+  lines <- format_for_fmp(
+    list(Bruton = flow),
+    gauge_ids = "405553",
+    ied_refs  = "Bruton_405553"
+  )
+  expect_equal(lines[4L], "Time,Bruton_405553")
+})
+
+test_that("format_for_fmp: Row 4 IED refs auto-constructed from names + gauge_ids", {
+  flow  <- make_flow_15min_fmp(c(10, 11))
+  lines <- format_for_fmp(list(Bruton = flow), gauge_ids = "405553")
+  expect_equal(lines[4L], "Time,Bruton_405553")
+})
+
+test_that("format_for_fmp: Row 4 falls back to list names when gauge_ids absent", {
+  flow  <- make_flow_15min_fmp(c(10, 11))
+  lines <- format_for_fmp(list(MyGauge = flow))
+  expect_equal(lines[4L], "Time,MyGauge")
+})
+
+test_that("format_for_fmp: Row 3 blank when gauge_ids not supplied", {
+  flow  <- make_flow_15min_fmp(c(10, 11))
+  lines <- format_for_fmp(list(Bruton = flow))
+  expect_equal(lines[3L], ",")   # blank first cell, blank site cell
+})
+
+test_that("format_for_fmp: Row 3 contains gauge_ids when supplied", {
+  flow  <- make_flow_15min_fmp(c(10, 11))
+  lines <- format_for_fmp(list(Bruton = flow), gauge_ids = "405553")
+  expect_equal(lines[3L], ",405553")
+})
+
+test_that("format_for_fmp: Row 1 contains title, Row 2 contains comment", {
+  flow  <- make_flow_15min_fmp(c(10))
+  lines <- format_for_fmp(list(s = flow), title = "MyTitle", comment = "QA check")
+  expect_true(startsWith(lines[1L], "MyTitle"))
+  expect_true(startsWith(lines[2L], "QA check"))
+})
+
+test_that("format_for_fmp: 15-min data produces relative hours 0.000, 0.250, 0.500", {
+  flow  <- make_flow_15min_fmp(c(10, 11, 12))
+  lines <- format_for_fmp(list(s = flow))
+  data_lines <- lines[5:7]
+  times <- vapply(strsplit(data_lines, ","), `[[`, character(1L), 1L)
+  expect_equal(times, c("0.000", "0.250", "0.500"))
+})
+
+test_that("format_for_fmp: start_time shifts relative hours correctly", {
+  flow  <- make_flow_15min_fmp(c(10, 11),
+             start = as.POSIXct("2024-01-01 10:00:00", tz = "UTC"))
+  t0    <- as.POSIXct("2024-01-01 09:00:00", tz = "UTC")
+  lines <- format_for_fmp(list(s = flow), start_time = t0)
+  first_time <- strsplit(lines[5L], ",")[[1L]][1L]
+  expect_equal(first_time, "1.000")   # 10:00 is 1 hour after 09:00
+})
+
+test_that("format_for_fmp: na_fill = 0 replaces NA in output", {
+  flow  <- make_flow_15min_fmp(c(10, NA, 12))
+  lines <- format_for_fmp(list(s = flow), na_fill = 0)
+  row6  <- strsplit(lines[6L], ",")[[1L]]
+  expect_equal(row6[2L], "0.000")
+})
+
+test_that("format_for_fmp: NA written as blank by default", {
+  flow  <- make_flow_15min_fmp(c(10, NA, 12))
+  lines <- format_for_fmp(list(s = flow))
+  row6  <- strsplit(lines[6L], ",")[[1L]]
+  expect_equal(row6[2L], "")
+})
+
+test_that("format_for_fmp: multi-site produces correct column count in Row 4", {
+  f1    <- make_flow_15min_fmp(c(10, 11))
+  f2    <- make_flow_15min_fmp(c(8, 9))
+  lines <- format_for_fmp(
+    list(Bruton = f1, Wincanton = f2),
+    gauge_ids = c("405553", "365943")
+  )
+  row4_cells <- strsplit(lines[4L], ",")[[1L]]
+  expect_length(row4_cells, 3L)   # Time + 2 sites
+  expect_equal(row4_cells[1L], "Time")
+  expect_equal(row4_cells[2L], "Bruton_405553")
+  expect_equal(row4_cells[3L], "Wincanton_365943")
+})
+
+test_that("format_for_fmp: single unnamed Flow object accepted without error", {
+  flow  <- make_flow_15min_fmp(c(10, 11))
+  expect_no_error(format_for_fmp(flow))
+})
+
+test_that("format_for_fmp: writes to file when out_file is provided", {
+  flow <- make_flow_15min_fmp(c(10, 11))
+  tmp  <- tempfile(fileext = ".csv")
+  ret  <- format_for_fmp(list(s = flow), out_file = tmp)
+  expect_true(file.exists(tmp))
+  expect_equal(ret, tmp)
+  written <- readLines(tmp)
+  in_mem  <- format_for_fmp(list(s = flow))
+  expect_equal(written, in_mem)
+})
+
+test_that("format_for_fmp: errors on non-Flow input", {
+  expect_error(format_for_fmp(list(1, 2, 3)), "Flow_Daily or Flow_15min")
+})
+
+test_that("format_for_fmp: errors when gauge_ids length mismatches flows", {
+  flow <- make_flow_15min_fmp(c(10))
+  expect_error(
+    format_for_fmp(list(s = flow), gauge_ids = c("A", "B")),
+    "gauge_ids.*has 2"
+  )
+})
+
+test_that("format_for_fmp: errors when ied_refs length mismatches flows", {
+  flow <- make_flow_15min_fmp(c(10))
+  expect_error(
+    format_for_fmp(list(s = flow), ied_refs = c("A", "B")),
+    "ied_refs.*has 2"
+  )
+})
