@@ -11,14 +11,14 @@ their own responsibilities and release cycles.
 ```
 ┌─────────────────────────────────────────────────────┐
 │   reach.hydro   — hydrological analysis & plotting   │
-│   <spatial pkg> — catchment geometry & weighting     │
+│   reach.basin   — catchment geometry & weighting     │
 ├─────────────────────────────────────────────────────┤
 │   reach.io      — data ingestion, Bronze/Silver/Gold │
 │                   pipeline, rating curves  (current) │
 └─────────────────────────────────────────────────────┘
 ```
 
-`reach.hydro` and the spatial package both depend on reach.io for S7 class
+`reach.hydro` and `reach.basin` both depend on reach.io for S7 class
 definitions and shared utilities (e.g. `cumsum_na()`). They do not depend on
 each other.
 
@@ -56,7 +56,7 @@ Replaces and extends the analysis functions currently in `riskyData`.
 
 ---
 
-## Spatial Package
+## reach.basin
 
 **Purpose:** Catchment geometry, gauge weighting, and spatial analysis tools.
 Replaces the spatial functions in `mappER` with a clean `sf`-native
@@ -66,6 +66,8 @@ implementation that has no hidden external dependencies.
 
 ### Planned Functions
 
+#### Catchment geometry & weighting
+
 | Function | Description | Replaces |
 |---|---|---|
 | `load_catchment(filepath)` | Load and validate CRS of a catchment shapefile | `mappER::loadCatchment()` |
@@ -74,6 +76,37 @@ implementation that has no hidden external dependencies.
 | `saar_adjusted_weights(thiessen_w, gauge_saar, catchment_saar)` | Three-method weight table: Thiessen, SAAR-adjusted, SAAR-adjusted rescaled | Manual in operational script §7 |
 | `elevation_weights(gauges, hypsometric_data)` | Elevation-band weights derived from hypsometric curve | Manual in operational script §8 |
 | `plot_hypsometric_curve(hyps_data, gauges)` | Hypsometric curve with gauge elevation overlaid as points | Manual in operational script §8 |
+| `gauge_to_catchment_weights(gauges, catchment, method)` | Generalised weight calculator supporting Thiessen, elevation-weighted, and distance-decay in one interface | Manual combinations in operational script |
+| `catchment_overlap_matrix(registry)` | Identify nested/overlapping catchments in the gauge registry; flags double-counting risk in areal rainfall estimates | — |
+
+#### Rainfall spatial processing
+
+| Function | Description | Notes |
+|---|---|---|
+| `extract_radar_rainfall(catchment, radar_stack)` | Extract areal rainfall from NIMROD or CEH-GEAR grids for a catchment polygon using partial-cell weighting | Requires `exactextractr` |
+| `areal_reduction_factor(area_km2, duration_hr)` | FEH/NERC ARF lookup for design storm scaling | Needed when setting boundary conditions from design events |
+
+#### Catchment descriptors
+
+| Function | Description | Notes |
+|---|---|---|
+| `extract_catchment_attrs(catchment)` | Pull baseflow index, mean slope, dominant soil type, woodland fraction from national datasets (HOST, LCM, OS Terrain) | Feeds ungauged estimation workflows |
+| `estimate_qmed(catchment)` | FEH statistical QMED from catchment descriptors | Useful for ungauged sites in the gauge registry |
+
+#### Real-time situational awareness
+
+| Function | Description | Notes |
+|---|---|---|
+| `spatial_interpolate_readings(readings_sf, grid, method)` | Kriging or IDW interpolation of current gauge readings onto a grid | Spatial picture of conditions across a region |
+| `travel_time_matrix(gauges, network)` | Hydraulic travel times between gauges from river network geometry | Useful for lead-time calculations and flood routing checks |
+| `assign_flood_warning_areas(gauges, fwa_polygons)` | Spatial join linking gauges to downstream Flood Warning Areas | Builds alert routing tables |
+
+#### Model validation
+
+| Function | Description | Notes |
+|---|---|---|
+| `compare_flood_extent(model_raster, observed_sf, threshold)` | Compute CSI, hit rate, and false alarm ratio between modelled inundation raster and observed extent | Observed extent from Sentinel-1 SAR or CEMS |
+| `fetch_sentinel_extent(aoi, date_range)` | Pull flood extent polygons from Copernicus Emergency Management Service or local processed SAR archive | Requires STAC/API access |
 
 ### Design Notes
 
@@ -91,6 +124,27 @@ implementation that has no hidden external dependencies.
   because `mappER::intersectPoly()` does not handle multi-polygon shapefiles
   correctly. The new implementation should handle these natively via
   `sf::st_cast()` before intersecting
+- `extract_radar_rainfall()` should use `exactextractr::exact_extract()` rather
+  than `raster::extract()` — `exactextractr` handles partial cells at catchment
+  boundaries correctly, which matters for small catchments relative to radar
+  grid resolution (1 km NIMROD)
+- `compare_flood_extent()` should return a named list with scalar skill scores
+  and an `sf` object of the TP/FP/FN geometry so results can be mapped as well
+  as tabulated
+- `gauge_to_catchment_weights()` should accept a `method` argument
+  (`"thiessen"`, `"elevation"`, `"distance_decay"`) and return a consistent
+  named numeric vector, so callers can swap methods without changing downstream
+  code
+
+### Suggested Dependencies
+
+| Package | Purpose |
+|---|---|
+| `sf` | Vector geometry (all spatial functions) |
+| `terra` | Raster I/O and processing |
+| `exactextractr` | Fast, area-weighted raster extraction to polygons |
+| `whitebox` | DEM hydrological conditioning for catchment delineation |
+| `rstac` | STAC API access for Sentinel/CEH-GEAR rainfall grids |
 
 ### SAAR Datasets
 
@@ -116,5 +170,5 @@ argument:
 | `$hydroYearDay()` | `reach.io::add_hydro_year()` |
 | `$postOrder()` | `data.table::setorder(dt, dateTime)` |
 | `riskyData::cumsumNA()` | `reach.io::cumsum_na()` |
-| `mappER::loadCatchment()` | `<spatial pkg>::load_catchment()` |
-| `mappER::teeSun()` + `intersectPoly()` + `gaugeProp()` | `<spatial pkg>::thiessen_weights()` |
+| `mappER::loadCatchment()` | `reach.basin::load_catchment()` |
+| `mappER::teeSun()` + `intersectPoly()` + `gaugeProp()` | `reach.basin::thiessen_weights()` |
