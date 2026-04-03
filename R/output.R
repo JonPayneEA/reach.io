@@ -140,9 +140,35 @@ format_for_pdm <- function(dt, measure = c("rainfall", "flow", "level"),
 #' 0.250,12.600,8.200
 #' ```
 #'
-#' IED references in Row 4 default to `"<name>_<gauge_id>"` when `names(flows)`
-#' and `gauge_ids` are both supplied, falling back to `names(flows)` or simple
-#' `"site_1"` / `"site_2"` labels when metadata is absent.
+#' **IED reference construction (Row 4):**
+#' The column headers in Row 4 are resolved in order of preference:
+#' \enumerate{
+#'   \item `ied_refs` supplied explicitly — used as-is.
+#'   \item `names(flows)` and `gauge_ids` both present — concatenated as
+#'     `"<name>_<gauge_id>"` (e.g. `"Bruton_405553"`).
+#'   \item Only `gauge_ids` supplied — gauge IDs used directly.
+#'   \item Only `names(flows)` present — list names used directly.
+#'   \item No metadata available — fallback labels `"site_1"`, `"site_2"`, …
+#' }
+#'
+#' **Multi-site merging:**
+#' When `flows` contains more than one object, all time series are merged by a
+#' full outer join on `dateTime`. Sites with different date ranges or missing
+#' timesteps produce `NA` (or `na_fill`) in the merged output rather than
+#' silently truncating any series to the shortest.
+#'
+#' **Reference time (`start_time`):**
+#' The time column is hours elapsed since `start_time`. By default this is the
+#' earliest `dateTime` value across all input series, giving `t = 0` at the
+#' first observation. Override `start_time` when the FMP simulation clock must
+#' start before the data begins — for example, when supplying a warm-up period
+#' or aligning multiple boundary files to a common origin.
+#'
+#' **In-memory vs. file output:**
+#' Omitting `out_file` returns the formatted lines as a character vector,
+#' which is convenient for inspection (`cat(lines, sep = "\n")`) and unit
+#' testing without touching the file system. Supply `out_file` to write
+#' directly to disk; parent directories are created automatically.
 #'
 #' @param flows A named `list` of [Flow_Daily] or [Flow_15min] objects, one per
 #'   gauge. A single (unnamed) object is also accepted and wrapped automatically.
