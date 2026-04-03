@@ -11,14 +11,14 @@ their own responsibilities and release cycles.
 ```
 ┌─────────────────────────────────────────────────────┐
 │   reach.hydro   — hydrological analysis & plotting   │
-│   <spatial pkg> — catchment geometry & weighting     │
+│   reach.basin   — catchment geometry & weighting     │
 ├─────────────────────────────────────────────────────┤
 │   reach.io      — data ingestion, Bronze/Silver/Gold │
 │                   pipeline, rating curves  (current) │
 └─────────────────────────────────────────────────────┘
 ```
 
-`reach.hydro` and the spatial package both depend on reach.io for S7 class
+`reach.hydro` and `reach.basin` both depend on reach.io for S7 class
 definitions and shared utilities (e.g. `cumsum_na()`). They do not depend on
 each other.
 
@@ -56,7 +56,7 @@ Replaces and extends the analysis functions currently in `riskyData`.
 
 ---
 
-## Spatial Package
+## reach.basin
 
 **Purpose:** Catchment geometry, gauge weighting, and spatial analysis tools.
 Replaces the spatial functions in `mappER` with a clean `sf`-native
@@ -170,5 +170,5 @@ argument:
 | `$hydroYearDay()` | `reach.io::add_hydro_year()` |
 | `$postOrder()` | `data.table::setorder(dt, dateTime)` |
 | `riskyData::cumsumNA()` | `reach.io::cumsum_na()` |
-| `mappER::loadCatchment()` | `<spatial pkg>::load_catchment()` |
-| `mappER::teeSun()` + `intersectPoly()` + `gaugeProp()` | `<spatial pkg>::thiessen_weights()` |
+| `mappER::loadCatchment()` | `reach.basin::load_catchment()` |
+| `mappER::teeSun()` + `intersectPoly()` + `gaugeProp()` | `reach.basin::thiessen_weights()` |
