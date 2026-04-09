@@ -78,17 +78,18 @@
     data_rows <- data_rows[nzchar(data_rows)]
     if (!length(data_rows)) return(invisible(NULL))
 
-    # Pre-process data rows: collapse any excess comma-delimited fields
-    # back into the Remarks column (the last column) before passing to
-    # fread. The Remarks text frequently contains commas, which fread
-    # would otherwise interpret as extra field separators and stop early.
+    # Pre-process data rows: when the Remarks field (last column) contains
+    # commas, fread splits it into extra fields and stops early. Fix: collapse
+    # overflow pieces back into the Remarks field and wrap it in CSV double-
+    # quotes so fread treats its internal commas as content, not separators.
     n_expected <- length(strsplit(block[header_i], ",", fixed = TRUE)[[1L]])
     clean_rows <- vapply(data_rows, function(row) {
       parts <- strsplit(row, ",", fixed = TRUE)[[1L]]
       if (length(parts) <= n_expected) return(row)
-      paste(c(parts[seq_len(n_expected - 1L)],
-              paste(parts[n_expected:length(parts)], collapse = ",")),
-            collapse = ",")
+      remarks <- paste(parts[n_expected:length(parts)], collapse = ",")
+      # CSV-quote the Remarks field; escape any internal double-quotes as ""
+      remarks_quoted <- paste0('"', gsub('"', '""', remarks, fixed = TRUE), '"')
+      paste(c(parts[seq_len(n_expected - 1L)], remarks_quoted), collapse = ",")
     }, character(1L), USE.NAMES = FALSE)
 
     dt <- data.table::fread(
