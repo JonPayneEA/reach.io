@@ -77,14 +77,37 @@
     data_rows <- block[(header_i + 1L):length(block)]
     data_rows <- data_rows[nzchar(data_rows)]
     if (!length(data_rows)) return(invisible(NULL))
-    
+
+    # Count expected fields from the header so we can detect and repair overflow
+    # columns caused by commas inside the Remarks field (the final column).
+    n_expected <- length(strsplit(block[header_i], ",", fixed = TRUE)[[1L]])
+
     dt <- data.table::fread(
       text       = c(block[header_i], data_rows),
       sep        = ",",
+      fill       = TRUE,        # don't stop on rows with extra comma-split fields
       na.strings = c("---", "")
     )
-    
+
     data.table::setnames(dt, make.names(names(dt), unique = TRUE))
+
+    # Re-join any overflow columns that fread created for commas inside the
+    # Remarks text. For each excess column, paste its non-NA values back into
+    # the last named column with the original comma separator.
+    if (ncol(dt) > n_expected) {
+      last_col <- names(dt)[n_expected]
+      overflow <- names(dt)[(n_expected + 1L):ncol(dt)]
+      for (oc in overflow) {
+        dt[!is.na(get(oc)),
+           (last_col) := paste0(
+             data.table::fifelse(
+               is.na(get(last_col)), "", paste0(get(last_col), ",")
+             ),
+             get(oc)
+           )]
+      }
+      dt[, (overflow) := NULL]
+    }
     
     station_num <- meta[["Station Number"]]
     if (is.null(station_num) || is.na(station_num)) return(invisible(NULL))
