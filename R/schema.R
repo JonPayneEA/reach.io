@@ -61,6 +61,12 @@ VALID_CATEGORIES <- c("hydrometric", "radarH19", "MOSES")
 #' Framework (Appendix A): `[SupplierCode]_[SiteID]_[DataType]_[YYYYMMDD]`
 #' e.g. `EA_39001_Q_20260115`.
 #'
+#' When `trace` is supplied, a parameter-level discriminator is inserted before
+#' the date: `[SupplierCode]_[SiteID]_[DataType]_[Trace]_[YYYYMMDD]`. This is
+#' used by the WISKI `.all` ingestor to distinguish multiple time series for the
+#' same station that share a data type — for example upstream stage (`sg`) and
+#' downstream stage (`sg_ds`) at the same WISKI station number.
+#'
 #' @param supplier_code Character. Supplier code, e.g. `"EA"`, `"WISKI"`,
 #'   `"MO"`. Use [source_to_supplier()] to derive from `source_system`.
 #' @param site_id Character. Gauge or site identifier.
@@ -69,6 +75,12 @@ VALID_CATEGORIES <- c("hydrometric", "radarH19", "MOSES")
 #'   parameter name.
 #' @param received_date Date or character. Date the data was received or
 #'   ingested. Defaults to today.
+#' @param trace Character or `NULL`. Optional parameter-level trace code to
+#'   disambiguate multiple series with the same station and data type. For
+#'   WISKI `.all` data this is derived from the third segment of the
+#'   `Time series Name` field (e.g. `"sg_ds"` from
+#'   `"THM/3401TH/SG_DS/15m.Cmd.RelAbs.P"`). `NULL` (default) omits the
+#'   trace and produces the standard four-part ID.
 #'
 #' @return A length-1 character string.
 #'
@@ -77,15 +89,26 @@ VALID_CATEGORIES <- c("hydrometric", "radarH19", "MOSES")
 #' @examples
 #' make_dataset_id("EA", "39001", "Q")
 #' make_dataset_id("WISKI", "2723TH", "H", received_date = "2026-01-15")
+#' make_dataset_id("WISKI", "3401TH", "H", trace = "sg_ds")
 make_dataset_id <- function(supplier_code,
                             site_id,
                             data_type,
-                            received_date = Sys.Date()) {
-  sprintf("%s_%s_%s_%s",
-          supplier_code,
-          site_id,
-          data_type,
-          format(as.Date(received_date), "%Y%m%d"))
+                            received_date = Sys.Date(),
+                            trace = NULL) {
+  if (!is.null(trace) && nzchar(trace)) {
+    sprintf("%s_%s_%s_%s_%s",
+            supplier_code,
+            site_id,
+            data_type,
+            trace,
+            format(as.Date(received_date), "%Y%m%d"))
+  } else {
+    sprintf("%s_%s_%s_%s",
+            supplier_code,
+            site_id,
+            data_type,
+            format(as.Date(received_date), "%Y%m%d"))
+  }
 }
 
 
