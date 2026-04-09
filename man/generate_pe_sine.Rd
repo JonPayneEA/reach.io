@@ -20,27 +20,20 @@ generate_pe_sine(B, A, phi, start, end, as_s7 = TRUE)
 (inclusive).}
 
 \item{as_s7}{Logical. If \code{TRUE} (default), wrap the result in a
-\code{\link{PotEvap_Daily}} S7 object with \code{source_name = "sine_curve"}.
+\link{PotEvap_Daily} S7 object with \code{source_name = "sine_curve"}.
 If \code{FALSE}, return a plain \code{data.table} with columns \code{date} and \code{pe}.}
 }
 \value{
-A \code{\link{PotEvap_Daily}} S7 object (when \code{as_s7 = TRUE}) or a
+A \link{PotEvap_Daily} S7 object (when \code{as_s7 = TRUE}) or a
 \code{data.table} with columns \code{date} (Date) and \code{pe} (numeric,
 mm day\eqn{^{-1}}) (when \code{as_s7 = FALSE}).
-
-PE values are clamped to zero — negative PE is physically impossible and
-can result from large amplitude values in winter.
 }
 \description{
 Produces a daily PE time series over a specified date range using the
 standard annual sine model:
 \deqn{PE(t) = \max\bigl(0,\; B + A \sin\!\left(\frac{2\pi}{365.25}(doy - \phi)\right)\bigr)}
-
-Typical usage: generate synthetic PE for model spin-up periods, ungauged
-catchments (using \code{\link{regionalise_pe_sine}} to obtain parameters), or
-sensitivity analysis. The result can be passed directly to
-\code{\link{disagg_to_15min}} to produce a 15-minute PE series for
-sub-daily modelling.
+Values are clamped to zero so physically impossible negative PE is never
+returned.
 }
 \examples{
 # Generate 5 years of synthetic PE from fitted parameters
@@ -49,16 +42,9 @@ pe_obj <- generate_pe_sine(params$B, params$A, params$phi,
                            start = "2010-01-01", end = "2014-12-31")
 pe_obj  # PotEvap_Daily S7 object
 
-# Disaggregate to 15-min
-pe_15min <- disagg_to_15min(pe_obj)
-
 # Plain data.table output
 dt <- generate_pe_sine(2.5, 2.0, 172,
                        start = "2020-01-01", end = "2020-12-31",
                        as_s7 = FALSE)
 head(dt)
-}
-\seealso{
-\code{\link{fit_pe_sine}}, \code{\link{regionalise_pe_sine}},
-\code{\link{disagg_to_15min}}, \code{\link{PotEvap_Daily}}
 }

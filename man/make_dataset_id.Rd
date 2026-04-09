@@ -4,7 +4,13 @@
 \alias{make_dataset_id}
 \title{Generate a Bronze dataset ID}
 \usage{
-make_dataset_id(supplier_code, site_id, data_type, received_date = Sys.Date())
+make_dataset_id(
+  supplier_code,
+  site_id,
+  data_type,
+  received_date = Sys.Date(),
+  trace = NULL
+)
 }
 \arguments{
 \item{supplier_code}{Character. Supplier code, e.g. \code{"EA"}, \code{"WISKI"},
@@ -18,6 +24,13 @@ parameter name.}
 
 \item{received_date}{Date or character. Date the data was received or
 ingested. Defaults to today.}
+
+\item{trace}{Character or \code{NULL}. Optional parameter-level trace code to
+disambiguate multiple series with the same station and data type. For
+WISKI \code{.all} data this is derived from the third segment of the
+\verb{Time series Name} field (e.g. \code{"sg_ds"} from
+\code{"THM/3401TH/SG_DS/15m.Cmd.RelAbs.P"}). \code{NULL} (default) omits the
+trace and produces the standard four-part ID.}
 }
 \value{
 A length-1 character string.
@@ -27,7 +40,15 @@ Produces a dataset ID in the format specified by the Hydrometric Data
 Framework (Appendix A): \verb{[SupplierCode]_[SiteID]_[DataType]_[YYYYMMDD]}
 e.g. \code{EA_39001_Q_20260115}.
 }
+\details{
+When \code{trace} is supplied, a parameter-level discriminator is inserted before
+the date: \verb{[SupplierCode]_[SiteID]_[DataType]_[Trace]_[YYYYMMDD]}. This is
+used by the WISKI \code{.all} ingestor to distinguish multiple time series for the
+same station that share a data type — for example upstream stage (\code{sg}) and
+downstream stage (\code{sg_ds}) at the same WISKI station number.
+}
 \examples{
 make_dataset_id("EA", "39001", "Q")
 make_dataset_id("WISKI", "2723TH", "H", received_date = "2026-01-15")
+make_dataset_id("WISKI", "3401TH", "H", trace = "sg_ds")
 }

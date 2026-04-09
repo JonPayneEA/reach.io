@@ -10,6 +10,7 @@ ingest_all_file(
   category = "hydrometric",
   register_path = file.path(output_dir, "register", "hydrometric_data_register.csv"),
   chunk_size = 50000L,
+  encoding = "latin1",
   keep_tmp = FALSE,
   registry_path = NULL
 )
@@ -26,6 +27,11 @@ subdirectories (\verb{gauge_id=<id>/}) are created inside this path.}
 \item{chunk_size}{Integer. Lines to read per chunk in pass 1. Default
 50000. Reduce if memory is constrained; increase for faster I/O on
 large disks.}
+
+\item{encoding}{Character. File encoding passed to \code{\link[base:connections]{base::file()}}. Default
+\code{"latin1"}, which covers Windows-1252 — the encoding used by WISKI
+exports from EA Windows systems. Change to \code{"UTF-8"} if your \code{.all}
+files are known to be UTF-8 encoded.}
 
 \item{keep_tmp}{Logical. Keep intermediate Parquet files after pass 2?
 Default \code{FALSE}. Set \code{TRUE} for debugging or to re-run pass 2 without
