@@ -1,6 +1,6 @@
 Package: reach.io
 Title: Hydrometric Data Pipeline Tools for the Environment Agency API
-Version: 0.1.0
+Version: 0.1.1
 Authors@R: person("Jonathan", "Payne", email = "jonathan.payne@environment-agency.gov.uk",
     role = c("aut", "cre"))
 Description: A hydrometric data pipeline toolkit for the Environment Agency
