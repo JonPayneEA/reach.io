@@ -87,7 +87,7 @@
     
     station_num <- meta[["Station Number"]]
     if (is.null(station_num) || is.na(station_num)) return(invisible(NULL))
-    
+
     dt[, timestamp      := as.POSIXct(Time.stamp,
                                       format = "%d/%m/%Y %H:%M:%S",
                                       tz     = "UTC")]
@@ -99,8 +99,27 @@
     dt[, ts_name        := meta[["Time series Name"]]  %||% NA_character_]
     dt[, lon            := suppressWarnings(as.numeric(meta[["Longitude"]]))]
     dt[, lat            := suppressWarnings(as.numeric(meta[["Latitude"]]))]
-    
-    out_path <- file.path(tmp_dir, paste0(station_num, ".parquet"))
+
+    # Derive a short parameter code from the structured WISKI ts_name field.
+    # ts_name follows the pattern <catchment>/<station>/<param_code>/<resolution>…
+    # e.g. "THM/3401TH/SG_DS/15m.Cmd.RelAbs.P" → param_code = "sg_ds".
+    # This is used to disambiguate multiple series (e.g. upstream vs downstream
+    # stage) that share the same station number and data_type code.
+    raw_ts     <- meta[["Time series Name"]] %||% NA_character_
+    param_code <- if (!is.na(raw_ts)) {
+      ts_parts <- strsplit(raw_ts, "/", fixed = TRUE)[[1L]]
+      if (length(ts_parts) >= 3L) {
+        tolower(gsub("[^A-Za-z0-9]+", "_", ts_parts[3L]))
+      } else {
+        tolower(gsub("[^A-Za-z0-9]+", "_", raw_ts))
+      }
+    } else {
+      "unknown"
+    }
+
+    # Separator __ is safe: station numbers are alphanumeric, param codes
+    # contain only [a-z0-9_] after sanitisation.
+    out_path <- file.path(tmp_dir, paste0(station_num, "__", param_code, ".parquet"))
     
     # Append to existing file for this station if one already exists in this
     # pass (multiple blocks for the same station within one .all file)
@@ -177,8 +196,12 @@
   log_rows <- vector("list", length(file_groups))
   
   for (k in seq_along(file_groups)) {
-    station  <- names(file_groups)[k]
-    files    <- file_groups[[station]]
+    # Keys are now "<station_num>__<param_code>" — split to recover each part.
+    key        <- names(file_groups)[k]
+    key_parts  <- strsplit(key, "__", fixed = TRUE)[[1L]]
+    station    <- key_parts[1L]
+    param_code <- if (length(key_parts) > 1L && nzchar(key_parts[2L])) key_parts[2L] else NULL
+    files      <- file_groups[[key]]
     
     dt <- data.table::rbindlist(
       lapply(files, function(f) {
@@ -214,13 +237,16 @@
 
     # Detect temporal resolution — try ts_name metadata first (faster), then
     # fall back to estimating from the median timestep.
-    # WISKI ts_name examples: "Mean 15min (Mrt0)", "Daily Mean (Mrt0)",
+    # WISKI ts_name examples (Kisters style): "Mean 15min (Mrt0)", "Daily Mean (Mrt0)",
     # "Hourly Mean (Mrt0)", "15 Min Instantaneous"
+    # WISKI ts_name examples (path style): "THM/3401TH/SG/15m.Cmd.RelAbs.P"
+    # The \b15m\b pattern matches "15m" as a whole word (surrounded by / or .)
+    # without also matching "315m" or the "15m" within "15min".
     raw_ts_name <- if ("ts_name" %in% names(dt)) dt$ts_name[1L] else NA_character_
     period_str  <- data.table::fcase(
-      grepl("15.?min",                  raw_ts_name, ignore.case = TRUE), "15min",
-      grepl("hourly|1.?hour|60.?min",   raw_ts_name, ignore.case = TRUE), "hourly",
-      grepl("daily|day",                raw_ts_name, ignore.case = TRUE), "daily",
+      grepl("15[- ]?min|\\b15m\\b",        raw_ts_name, ignore.case = TRUE, perl = TRUE), "15min",
+      grepl("hourly|1.?hour|60.?min",       raw_ts_name, ignore.case = TRUE), "hourly",
+      grepl("daily|day",                    raw_ts_name, ignore.case = TRUE), "daily",
       default = NA_character_
     )
 
@@ -256,7 +282,8 @@
     # -- Apply Bronze schema and write to framework folder structure ----------
     supplier_code <- "WISKI"
     dataset_id    <- make_dataset_id(supplier_code, station, data_type,
-                                     received_date = run_date)
+                                     received_date = run_date,
+                                     trace = param_code)
     
     bronze_dt <- apply_bronze_schema(
       dt                = pre_dt,
