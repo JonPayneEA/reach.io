@@ -237,13 +237,16 @@
 
     # Detect temporal resolution — try ts_name metadata first (faster), then
     # fall back to estimating from the median timestep.
-    # WISKI ts_name examples: "Mean 15min (Mrt0)", "Daily Mean (Mrt0)",
+    # WISKI ts_name examples (Kisters style): "Mean 15min (Mrt0)", "Daily Mean (Mrt0)",
     # "Hourly Mean (Mrt0)", "15 Min Instantaneous"
+    # WISKI ts_name examples (path style): "THM/3401TH/SG/15m.Cmd.RelAbs.P"
+    # The \b15m\b pattern matches "15m" as a whole word (surrounded by / or .)
+    # without also matching "315m" or the "15m" within "15min".
     raw_ts_name <- if ("ts_name" %in% names(dt)) dt$ts_name[1L] else NA_character_
     period_str  <- data.table::fcase(
-      grepl("15.?min",                  raw_ts_name, ignore.case = TRUE), "15min",
-      grepl("hourly|1.?hour|60.?min",   raw_ts_name, ignore.case = TRUE), "hourly",
-      grepl("daily|day",                raw_ts_name, ignore.case = TRUE), "daily",
+      grepl("15[- ]?min|\\b15m\\b",        raw_ts_name, ignore.case = TRUE, perl = TRUE), "15min",
+      grepl("hourly|1.?hour|60.?min",       raw_ts_name, ignore.case = TRUE), "hourly",
+      grepl("daily|day",                    raw_ts_name, ignore.case = TRUE), "daily",
       default = NA_character_
     )
 
