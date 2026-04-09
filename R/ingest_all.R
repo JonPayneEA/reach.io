@@ -51,11 +51,12 @@
 #' @return Invisibly NULL. Side effect: writes Parquet files to `tmp_dir`.
 #'
 #' @noRd
-.parse_all_blocks <- function(path, tmp_dir, chunk_size = 50000L) {
-  
+.parse_all_blocks <- function(path, tmp_dir, chunk_size = 50000L,
+                               encoding = "latin1") {
+
   dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
-  
-  con <- file(path, open = "r", encoding = "UTF-8")
+
+  con <- file(path, open = "r", encoding = encoding)
   on.exit(close(con))
   
   carried <- character(0)
@@ -370,6 +371,10 @@
 #' @param chunk_size Integer. Lines to read per chunk in pass 1. Default
 #'   50000. Reduce if memory is constrained; increase for faster I/O on
 #'   large disks.
+#' @param encoding Character. File encoding passed to [base::file()]. Default
+#'   `"latin1"`, which covers Windows-1252 — the encoding used by WISKI
+#'   exports from EA Windows systems. Change to `"UTF-8"` if your `.all`
+#'   files are known to be UTF-8 encoded.
 #' @param keep_tmp Logical. Keep intermediate Parquet files after pass 2?
 #'   Default `FALSE`. Set `TRUE` for debugging or to re-run pass 2 without
 #'   re-parsing.
@@ -421,6 +426,7 @@ ingest_all_file <- function(path,
                             register_path = file.path(output_dir, "register",
                                                       "hydrometric_data_register.csv"),
                             chunk_size    = 50000L,
+                            encoding      = "latin1",
                             keep_tmp      = FALSE,
                             registry_path = NULL) {
 
@@ -433,7 +439,7 @@ ingest_all_file <- function(path,
   )
 
   message(sprintf("Pass 1: parsing %s", basename(path)))
-  .parse_all_blocks(path, tmp_dir, chunk_size)
+  .parse_all_blocks(path, tmp_dir, chunk_size, encoding)
 
   message("Pass 2: merging to Bronze Parquet")
   log_dt <- .merge_all_parquets(tmp_dir, output_dir, run_date,
