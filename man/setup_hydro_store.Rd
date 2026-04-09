@@ -8,7 +8,7 @@ setup_hydro_store(
   root,
   categories = list(hydrometric = list(suppliers = c("EA", "WISKI", "NRFA",
     "rating_curves"), data_types = c("Q", "H", "P")), radarH19 = list(suppliers = "MO",
-    data_types = "P"), MOSES = list(suppliers = "MO", data_types = "SM")),
+    data_types = "P"), MOSES = list(suppliers = "MO", data_types = c("SM", "PE"))),
   gold_purposes = list(hydrometric = list(Q = c("FFA"), P = c("catchment_average"))),
   verbose = TRUE
 )

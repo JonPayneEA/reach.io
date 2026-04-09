@@ -19,14 +19,14 @@ or \code{"nls"} (direct nonlinear fit, may not converge for noisy series).}
 \value{
 A named list with elements:
 \describe{
-  \item{\code{B}}{Annual mean PE (mm day\eqn{^{-1}}).}
-  \item{\code{A}}{Amplitude (mm day\eqn{^{-1}}).}
-  \item{\code{phi}}{Phase offset (day of year of peak PE).}
-  \item{\code{r_squared}}{Coefficient of determination of the sine fit.}
-  \item{\code{rmse}}{Root mean squared error (mm day\eqn{^{-1}}).}
-  \item{\code{method}}{The method actually used (may differ from \code{method} if
-    NLS fell back to \code{"lm_fourier"}).}
-  \item{\code{n_obs}}{Number of observations used in the fit.}
+\item{\code{B}}{Annual mean PE (mm day\eqn{^{-1}}).}
+\item{\code{A}}{Amplitude (mm day\eqn{^{-1}}).}
+\item{\code{phi}}{Phase offset (day of year of peak PE).}
+\item{\code{r_squared}}{Coefficient of determination of the sine fit.}
+\item{\code{rmse}}{Root mean squared error (mm day\eqn{^{-1}}).}
+\item{\code{method}}{The method actually used (may differ from \code{method} if
+NLS fell back to \code{"lm_fourier"}).}
+\item{\code{n_obs}}{Number of observations used in the fit.}
 }
 }
 \description{
@@ -36,7 +36,8 @@ where \eqn{B} is the annual mean (mm day\eqn{^{-1}}), \eqn{A} is the
 amplitude (mm day\eqn{^{-1}}), and \eqn{\phi} is the phase offset
 (day of year of peak PE; approximately 172 for UK lowland catchments,
 i.e. around 21 June).
-
+}
+\details{
 Two fitting methods are available. \code{"lm_fourier"} (the default) rewrites
 the model as a linear regression via a Fourier identity, making it
 numerically stable and guaranteed to converge. \code{"nls"} fits the model
@@ -61,8 +62,4 @@ params$phi  # ~172
 
 # NLS method
 params_nls <- fit_pe_sine(pe_obs, dates, method = "nls")
-}
-\seealso{
-\code{\link{generate_pe_sine}}, \code{\link{regionalise_pe_sine}},
-\code{\link{compare_pe_sine}}
 }
