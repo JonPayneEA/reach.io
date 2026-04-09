@@ -78,36 +78,26 @@
     data_rows <- data_rows[nzchar(data_rows)]
     if (!length(data_rows)) return(invisible(NULL))
 
-    # Count expected fields from the header so we can detect and repair overflow
-    # columns caused by commas inside the Remarks field (the final column).
+    # Pre-process data rows: collapse any excess comma-delimited fields
+    # back into the Remarks column (the last column) before passing to
+    # fread. The Remarks text frequently contains commas, which fread
+    # would otherwise interpret as extra field separators and stop early.
     n_expected <- length(strsplit(block[header_i], ",", fixed = TRUE)[[1L]])
+    clean_rows <- vapply(data_rows, function(row) {
+      parts <- strsplit(row, ",", fixed = TRUE)[[1L]]
+      if (length(parts) <= n_expected) return(row)
+      paste(c(parts[seq_len(n_expected - 1L)],
+              paste(parts[n_expected:length(parts)], collapse = ",")),
+            collapse = ",")
+    }, character(1L), USE.NAMES = FALSE)
 
     dt <- data.table::fread(
-      text       = c(block[header_i], data_rows),
+      text       = c(block[header_i], clean_rows),
       sep        = ",",
-      fill       = TRUE,        # don't stop on rows with extra comma-split fields
       na.strings = c("---", "")
     )
 
     data.table::setnames(dt, make.names(names(dt), unique = TRUE))
-
-    # Re-join any overflow columns that fread created for commas inside the
-    # Remarks text. For each excess column, paste its non-NA values back into
-    # the last named column with the original comma separator.
-    if (ncol(dt) > n_expected) {
-      last_col <- names(dt)[n_expected]
-      overflow <- names(dt)[(n_expected + 1L):ncol(dt)]
-      for (oc in overflow) {
-        dt[!is.na(get(oc)),
-           (last_col) := paste0(
-             data.table::fifelse(
-               is.na(get(last_col)), "", paste0(get(last_col), ",")
-             ),
-             get(oc)
-           )]
-      }
-      dt[, (overflow) := NULL]
-    }
     
     station_num <- meta[["Station Number"]]
     if (is.null(station_num) || is.na(station_num)) return(invisible(NULL))
