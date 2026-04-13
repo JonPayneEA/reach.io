@@ -167,6 +167,14 @@ find_stations <- function(names     = NULL,
 
   dt <- unique(data.table::rbindlist(results, fill = TRUE), by = "notation")
 
+  # Guarantee all expected columns exist. Some are absent when no looked-up
+  # station returned that field (e.g. RLOIid is not present for WISKI-only
+  # sites). Without this, the by = .(... RLOIid ...) grouping below errors.
+  scalar_keep <- setdiff(keep_cols, "measures")
+  for (col in scalar_keep) {
+    if (!col %in% names(dt)) dt[, (col) := NA_character_]
+  }
+
   # Resolve any remaining list columns except measures
   list_cols <- names(dt)[sapply(dt, is.list)]
   list_cols <- list_cols[list_cols != "measures"]
