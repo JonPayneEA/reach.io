@@ -326,3 +326,125 @@ test_that("promote_to_silver applies checks independently per site_id", {
   site2_flags <- out[site_id == "39002", qc_flag]
   expect_true(all(site2_flags == 1L))
 })
+
+# ---- deduplication ----------------------------------------------------------
+
+test_that("promote_to_silver removes duplicate (site_id, timestamp) rows", {
+  dt       <- make_bronze_dt()
+  dt_duped <- rbind(dt, dt[1:10])
+  expect_warning(
+    out <- promote_to_silver(dt_duped, output_dir = tempdir(),
+                              write_output = FALSE, dedup = TRUE),
+    "duplicate"
+  )
+  expect_equal(nrow(out), nrow(dt))
+})
+
+test_that("promote_to_silver preserves all rows when dedup = FALSE", {
+  dt       <- make_bronze_dt()
+  dt_duped <- rbind(dt, dt[1:5])
+  out <- suppressWarnings(
+    promote_to_silver(dt_duped, output_dir = tempdir(),
+                      write_output = FALSE, dedup = FALSE)
+  )
+  expect_equal(nrow(out), nrow(dt_duped))
+})
+
+# ---- gap annotation ---------------------------------------------------------
+
+test_that("promote_to_silver attaches gap_counts attribute when annotate_gaps = TRUE", {
+  dt  <- make_bronze_dt()
+  out <- suppressWarnings(
+    promote_to_silver(dt, output_dir = tempdir(), write_output = FALSE,
+                      annotate_gaps = TRUE)
+  )
+  gc <- attr(out, "gap_counts")
+  expect_false(is.null(gc))
+  expect_true(is.integer(gc))
+  expect_named(gc)
+})
+
+test_that("gap_counts has one entry per site_id", {
+  dt  <- make_bronze_dt()
+  out <- suppressWarnings(
+    promote_to_silver(dt, output_dir = tempdir(), write_output = FALSE,
+                      annotate_gaps = TRUE)
+  )
+  expect_setequal(names(attr(out, "gap_counts")), dt[, unique(site_id)])
+})
+
+test_that("promote_to_silver does not attach gap_counts when annotate_gaps = FALSE", {
+  dt  <- make_bronze_dt()
+  out <- suppressWarnings(
+    promote_to_silver(dt, output_dir = tempdir(), write_output = FALSE,
+                      annotate_gaps = FALSE)
+  )
+  expect_null(attr(out, "gap_counts"))
+})
+
+
+# ---- Stage (H) QC checks — planned ------------------------------------------
+# These stubs document the intended Option A checks for H data.
+# Implementation is deferred until UK-Flow15 (Fileni et al., 2026) is
+# peer-reviewed and the check logic is finalised.
+
+test_that("qc_h: stage outside plausible datum range is flagged as Suspect", {
+  skip("H QC not yet implemented — awaiting UK-Flow15 peer review")
+})
+
+test_that("qc_h: sudden spike then return (debris/ice/sensor contact) is flagged as Suspect", {
+  skip("H QC not yet implemented — awaiting UK-Flow15 peer review")
+})
+
+test_that("qc_h: rate of change exceeding physical bound is flagged as Suspect", {
+  skip("H QC not yet implemented — awaiting UK-Flow15 peer review")
+})
+
+test_that("qc_h: flat-lined stage over extended period is flagged as Suspect", {
+  skip("H QC not yet implemented — awaiting UK-Flow15 peer review")
+})
+
+test_that("qc_h: stage rising while flow drops (sustained) is flagged as Suspect", {
+  skip("H QC not yet implemented — awaiting UK-Flow15 peer review (requires paired Q+H series)")
+})
+
+test_that("qc_h: persistent step-change offset (datum shift) is flagged", {
+  skip("H QC not yet implemented — awaiting UK-Flow15 peer review")
+})
+
+
+# ---- Rainfall (P) QC checks — planned ----------------------------------------
+# These stubs document the intended Option A checks for P data.
+# Implementation is deferred until UK-Flow15 (Fileni et al., 2026) is
+# peer-reviewed and the check logic is finalised.
+
+test_that("qc_p: negative rainfall value is flagged as Rejected", {
+  skip("P QC not yet implemented — awaiting UK-Flow15 peer review")
+})
+
+test_that("qc_p: 15-min intensity exceeding credible cap (>50 mm/15 min) is flagged as Suspect", {
+  skip("P QC not yet implemented — awaiting UK-Flow15 peer review")
+})
+
+test_that("qc_p: rolling 24-h accumulation exceeding UK cap (~300 mm) is flagged as Suspect", {
+  skip("P QC not yet implemented — awaiting UK-Flow15 peer review")
+})
+
+test_that("qc_p: extended dry-run during known wet period is flagged as Suspect", {
+  skip("P QC not yet implemented — awaiting UK-Flow15 peer review (requires wet-period mask)")
+})
+
+test_that("qc_p: tipping bucket counter overflow (negative increment) is flagged or corrected", {
+  skip("P QC not yet implemented — awaiting UK-Flow15 peer review")
+})
+
+test_that("qc_p: rain at site while all neighbouring gauges show zero is flagged as Suspect", {
+  skip("P QC not yet implemented — awaiting UK-Flow15 peer review (requires neighbouring gauges)")
+})
+
+
+# ---- Rating extrapolation flag — planned -------------------------------------
+
+test_that("stage outside valid rating curve range sets extrapolated = TRUE", {
+  skip("Rating extrapolation flag not yet implemented — requires operational rating curve store")
+})

@@ -329,6 +329,21 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
 #' check_gaps("data/hydro", site_id = "2723TH", data_type = "H",
 #'            expected_interval = "daily")
 #' }
+# Find all Silver Parquet files for one site_id + data_type combination.
+#' @noRd
+.find_silver_parquets <- function(root, site_id, data_type) {
+  silver_root <- file.path(root, "silver")
+  if (!dir.exists(silver_root)) return(character(0))
+
+  candidates <- list.files(silver_root, pattern = "\\.parquet$",
+                           recursive = TRUE, full.names = TRUE)
+  dt_pat   <- paste0("/", data_type, "/")
+  site_pat <- paste0("_", site_id, "_")
+  candidates[grepl(dt_pat,   candidates, fixed = TRUE) &
+               grepl(site_pat, candidates, fixed = TRUE)]
+}
+
+
 check_gaps <- function(root, site_id, data_type, category = "hydrometric",
                        expected_interval = NULL) {
   # --- Resolve interval ---
@@ -429,6 +444,304 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
     nrow(gap_dt), length(missing), pct_gap,
     format(t_start, "%Y-%m-%d"), format(t_end, "%Y-%m-%d"),
     int_sec, n_obs, n_exp
+  ))
+  print(gap_dt)
+  invisible(gap_dt)
+}
+
+
+# =============================================================================
+# list_silver_gauges()
+# =============================================================================
+
+#' List all gauges available in the Silver store
+#'
+#' Scans the Silver store directory tree and returns a catalogue of every
+#' gauge (unique `site_id` + `data_type` combination) for which Silver data
+#' has been promoted from Bronze.
+#'
+#' @param root Character. Root of the data store.
+#' @param data_type Character vector or `NULL`. Filter to one or more
+#'   framework data type codes, e.g. `"Q"`, `"H"`, `"P"`. `NULL` (default)
+#'   returns all types.
+#'
+#' @return A `data.table` with columns `site_id`, `category`, `data_type`,
+#'   `year_min`, `year_max`, and `file_count`, printed as a formatted
+#'   catalogue. Returned invisibly.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' list_silver_gauges("data/hydro")
+#' list_silver_gauges("data/hydro", data_type = "Q")
+#' }
+list_silver_gauges <- function(root, data_type = NULL) {
+  silver_root <- file.path(root, "silver")
+
+  if (!dir.exists(silver_root)) {
+    message("No Silver store found at: ", silver_root,
+            "\nRun promote_to_silver() to populate the Silver tier.")
+    return(invisible(data.table::data.table()))
+  }
+
+  files <- list.files(silver_root, pattern = "\\.parquet$",
+                      recursive = TRUE, full.names = TRUE)
+
+  if (length(files) == 0L) {
+    message("No Silver Parquet files found in: ", silver_root)
+    return(invisible(data.table::data.table()))
+  }
+
+  # Normalise paths for cross-platform splitting
+  norm_root <- normalizePath(silver_root, mustWork = FALSE)
+  rel <- sub(
+    paste0("^", gsub("([.+?^${}()|\\[\\]\\\\])", "\\\\\\1", norm_root),
+           .Platform$file.sep),
+    "",
+    normalizePath(files, mustWork = FALSE)
+  )
+  # Expected: <category>/<data_type>/<year>/<dataset_id>.parquet
+  parts <- strsplit(rel, "/|\\\\")
+
+  parsed <- data.table::rbindlist(lapply(seq_along(parts), function(i) {
+    p <- parts[[i]]
+    if (length(p) < 4L) return(NULL)
+    fname    <- tools::file_path_sans_ext(p[4L])
+    segs     <- strsplit(fname, "_")[[1L]]
+    if (length(segs) < 3L) return(NULL)
+    data.table::data.table(
+      category  = p[1L],
+      data_type = p[2L],
+      year      = p[3L],
+      site_id   = segs[2L],
+      file      = files[i]
+    )
+  }), fill = TRUE)
+
+  if (nrow(parsed) == 0L) {
+    message("Could not parse any Silver file paths.")
+    return(invisible(data.table::data.table()))
+  }
+
+  if (!is.null(data_type))
+    parsed <- parsed[parsed$data_type %in% data_type]
+
+  if (nrow(parsed) == 0L) {
+    message("No Silver files match the specified data_type filter.")
+    return(invisible(data.table::data.table()))
+  }
+
+  out <- parsed[, .(
+    year_min   = min(year),
+    year_max   = max(year),
+    file_count = .N
+  ), by = c("category", "data_type", "site_id")]
+
+  data.table::setorder(out, category, data_type, site_id)
+
+  cat(sprintf("<Silver Catalogue>  %d gauge(s) across %d data type(s)\n\n",
+              nrow(out), length(unique(out$data_type))))
+  print(out)
+  invisible(out)
+}
+
+
+# =============================================================================
+# summarise_silver_coverage()
+# =============================================================================
+
+#' Summarise QC coverage for Silver store gauges
+#'
+#' Reads a subset of columns from every Silver Parquet file and returns
+#' per-gauge statistics: date range, total row count, and the distribution
+#' of QC flags (counts and percentage Good).
+#'
+#' @param root Character. Root of the data store.
+#' @param data_type Character vector or `NULL`. Filter to one or more data
+#'   type codes. `NULL` (default) shows all types.
+#' @param site_id Character vector or `NULL`. Filter to one or more sites.
+#'   `NULL` (default) shows all sites.
+#'
+#' @return A `data.table` with one row per site + data-type, printed as a
+#'   coverage summary. Returned invisibly.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' summarise_silver_coverage("data/hydro")
+#' summarise_silver_coverage("data/hydro", data_type = "Q", site_id = "39001")
+#' }
+summarise_silver_coverage <- function(root, data_type = NULL, site_id = NULL) {
+  silver_root <- file.path(root, "silver")
+
+  if (!dir.exists(silver_root)) {
+    message("No Silver store found at: ", silver_root)
+    return(invisible(data.table::data.table()))
+  }
+
+  files <- list.files(silver_root, pattern = "\\.parquet$",
+                      recursive = TRUE, full.names = TRUE)
+
+  if (length(files) == 0L) {
+    message("No Silver Parquet files found.")
+    return(invisible(data.table::data.table()))
+  }
+
+  # Apply path-level filters before reading
+  if (!is.null(data_type)) {
+    pats  <- paste0("/", data_type, "/")
+    keep  <- Reduce(`|`, lapply(pats, function(p) grepl(p, files, fixed = TRUE)))
+    files <- files[keep]
+  }
+  if (!is.null(site_id)) {
+    pats  <- paste0("_", site_id, "_")
+    keep  <- Reduce(`|`, lapply(pats, function(p) grepl(p, files, fixed = TRUE)))
+    files <- files[keep]
+  }
+
+  if (length(files) == 0L) {
+    message("No Silver files match the specified filters.")
+    return(invisible(data.table::data.table()))
+  }
+
+  records <- lapply(files, function(f) {
+    tryCatch(
+      data.table::as.data.table(
+        arrow::read_parquet(f,
+          col_select = c("timestamp", "site_id", "data_type", "qc_flag"))
+      ),
+      error = function(e) NULL
+    )
+  })
+  combined <- data.table::rbindlist(Filter(Negate(is.null), records))
+
+  if (nrow(combined) == 0L) {
+    message("No data could be read from Silver files.")
+    return(invisible(data.table::data.table()))
+  }
+
+  out <- combined[, .(
+    start       = as.character(as.Date(min(timestamp))),
+    end         = as.character(as.Date(max(timestamp))),
+    n_rows      = .N,
+    n_good      = sum(qc_flag == 1L, na.rm = TRUE),
+    n_estimated = sum(qc_flag == 2L, na.rm = TRUE),
+    n_suspect   = sum(qc_flag == 3L, na.rm = TRUE),
+    n_rejected  = sum(qc_flag == 4L, na.rm = TRUE),
+    pct_good    = round(100 * sum(qc_flag == 1L, na.rm = TRUE) / .N, 1)
+  ), by = c("site_id", "data_type")]
+
+  data.table::setorder(out, data_type, site_id)
+
+  cat(sprintf("<Silver Coverage>  %d gauge(s)\n\n", nrow(out)))
+  print(out)
+  invisible(out)
+}
+
+
+# =============================================================================
+# check_silver_gaps()
+# =============================================================================
+
+#' Identify missing timesteps for a Silver gauge series
+#'
+#' Reads timestamps from all Silver Parquet files for the specified `site_id`
+#' and `data_type`, infers the expected observation interval, and reports any
+#' contiguous periods of missing data.
+#'
+#' @param root Character. Root of the data store.
+#' @param site_id Character. Site identifier.
+#' @param data_type Character. Framework data type code (`"Q"`, `"H"`,
+#'   `"P"`, etc.).
+#' @param expected_interval Character or `NULL`. Expected time step:
+#'   `"15min"`, `"hourly"`, or `"daily"`. When `NULL` (default), inferred
+#'   from the median observed gap.
+#'
+#' @return A `data.table` with columns `gap_start` (POSIXct), `gap_end`
+#'   (POSIXct), and `n_missing` (integer). An empty table means no gaps.
+#'   Returned invisibly.
+#'
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' check_silver_gaps("data/hydro", site_id = "39001", data_type = "Q")
+#' }
+check_silver_gaps <- function(root, site_id, data_type,
+                              expected_interval = NULL) {
+  pq_files <- .find_silver_parquets(root, site_id, data_type)
+
+  if (length(pq_files) == 0L) {
+    message(sprintf("No Silver files found for site '%s', data type '%s'.",
+                    site_id, data_type))
+    return(invisible(data.table::data.table()))
+  }
+
+  ts_list <- lapply(pq_files, function(f) {
+    tryCatch(
+      data.table::as.data.table(
+        arrow::read_parquet(f, col_select = "timestamp")
+      )$timestamp,
+      error = function(e) NULL
+    )
+  })
+  all_ts <- sort(unique(do.call(c, Filter(Negate(is.null), ts_list))))
+
+  if (length(all_ts) < 2L) {
+    message("Fewer than 2 observations found; cannot assess gaps.")
+    return(invisible(data.table::data.table()))
+  }
+
+  int_sec <- if (!is.null(expected_interval)) {
+    s <- .interval_seconds(expected_interval)
+    if (is.na(s))
+      stop("Unrecognised expected_interval: ", expected_interval,
+           ". Use '15min', 'hourly', or 'daily'.")
+    s
+  } else {
+    diffs <- as.numeric(diff(all_ts), units = "secs")
+    s     <- as.integer(stats::median(diffs, na.rm = TRUE))
+    label <- if (s == 900L) "15min" else if (s == 3600L) "hourly" else
+             if (s == 86400L) "daily" else sprintf("%ds", s)
+    message(sprintf("  Inferred interval: %s (%d s).", label, s))
+    s
+  }
+
+  expected <- seq(min(all_ts), max(all_ts), by = int_sec)
+  missing  <- expected[!expected %in% all_ts]
+  n_obs    <- length(all_ts)
+
+  if (length(missing) == 0L) {
+    cat(sprintf(
+      "<Silver gap check: %s / %s>  No gaps found.\n  %d / %d observations present (%s to %s).\n",
+      site_id, data_type, n_obs, length(expected),
+      format(min(all_ts), "%Y-%m-%d"), format(max(all_ts), "%Y-%m-%d")
+    ))
+    return(invisible(data.table::data.table()))
+  }
+
+  gaps   <- as.integer(diff(missing) / int_sec)
+  breaks <- c(0L, which(gaps > 1L), length(missing))
+
+  gap_dt <- data.table::rbindlist(lapply(seq_along(breaks[-1L]), function(i) {
+    idx_s <- breaks[i] + 1L
+    idx_e <- breaks[i + 1L]
+    data.table::data.table(
+      gap_start = missing[idx_s],
+      gap_end   = missing[idx_e],
+      n_missing = idx_e - idx_s + 1L
+    )
+  }))
+
+  pct_gap <- round(100 * length(missing) / length(expected), 1)
+  cat(sprintf(
+    paste0("<Silver gap check: %s / %s>  %d period(s), %d missing timestep(s)",
+           " (%.1f%%).\n  %s to %s  |  %ds  |  %d / %d present.\n\n"),
+    site_id, data_type, nrow(gap_dt), length(missing), pct_gap,
+    format(min(all_ts), "%Y-%m-%d"), format(max(all_ts), "%Y-%m-%d"),
+    int_sec, n_obs, length(expected)
   ))
   print(gap_dt)
   invisible(gap_dt)

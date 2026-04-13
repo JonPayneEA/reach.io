@@ -516,9 +516,19 @@ silver_path <- function(output_dir, category, data_type, dataset_id) {
 #'   high-flow truncation. Default 0.9.
 #' @param write_output Logical. If `TRUE` (default), write Silver Parquet to
 #'   disk. Set `FALSE` to return the result without writing.
+#' @param dedup Logical. If `TRUE` (default), duplicate `(site_id, timestamp)`
+#'   rows are removed before QC, keeping the last row per pair. A warning is
+#'   issued if any duplicates are found. Set `FALSE` to skip deduplication
+#'   (e.g. when the caller has already deduplicated).
+#' @param annotate_gaps Logical. If `TRUE` (default), the number of missing
+#'   timesteps per site is estimated from the median observed interval and
+#'   attached as a named integer vector via `attr(result, "gap_counts")`. A
+#'   warning is issued if any site has gaps. Set `FALSE` to skip annotation.
 #'
 #' @return A `data.table` conforming to the Silver schema, invisibly when
-#'   `write_output = TRUE`.
+#'   `write_output = TRUE`. When `annotate_gaps = TRUE`, the result carries an
+#'   attribute `"gap_counts"`: a named integer vector of missing-timestep
+#'   counts keyed by `site_id`.
 #'
 #' @export
 #'
@@ -559,7 +569,9 @@ promote_to_silver <- function(bronze_data,
                                truncation_min_run        = 4L,
                                truncation_low_quantile   = 0.1,
                                truncation_high_quantile  = 0.9,
-                               write_output              = TRUE) {
+                               write_output              = TRUE,
+                               dedup                     = TRUE,
+                               annotate_gaps             = TRUE) {
 
   # -- Trial warning -----------------------------------------------------------
   warning(
@@ -579,6 +591,20 @@ promote_to_silver <- function(bronze_data,
     dt <- data.table::copy(bronze_data)
   } else {
     stop("`bronze_data` must be a file path (character) or a data.table.")
+  }
+
+  # -- Deduplication -----------------------------------------------------------
+  if (dedup) {
+    n_before <- nrow(dt)
+    dt       <- unique(dt, by = c("site_id", "timestamp"), fromLast = TRUE)
+    n_dup    <- n_before - nrow(dt)
+    if (n_dup > 0L) {
+      warning(
+        sprintf("%d duplicate (site_id, timestamp) row(s) removed before QC.",
+                n_dup),
+        call. = FALSE
+      )
+    }
   }
 
   # -- Validate Bronze schema --------------------------------------------------
@@ -620,6 +646,32 @@ promote_to_silver <- function(bronze_data,
                                 "dataset_id", "site_id", "data_type",
                                 "qc_flag", "qc_value",
                                 "qc_y_code", "qc_flagged_at"))
+
+  # -- Gap annotation ----------------------------------------------------------
+  if (annotate_gaps) {
+    sites   <- dt[, unique(site_id)]
+    gap_vec <- vapply(sites, function(sid) {
+      ts <- sort(dt[site_id == sid, timestamp])
+      if (length(ts) < 2L) return(0L)
+      diffs   <- as.numeric(diff(ts), units = "secs")
+      int_sec <- as.integer(stats::median(diffs, na.rm = TRUE))
+      if (is.na(int_sec) || int_sec <= 0L) return(0L)
+      expected_n <- as.integer(round(
+        as.numeric(difftime(max(ts), min(ts), units = "secs")) / int_sec
+      )) + 1L
+      max(0L, expected_n - length(ts))
+    }, integer(1L))
+    names(gap_vec) <- sites
+
+    if (any(gap_vec > 0L)) {
+      warning(
+        sprintf("Gaps detected in %d site(s); see attr(result, \"gap_counts\").",
+                sum(gap_vec > 0L)),
+        call. = FALSE
+      )
+    }
+    data.table::setattr(dt, "gap_counts", gap_vec)
+  }
 
   # -- Write Silver Parquet ----------------------------------------------------
   if (write_output) {
