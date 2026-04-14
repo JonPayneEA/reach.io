@@ -186,6 +186,54 @@ download_hydrology(
 All six inherit from the abstract `HydroData` class. Downstream code can
 dispatch on the class name to handle daily and sub-daily data differently.
 
+#### Working with S7 objects
+
+Data and metadata are stored in slots accessed with `@`:
+
+```r
+obj <- result$flow   # a Flow_15min object
+
+# ── Readings ──────────────────────────────────────────────────────────────────
+obj@readings            # data.table of all readings
+obj@readings$dateTime   # POSIXct timestamps
+obj@readings$value      # numeric values
+obj@readings$measure_notation  # EA measure ID string
+
+# ── Metadata ──────────────────────────────────────────────────────────────────
+obj@parameter    # "flow"
+obj@period_name  # "15min"
+obj@from_date    # "2022-01-01"
+obj@to_date      # "2022-12-31"
+obj@n_rows       # integer row count
+obj@downloaded_at
+```
+
+Two helper generics avoid touching `@readings` directly:
+
+```r
+as_data_table(obj)          # returns readings as a plain data.table
+as_long(obj)                # same, with a leading `parameter` column
+                            # useful for rbind() across multiple objects
+```
+
+Common patterns:
+
+```r
+# Filter to a date range
+obj@readings[date >= as.Date("2022-06-01")]
+
+# Quick plot
+with(obj@readings, plot(dateTime, value, type = "l"))
+
+# Export to model input formats
+format_for_pdm(obj@readings, measure = "flow")
+format_for_fmp(list(MyGauge = obj), gauge_ids = "SS92F014")
+
+# Add hydrological year columns in-place
+add_hydro_year(obj@readings)
+obj@readings[, .(hydro_year, value)]
+```
+
 #### EA API fair-use note
 
 The EA asks that automated users issue one request at a time. Both download
