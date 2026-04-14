@@ -315,6 +315,547 @@ qc_truncation_high <- function(value,
 }
 
 
+# -- Stage / Level (H) QC check functions -------------------------------------
+#
+# H-digit codes mirror the Y-digit approach but are tuned for stage/level
+# series. Stage data has different physical bounds and failure modes to flow:
+# spikes tend to be localised (debris, ice, sensor contact), flat-lining
+# indicates a frozen or stuck sensor, and datum shifts reflect recalibration
+# or sensor movement rather than the physical event dynamics seen in flow.
+#
+# H-digit code table:
+#   0  No issues
+#   1  Outside plausible datum range
+#   2  Spike (large step up with return within short window)
+#   3  Rate of change exceeded physical bound (single step)
+#   4  Flat-line (identical value over extended period)
+#   5  Datum shift (persistent step-change offset)
+#
+# Stage-flow consistency (H-code 6 in the original plan) requires a paired
+# flow series and is exposed as a standalone function rather than being
+# applied automatically inside promote_to_silver().
+#
+# Priority: code 1 > code 2 > code 3 > code 4 > code 5 > code 0
+# All H codes map to qc_flag 3 (Suspect); none auto-Reject.
+
+
+#' Detect stage values outside plausible datum bounds (H = 1)
+#'
+#' Flags readings that fall outside the physically credible operating range
+#' for the instrument installation. Bounds are station-specific and must be
+#' supplied by the caller; defaults are \code{-Inf} / \code{Inf} (no check).
+#'
+#' @param value Numeric vector of stage/level values (mAOD or mASD).
+#' @param min_datum Numeric. Minimum credible stage. Default \code{-Inf}.
+#' @param max_credible Numeric. Maximum credible stage. Default \code{Inf}.
+#' @return Logical vector; \code{TRUE} where value is outside bounds.
+#' @noRd
+qc_h_range <- function(value, min_datum = -Inf, max_credible = Inf) {
+  !is.na(value) & (value < min_datum | value > max_credible)
+}
+
+
+#' Detect sudden spike-and-return in stage (H = 2)
+#'
+#' A stage spike is characterised by a single large step-change upward
+#' followed by a return to near-original levels within a short window
+#' (debris, ice, sensor contact). Detection uses the MAD of the step-change
+#' series to set a robust threshold.
+#'
+#' @param value Numeric vector of stage values, ordered by time.
+#' @param spike_k Numeric. MAD multiplier for the threshold. Default 5.
+#' @param spike_return_window Integer. Number of subsequent steps within
+#'   which a return must be observed. Default 3.
+#' @return Logical vector; \code{TRUE} at spike and return positions.
+#' @noRd
+qc_h_spike <- function(value,
+                        spike_k             = 5,
+                        spike_return_window = 3L) {
+  n    <- length(value)
+  flag <- logical(n)
+  if (n < 3L) return(flag)
+
+  dv      <- diff(value)
+  dv_mad  <- mad(dv, constant = 1, na.rm = TRUE)
+  if (is.na(dv_mad) || dv_mad == 0) return(flag)
+
+  threshold <- median(abs(dv), na.rm = TRUE) + spike_k * dv_mad
+  up_spikes <- which(!is.na(dv) & dv > threshold)
+
+  for (s in up_spikes) {
+    window_end <- min(s + as.integer(spike_return_window), n - 1L)
+    if (window_end >= s + 1L &&
+        any(dv[(s + 1L):window_end] < -threshold * 0.5, na.rm = TRUE)) {
+      flag[(s + 1L):(window_end + 1L)] <- TRUE
+    }
+  }
+  flag
+}
+
+
+#' Detect physically implausible rates of change in stage (H = 3)
+#'
+#' Rivers and reservoirs can only rise or fall at physically bounded rates.
+#' Single-step changes larger than \code{max_rise_per_step} or
+#' \code{max_fall_per_step} are almost certainly instrument artefacts.
+#' Thresholds should be set in the same units as \code{value} per timestep.
+#'
+#' @param value Numeric vector of stage values, ordered by time.
+#' @param max_rise_per_step Numeric. Maximum credible rise per timestep.
+#'   Default 0.5 (suitable for 15-min data in mAOD).
+#' @param max_fall_per_step Numeric. Maximum credible fall per timestep.
+#'   Default 0.5.
+#' @return Logical vector; \code{TRUE} at the timestep where the rate was
+#'   exceeded (the destination of the step, not the origin).
+#' @noRd
+qc_h_rate_of_change <- function(value,
+                                 max_rise_per_step = 0.5,
+                                 max_fall_per_step = 0.5) {
+  n    <- length(value)
+  flag <- logical(n)
+  if (n < 2L) return(flag)
+
+  dv          <- diff(value)
+  flag[-1L]   <- !is.na(dv) & (dv > max_rise_per_step | dv < -max_fall_per_step)
+  flag
+}
+
+
+#' Detect flat-lined stage (H = 4)
+#'
+#' A frozen or stuck sensor produces long runs of identical values across its
+#' full operating range — not restricted to low or high quantiles as in the
+#' flow truncation checks. Any run of \code{flatline_min_run} or more
+#' identical values is flagged.
+#'
+#' @param value Numeric vector of stage values, ordered by time.
+#' @param flatline_min_run Integer. Minimum run length to flag. Default 4
+#'   (one hour of identical 15-min values).
+#' @return Logical vector; \code{TRUE} throughout each flagged run.
+#' @noRd
+qc_h_flatline <- function(value, flatline_min_run = 4L) {
+  n    <- length(value)
+  flag <- logical(n)
+  if (n < flatline_min_run) return(flag)
+
+  r      <- rle(round(value, digits = 4L))
+  ends   <- cumsum(r$lengths)
+  starts <- ends - r$lengths + 1L
+
+  for (i in seq_along(r$lengths)) {
+    if (!is.na(r$values[i]) && r$lengths[i] >= flatline_min_run) {
+      flag[starts[i]:ends[i]] <- TRUE
+    }
+  }
+  flag
+}
+
+
+#' Detect stage–flow consistency failures (standalone utility)
+#'
+#' Flags timesteps where stage and flow move in opposite directions
+#' consistently over a rolling window — physically implausible for a single
+#' cross-section under normal conditions. This check requires a paired flow
+#' series and is therefore not called automatically inside
+#' \code{promote_to_silver()}; it is exposed as a standalone utility for use
+#' in multi-type workflows.
+#'
+#' @param stage Numeric vector of stage values, ordered by time.
+#' @param flow Numeric vector of flow values the same length as \code{stage}.
+#' @param consistency_window Integer. Rolling window size in timesteps.
+#'   Default 4.
+#' @return Logical vector; \code{TRUE} where sustained inconsistency is
+#'   detected.
+#' @export
+qc_h_stage_flow_consistency <- function(stage, flow,
+                                         consistency_window = 4L) {
+  n <- length(stage)
+  flag <- logical(n)
+  if (length(flow) != n)
+    stop("`stage` and `flow` must be the same length.")
+  if (n < consistency_window + 1L) return(flag)
+
+  d_stage <- diff(stage)
+  d_flow  <- diff(flow)
+
+  nonzero <- !is.na(d_stage) & !is.na(d_flow)
+  incon   <- nonzero &
+             sign(d_stage) != 0L & sign(d_flow) != 0L &
+             sign(d_stage) != sign(d_flow)
+
+  w <- as.integer(consistency_window)
+  for (i in seq(w, n - 1L)) {
+    if (sum(incon[(i - w + 1L):i], na.rm = TRUE) >= w) {
+      flag[(i - w + 2L):(i + 1L)] <- TRUE
+    }
+  }
+  flag
+}
+
+
+#' Detect persistent datum shifts in stage (H = 5)
+#'
+#' Compares the median stage in two adjacent rolling windows of width
+#' \code{shift_window}. A sustained offset exceeding \code{shift_threshold}
+#' between successive windows indicates a likely sensor recalibration,
+#' datum reset, or physical movement of the gauge. The post-shift window is
+#' flagged.
+#'
+#' @param value Numeric vector of stage values, ordered by time.
+#' @param shift_window Integer. Width (timesteps) of each comparison window.
+#'   Default 24 (six hours at 15-min resolution).
+#' @param shift_threshold Numeric. Minimum median difference (same units as
+#'   \code{value}) required to flag a shift. Default 0.1.
+#' @return Logical vector; \code{TRUE} in the post-shift window where a
+#'   datum shift is detected.
+#' @noRd
+qc_h_datum_shift <- function(value,
+                              shift_window    = 24L,
+                              shift_threshold = 0.1) {
+  n    <- length(value)
+  flag <- logical(n)
+  w    <- as.integer(shift_window)
+  if (n < 2L * w) return(flag)
+
+  for (i in seq(w + 1L, n - w + 1L)) {
+    before <- value[(i - w):(i - 1L)]
+    after  <- value[i:min(i + w - 1L, n)]
+    shift  <- abs(median(after, na.rm = TRUE) - median(before, na.rm = TRUE))
+    if (!is.na(shift) && shift > shift_threshold) {
+      flag[i:min(i + w - 1L, n)] <- TRUE
+    }
+  }
+  flag
+}
+
+
+# -- H-digit assembly ---------------------------------------------------------
+
+#' Apply all Stage/Level QC checks and return H-digit codes
+#'
+#' Runs all five automated H checks against an ordered stage series and
+#' combines results into a single integer code per observation. Stage-flow
+#' consistency is not applied here as it requires a paired flow series; use
+#' \code{\link{qc_h_stage_flow_consistency}()} directly for that check.
+#'
+#' Priority order (highest overwrites lower):
+#' code 1 (range) > code 2 (spike) > code 3 (rate of change) >
+#' code 4 (flatline) > code 5 (datum shift) > code 0 (clean)
+#'
+#' @param value Numeric vector of stage values, ordered by time.
+#' @param min_datum,max_credible Forwarded to \code{qc_h_range()}.
+#' @param spike_k,spike_return_window Forwarded to \code{qc_h_spike()}.
+#' @param max_rise_per_step,max_fall_per_step Forwarded to
+#'   \code{qc_h_rate_of_change()}.
+#' @param flatline_min_run Forwarded to \code{qc_h_flatline()}.
+#' @param shift_window,shift_threshold Forwarded to \code{qc_h_datum_shift()}.
+#' @return Integer vector of H-digit codes (0–5), one per observation.
+#' @noRd
+apply_h_code <- function(value,
+                          min_datum           = -Inf,
+                          max_credible        =  Inf,
+                          spike_k             = 5,
+                          spike_return_window = 3L,
+                          max_rise_per_step   = 0.5,
+                          max_fall_per_step   = 0.5,
+                          flatline_min_run    = 4L,
+                          shift_window        = 24L,
+                          shift_threshold     = 0.1) {
+  rng <- qc_h_range(value, min_datum, max_credible)
+  spk <- qc_h_spike(value, spike_k, spike_return_window)
+  roc <- qc_h_rate_of_change(value, max_rise_per_step, max_fall_per_step)
+  flt <- qc_h_flatline(value, flatline_min_run)
+  dst <- qc_h_datum_shift(value, shift_window, shift_threshold)
+
+  h        <- integer(length(value))
+  h[dst]   <- 5L
+  h[flt]   <- 4L
+  h[roc]   <- 3L
+  h[spk]   <- 2L
+  h[rng]   <- 1L
+  h
+}
+
+
+#' Map H-digit codes to framework qc_flag values
+#'
+#' All non-zero H codes map to 3 (Suspect). Automatic Rejection is not
+#' applied to stage data — decisions about Rejected status require manual
+#' review or downstream rule application.
+#'
+#' @param h Integer vector of H-digit codes (0–5).
+#' @return Integer vector of qc_flag values (1 or 3).
+#' @noRd
+h_to_qc_flag <- function(h) {
+  flag           <- integer(length(h))
+  flag[h == 0L]  <- 1L   # Good
+  flag[h  > 0L]  <- 3L   # Suspect
+  flag
+}
+
+
+# -- Rainfall (P) QC check functions ------------------------------------------
+#
+# P-digit codes cover the common failure modes of tipping-bucket and
+# catchment-average rainfall gauges at 15-min resolution. Unlike flow and
+# stage, rainfall is non-negative and physically bounded by climatological
+# maxima. Two checks (dry run during wet periods, temporal isolation) require
+# external reference data and are exposed as standalone functions rather than
+# being called automatically inside promote_to_silver().
+#
+# P-digit code table:
+#   0  No issues
+#   1  Negative value            → Rejected
+#   2  Intensity cap exceeded    → Suspect
+#   3  24-h accumulation cap     → Suspect
+#   4  Flat-line / dry run       → Suspect  (standalone; needs wet-period mask)
+#   5  Counter reset / overflow  → Rejected
+#   6  Temporal isolation        → Suspect  (standalone; needs neighbours)
+#
+# Codes 1 and 5 map to Rejected; codes 2, 3, 4, 6 map to Suspect.
+
+
+#' Detect negative rainfall values (P = 1)
+#'
+#' Negative increments in 15-min rainfall data are physically impossible and
+#' indicate a sensor reset, overflow artefact, or data transmission error.
+#'
+#' @param value Numeric vector of 15-min rainfall increments (mm).
+#' @return Logical vector; \code{TRUE} where \code{value < 0}.
+#' @noRd
+qc_p_negative <- function(value) {
+  !is.na(value) & value < 0
+}
+
+
+#' Detect 15-min intensities exceeding a credible maximum (P = 2)
+#'
+#' Flags individual 15-min values that exceed the physically credible
+#' maximum rainfall intensity for the UK climate. The default of 50 mm per
+#' 15 minutes is a conservative upper bound; adjust for specific regional
+#' contexts.
+#'
+#' @param value Numeric vector of 15-min rainfall increments (mm).
+#' @param max_intensity_15min Numeric. Credible maximum (mm/15 min).
+#'   Default 50.
+#' @return Logical vector; \code{TRUE} where intensity exceeds the cap.
+#' @noRd
+qc_p_intensity <- function(value, max_intensity_15min = 50) {
+  !is.na(value) & value > max_intensity_15min
+}
+
+
+#' Detect 24-hour accumulations exceeding a credible maximum (P = 3)
+#'
+#' Computes a rolling sum over \code{steps_per_day} consecutive timesteps
+#' and flags all observations in windows whose total exceeds
+#' \code{max_daily_mm}. The default of 300 mm is a conservative upper bound
+#' for UK conditions.
+#'
+#' @param value Numeric vector of 15-min rainfall increments (mm),
+#'   ordered by time.
+#' @param max_daily_mm Numeric. Maximum credible 24-hour total (mm).
+#'   Default 300.
+#' @param steps_per_day Integer. Number of timesteps per 24 hours.
+#'   Default 96 (15-min data).
+#' @return Logical vector; \code{TRUE} for all observations in windows
+#'   that exceed the daily cap.
+#' @noRd
+qc_p_daily_cap <- function(value,
+                            max_daily_mm  = 300,
+                            steps_per_day = 96L) {
+  n    <- length(value)
+  flag <- logical(n)
+  s    <- as.integer(steps_per_day)
+  if (n < s) return(flag)
+
+  for (i in seq(s, n)) {
+    idx <- (i - s + 1L):i
+    if (sum(value[idx], na.rm = TRUE) > max_daily_mm) {
+      flag[idx] <- TRUE
+    }
+  }
+  flag
+}
+
+
+#' Detect extended dry runs during known wet periods (standalone utility)
+#'
+#' Long sequences of zero rainfall during periods when neighbouring gauges
+#' are recording rain suggest a blocked or frozen gauge. This check requires
+#' an external \code{wet_period_mask} (a logical vector of the same length
+#' as \code{value}, \code{TRUE} where the period is known to be wet) and is
+#' therefore not applied automatically inside \code{promote_to_silver()}.
+#'
+#' @param value Numeric vector of 15-min rainfall increments (mm),
+#'   ordered by time.
+#' @param wet_period_mask Logical vector, same length as \code{value}.
+#'   \code{TRUE} indicates the timestep falls within a known wet period.
+#' @param dry_run_min_steps Integer. Minimum consecutive zero-rainfall steps
+#'   during a wet period to trigger the flag. Default 12 (three hours).
+#' @return Logical vector; \code{TRUE} throughout each flagged dry run.
+#' @export
+qc_p_dry_run <- function(value, wet_period_mask, dry_run_min_steps = 12L) {
+  n <- length(value)
+  flag <- logical(n)
+  if (length(wet_period_mask) != n)
+    stop("`value` and `wet_period_mask` must be the same length.")
+  if (n < dry_run_min_steps) return(flag)
+
+  is_dry_in_wet <- !is.na(value) & value == 0 & wet_period_mask
+  r      <- rle(is_dry_in_wet)
+  ends   <- cumsum(r$lengths)
+  starts <- ends - r$lengths + 1L
+
+  for (i in seq_along(r$lengths)) {
+    if (isTRUE(r$values[i]) && r$lengths[i] >= dry_run_min_steps) {
+      flag[starts[i]:ends[i]] <- TRUE
+    }
+  }
+  flag
+}
+
+
+#' Detect tipping-bucket counter resets and overflows (P = 5)
+#'
+#' A counter overflow causes a sudden isolated spike — a large positive
+#' increment immediately followed by a return to typical low values. This is
+#' distinct from a genuine rain event in that the spike is not preceded by
+#' rising increments and is followed by an abrupt return. Detection mirrors
+#' the absolute spike approach: a value that exceeds the median by
+#' \code{reset_spike_k} MADs and is followed within
+#' \code{reset_return_window} steps by a value at or below the median is
+#' flagged.
+#'
+#' @param value Numeric vector of 15-min rainfall increments (mm),
+#'   ordered by time.
+#' @param reset_spike_k Numeric. MAD multiplier for the spike threshold.
+#'   Default 10.
+#' @param reset_return_window Integer. Steps within which a return to
+#'   normal must be observed. Default 2.
+#' @return Logical vector; \code{TRUE} at the overflow timestep.
+#' @noRd
+qc_p_reset <- function(value,
+                        reset_spike_k       = 10,
+                        reset_return_window = 2L) {
+  n    <- length(value)
+  flag <- logical(n)
+  if (n < 3L) return(flag)
+
+  dv_mad <- mad(value, constant = 1, na.rm = TRUE)
+  if (is.na(dv_mad) || dv_mad == 0) return(flag)
+
+  dv_med    <- median(value, na.rm = TRUE)
+  threshold <- dv_med + reset_spike_k * dv_mad
+
+  spikes <- which(!is.na(value) & value > threshold)
+  for (s in spikes) {
+    idx_end <- min(s + as.integer(reset_return_window), n)
+    if (idx_end > s &&
+        any(value[(s + 1L):idx_end] <= dv_med + dv_mad, na.rm = TRUE)) {
+      flag[s] <- TRUE
+    }
+  }
+  flag
+}
+
+
+#' Detect rainfall isolated from neighbouring gauges (standalone utility)
+#'
+#' Rain recorded at a site while all (or most) neighbouring gauges report
+#' zero suggests a localised instrument artefact rather than a genuine event.
+#' This check requires neighbour readings and is therefore not applied
+#' automatically inside \code{promote_to_silver()}.
+#'
+#' @param value Numeric vector of 15-min rainfall increments (mm).
+#' @param neighbours Matrix or data.frame with one row per timestep and one
+#'   column per neighbouring gauge. Values are 15-min increments (mm).
+#' @param isolation_threshold Numeric. Values at or below this level are
+#'   treated as "zero rain" when assessing neighbours. Default 0.2 mm.
+#' @param isolation_fraction Numeric (0–1). Fraction of neighbours that must
+#'   report zero for the isolation check to fire. Default 0.8.
+#' @return Logical vector; \code{TRUE} where isolated rainfall is detected.
+#' @export
+qc_p_temporal_consistency <- function(value, neighbours,
+                                       isolation_threshold = 0.2,
+                                       isolation_fraction  = 0.8) {
+  n <- length(value)
+  flag <- logical(n)
+
+  if (!is.matrix(neighbours) && !is.data.frame(neighbours))
+    stop("`neighbours` must be a matrix or data.frame of neighbour readings.")
+  if (nrow(neighbours) != n)
+    stop("`neighbours` must have the same number of rows as `value`.")
+
+  nbr_mat <- as.matrix(neighbours)
+  n_nbrs  <- ncol(nbr_mat)
+  if (n_nbrs == 0L) return(flag)
+
+  nbr_zero_frac <- apply(nbr_mat, 1, function(row) {
+    sum(!is.na(row) & row <= isolation_threshold) / n_nbrs
+  })
+
+  flag <- !is.na(value) & value > isolation_threshold &
+          !is.na(nbr_zero_frac) & nbr_zero_frac >= isolation_fraction
+  flag
+}
+
+
+# -- P-digit assembly ---------------------------------------------------------
+
+#' Apply automated Rainfall QC checks and return P-digit codes
+#'
+#' Runs the four self-contained P checks (negative, intensity cap, daily cap,
+#' counter reset) against an ordered 15-min rainfall series. The dry-run and
+#' temporal-isolation checks require external reference data and must be
+#' applied separately via \code{\link{qc_p_dry_run}()} and
+#' \code{\link{qc_p_temporal_consistency}()}.
+#'
+#' Priority order:
+#' code 1 (negative) = code 5 (reset) > code 2 (intensity) >
+#' code 3 (daily cap) > code 0 (clean)
+#'
+#' @param value Numeric vector of 15-min rainfall increments (mm).
+#' @param max_intensity_15min Forwarded to \code{qc_p_intensity()}.
+#' @param max_daily_mm Forwarded to \code{qc_p_daily_cap()}.
+#' @param steps_per_day Forwarded to \code{qc_p_daily_cap()}.
+#' @param reset_spike_k,reset_return_window Forwarded to \code{qc_p_reset()}.
+#' @return Integer vector of P-digit codes (0–5), one per observation.
+#' @noRd
+apply_p_code <- function(value,
+                          max_intensity_15min = 50,
+                          max_daily_mm        = 300,
+                          steps_per_day       = 96L,
+                          reset_spike_k       = 10,
+                          reset_return_window = 2L) {
+  neg <- qc_p_negative(value)
+  int <- qc_p_intensity(value, max_intensity_15min)
+  cap <- qc_p_daily_cap(value, max_daily_mm, steps_per_day)
+  rst <- qc_p_reset(value, reset_spike_k, reset_return_window)
+
+  p        <- integer(length(value))
+  p[cap]   <- 3L
+  p[int]   <- 2L
+  p[rst]   <- 5L
+  p[neg]   <- 1L   # highest priority
+  p
+}
+
+
+#' Map P-digit codes to framework qc_flag values
+#'
+#' @param p Integer vector of P-digit codes (0–5).
+#' @return Integer vector of qc_flag values (1, 3, or 4).
+#' @noRd
+p_to_qc_flag <- function(p) {
+  flag                    <- integer(length(p))
+  flag[p == 0L]           <- 1L   # Good
+  flag[p %in% c(2L, 3L)] <- 3L   # Suspect
+  flag[p %in% c(1L, 5L)] <- 4L   # Rejected
+  flag
+}
+
+
 # -- Y-digit assembly ---------------------------------------------------------
 
 #' Apply all traditional QC checks and return the UK-Flow15 Y-digit code
@@ -516,9 +1057,19 @@ silver_path <- function(output_dir, category, data_type, dataset_id) {
 #'   high-flow truncation. Default 0.9.
 #' @param write_output Logical. If `TRUE` (default), write Silver Parquet to
 #'   disk. Set `FALSE` to return the result without writing.
+#' @param dedup Logical. If `TRUE` (default), duplicate `(site_id, timestamp)`
+#'   rows are removed before QC, keeping the last row per pair. A warning is
+#'   issued if any duplicates are found. Set `FALSE` to skip deduplication
+#'   (e.g. when the caller has already deduplicated).
+#' @param annotate_gaps Logical. If `TRUE` (default), the number of missing
+#'   timesteps per site is estimated from the median observed interval and
+#'   attached as a named integer vector via `attr(result, "gap_counts")`. A
+#'   warning is issued if any site has gaps. Set `FALSE` to skip annotation.
 #'
 #' @return A `data.table` conforming to the Silver schema, invisibly when
-#'   `write_output = TRUE`.
+#'   `write_output = TRUE`. When `annotate_gaps = TRUE`, the result carries an
+#'   attribute `"gap_counts"`: a named integer vector of missing-timestep
+#'   counts keyed by `site_id`.
 #'
 #' @export
 #'
@@ -547,6 +1098,7 @@ silver_path <- function(output_dir, category, data_type, dataset_id) {
 promote_to_silver <- function(bronze_data,
                                output_dir,
                                category                  = "hydrometric",
+                               # --- Flow (Q) parameters ---
                                allow_negative            = FALSE,
                                relative_spike_ratio      = 10,
                                min_baseline              = 0.1,
@@ -559,7 +1111,26 @@ promote_to_silver <- function(bronze_data,
                                truncation_min_run        = 4L,
                                truncation_low_quantile   = 0.1,
                                truncation_high_quantile  = 0.9,
-                               write_output              = TRUE) {
+                               # --- Stage / Level (H) parameters ---
+                               min_datum                 = -Inf,
+                               max_credible              =  Inf,
+                               spike_k                   = 5,
+                               spike_return_window       = 3L,
+                               max_rise_per_step         = 0.5,
+                               max_fall_per_step         = 0.5,
+                               flatline_min_run          = 4L,
+                               shift_window              = 24L,
+                               shift_threshold           = 0.1,
+                               # --- Rainfall (P) parameters ---
+                               max_intensity_15min       = 50,
+                               max_daily_mm              = 300,
+                               steps_per_day             = 96L,
+                               reset_spike_k             = 10,
+                               reset_return_window       = 2L,
+                               # --- Pipeline options ---
+                               write_output              = TRUE,
+                               dedup                     = TRUE,
+                               annotate_gaps             = TRUE) {
 
   # -- Trial warning -----------------------------------------------------------
   warning(
@@ -581,6 +1152,20 @@ promote_to_silver <- function(bronze_data,
     stop("`bronze_data` must be a file path (character) or a data.table.")
   }
 
+  # -- Deduplication -----------------------------------------------------------
+  if (dedup) {
+    n_before <- nrow(dt)
+    dt       <- unique(dt, by = c("site_id", "timestamp"), fromLast = TRUE)
+    n_dup    <- n_before - nrow(dt)
+    if (n_dup > 0L) {
+      warning(
+        sprintf("%d duplicate (site_id, timestamp) row(s) removed before QC.",
+                n_dup),
+        call. = FALSE
+      )
+    }
+  }
+
   # -- Validate Bronze schema --------------------------------------------------
   required <- c("timestamp", "value", "supplier_flag",
                 "dataset_id", "site_id", "data_type")
@@ -590,36 +1175,108 @@ promote_to_silver <- function(bronze_data,
                  paste(missing, collapse = ", ")))
   }
 
-  # -- Apply QC per site -------------------------------------------------------
+  # -- Apply QC per site (dispatch by data_type) --------------------------------
   data.table::setorder(dt, site_id, timestamp)
 
-  flagged_at <- as.POSIXct(Sys.time(), tz = "UTC")
+  flagged_at     <- as.POSIXct(Sys.time(), tz = "UTC")
+  data_type_used <- dt$data_type[[1L]]
 
-  dt[, qc_y_code := apply_y_digit(
-    value,
-    allow_negative            = allow_negative,
-    relative_spike_ratio      = relative_spike_ratio,
-    min_baseline              = min_baseline,
-    absolute_spike_k          = absolute_spike_k,
-    min_spike_flow            = min_spike_flow,
-    drop_ratio                = drop_ratio,
-    min_flow_for_drop         = min_flow_for_drop,
-    fluctuation_window        = fluctuation_window,
-    fluctuation_min_reversals = fluctuation_min_reversals,
-    truncation_min_run        = truncation_min_run,
-    truncation_low_quantile   = truncation_low_quantile,
-    truncation_high_quantile  = truncation_high_quantile
-  ), by = site_id]
+  if (data_type_used == "Q") {
+    dt[, qc_y_code := apply_y_digit(
+      value,
+      allow_negative            = allow_negative,
+      relative_spike_ratio      = relative_spike_ratio,
+      min_baseline              = min_baseline,
+      absolute_spike_k          = absolute_spike_k,
+      min_spike_flow            = min_spike_flow,
+      drop_ratio                = drop_ratio,
+      min_flow_for_drop         = min_flow_for_drop,
+      fluctuation_window        = fluctuation_window,
+      fluctuation_min_reversals = fluctuation_min_reversals,
+      truncation_min_run        = truncation_min_run,
+      truncation_low_quantile   = truncation_low_quantile,
+      truncation_high_quantile  = truncation_high_quantile
+    ), by = site_id]
+    dt[, qc_flag := y_to_qc_flag(qc_y_code)]
+    code_col <- "qc_y_code"
 
-  dt[, qc_flag     := y_to_qc_flag(qc_y_code)]
-  dt[, qc_value    := data.table::fifelse(qc_flag < 4L, value, NA_real_)]
+  } else if (data_type_used == "H") {
+    dt[, qc_h_code := apply_h_code(
+      value,
+      min_datum           = min_datum,
+      max_credible        = max_credible,
+      spike_k             = spike_k,
+      spike_return_window = spike_return_window,
+      max_rise_per_step   = max_rise_per_step,
+      max_fall_per_step   = max_fall_per_step,
+      flatline_min_run    = flatline_min_run,
+      shift_window        = shift_window,
+      shift_threshold     = shift_threshold
+    ), by = site_id]
+    dt[, qc_flag := h_to_qc_flag(qc_h_code)]
+    code_col <- "qc_h_code"
+
+  } else if (data_type_used == "P") {
+    dt[, qc_p_code := apply_p_code(
+      value,
+      max_intensity_15min = max_intensity_15min,
+      max_daily_mm        = max_daily_mm,
+      steps_per_day       = steps_per_day,
+      reset_spike_k       = reset_spike_k,
+      reset_return_window = reset_return_window
+    ), by = site_id]
+    dt[, qc_flag := p_to_qc_flag(qc_p_code)]
+    code_col <- "qc_p_code"
+
+  } else {
+    warning(
+      sprintf(
+        "No QC checks defined for data_type '%s'; all values assigned Good (flag 1).",
+        data_type_used
+      ),
+      call. = FALSE
+    )
+    dt[, qc_flag := 1L]
+    code_col <- NULL
+  }
+
+  dt[, qc_value      := data.table::fifelse(qc_flag < 4L, value, NA_real_)]
   dt[, qc_flagged_at := flagged_at]
 
-  # Reorder to Silver schema column order
-  data.table::setcolorder(dt, c("timestamp", "value", "supplier_flag",
-                                "dataset_id", "site_id", "data_type",
-                                "qc_flag", "qc_value",
-                                "qc_y_code", "qc_flagged_at"))
+  # Reorder to Silver schema column order (code column is data_type-specific)
+  base_cols  <- c("timestamp", "value", "supplier_flag", "dataset_id",
+                  "site_id", "data_type", "qc_flag", "qc_value", "qc_flagged_at")
+  col_order  <- if (!is.null(code_col))
+    append(base_cols, code_col, after = match("qc_value", base_cols))
+  else
+    base_cols
+  data.table::setcolorder(dt, intersect(col_order, names(dt)))
+
+  # -- Gap annotation ----------------------------------------------------------
+  if (annotate_gaps) {
+    sites   <- dt[, unique(site_id)]
+    gap_vec <- vapply(sites, function(sid) {
+      ts <- sort(dt[site_id == sid, timestamp])
+      if (length(ts) < 2L) return(0L)
+      diffs   <- as.numeric(diff(ts), units = "secs")
+      int_sec <- as.integer(stats::median(diffs, na.rm = TRUE))
+      if (is.na(int_sec) || int_sec <= 0L) return(0L)
+      expected_n <- as.integer(round(
+        as.numeric(difftime(max(ts), min(ts), units = "secs")) / int_sec
+      )) + 1L
+      max(0L, expected_n - length(ts))
+    }, integer(1L))
+    names(gap_vec) <- sites
+
+    if (any(gap_vec > 0L)) {
+      warning(
+        sprintf("Gaps detected in %d site(s); see attr(result, \"gap_counts\").",
+                sum(gap_vec > 0L)),
+        call. = FALSE
+      )
+    }
+    data.table::setattr(dt, "gap_counts", gap_vec)
+  }
 
   # -- Write Silver Parquet ----------------------------------------------------
   if (write_output) {
