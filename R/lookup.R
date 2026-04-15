@@ -194,19 +194,24 @@ find_stations <- function(names     = NULL,
   vt_raw <- sapply(parts, `[`, 7L)
   pd_raw <- sapply(parts, `[`, 8L)
 
-  dt[, value_type := data.table::fcase(
+  # fcase() default must be length-1; use fifelse to fall back to the raw
+  # segment value for any unrecognised code (keeps behaviour version-safe).
+  vt_mapped <- data.table::fcase(
     vt_raw == "m",   "mean",
     vt_raw == "min", "min",
     vt_raw == "max", "max",
     vt_raw == "i",   "instantaneous",
     vt_raw == "t",   "total",
-    default = vt_raw   # keep raw value rather than silently producing NA
-  )]
-  dt[, period := data.table::fcase(
+    default = NA_character_
+  )
+  dt[, value_type := data.table::fifelse(is.na(vt_mapped), vt_raw, vt_mapped)]
+
+  pd_mapped <- data.table::fcase(
     pd_raw == "900",   "15min",
     pd_raw == "86400", "daily",
-    default = pd_raw   # keep raw value for any other period
-  )]
+    default = NA_character_
+  )
+  dt[, period := data.table::fifelse(is.na(pd_mapped), pd_raw, pd_mapped)]
 
   return(dt[parameter %in% c("rainfall", "flow", "level")])
 }
