@@ -1,0 +1,535 @@
+---
+title: "Silver tier: quality control and data access"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Silver tier: quality control and data access}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+> **Note:** Silver tier QC is currently trial / skeleton code. Thresholds and
+> check logic have not been validated against EA operational data and will
+> change. Do not use in production workflows yet.
+
+## Overview
+
+The Silver tier applies automated quality control to Bronze Parquet data,
+adding QC flags and a QC-accepted value column. It sits between raw Bronze
+ingestion and the Gold tier, which will hold derived and approved outputs.
+
+```
+Bronze  →  promote_to_silver()  →  Silver  →  read_silver()  →  analysis
+  raw            QC flags             flagged        filtered
+```
+
+The Silver schema extends Bronze by four columns:
+
+| Column | Type | Description |
+|---|---|---|
+| `qc_flag` | integer | 1 Good · 2 Estimated · 3 Suspect · 4 Rejected |
+| `qc_value` | float64 | Accepted reading; `NA` where Rejected |
+| `qc_y_code` / `qc_h_code` / `qc_p_code` | integer | Data-type-specific anomaly code |
+| `qc_flagged_at` | POSIXct | Timestamp of the promotion run |
+
+Flag 2 (Estimated) is **never assigned automatically** — it is reserved for
+values that have been manually corrected or gap-filled downstream.
+
+---
+
+## 1. Promoting Bronze data to Silver
+
+`promote_to_silver()` reads a Bronze Parquet file (or a `data.table`
+conforming to the Bronze schema), applies QC checks appropriate to the
+data type, and writes the result to the Silver store.
+
+```{r promote-basic}
+library(reach.io)
+
+# Promote a single Bronze file
+result <- promote_to_silver(
+  bronze_data = "data/hydrometric/bronze/hydrometric/EA/Q/2023/EA_39001_Q_20260115.parquet",
+  output_dir  = "data/hydrometric"
+)
+
+result
+#> <data.table [35040 × 10]>
+#>    timestamp           value supplier_flag dataset_id       site_id data_type
+#>    qc_flag qc_value qc_y_code qc_flagged_at
+```
+
+The function returns the Silver `data.table` invisibly when writing to disk
+(`write_output = TRUE`, the default). Assign it to inspect the result in
+memory.
+
+### 1.1 Promoting all Bronze files for a gauge
+
+```{r promote-loop}
+# Locate all Bronze files for site 39001, data type Q
+bronze_files <- list.files(
+  path       = "data/hydrometric/bronze/hydrometric/EA/Q",
+  pattern    = "^EA_39001_Q_.*\\.parquet$",
+  full.names = TRUE,
+  recursive  = TRUE
+)
+
+for (f in bronze_files) {
+  message("Promoting: ", basename(f))
+  promote_to_silver(f, output_dir = "data/hydrometric")
+}
+```
+
+### 1.2 Inspecting QC results before writing
+
+Set `write_output = FALSE` to check results without writing Parquet files:
+
+```{r promote-dryrun}
+result <- promote_to_silver(
+  bronze_data  = "data/hydrometric/bronze/hydrometric/EA/Q/2023/EA_39001_Q_20260115.parquet",
+  output_dir   = "data/hydrometric",
+  write_output = FALSE
+)
+
+# QC flag breakdown
+result[, .N, by = qc_flag][order(qc_flag)]
+#>    qc_flag     N
+#> 1:       1 34891
+#> 2:       3   127
+#> 3:       4    22
+
+# What anomaly codes were assigned?
+result[qc_flag > 1L, .N, by = qc_y_code][order(qc_y_code)]
+#>    qc_y_code   N
+#> 1:         2  88   # relative spike (suspect)
+#> 2:         3  39   # absolute spike (suspect)
+#> 3:         8  22   # combined spike (rejected)
+```
+
+---
+
+## 2. QC checks by data type
+
+Checks are applied automatically based on the `data_type` column in the
+Bronze data. No configuration is needed for the defaults.
+
+### 2.1 Flow (Q) — Y-digit codes
+
+| Y-code | Anomaly | Default flag |
+|---|---|---|
+| 0 | Clean | Good (1) |
+| 1 | Negative value | Rejected (4) |
+| 2 | Relative spike (≥10× previous) | Suspect (3) |
+| 3 | Absolute spike (MAD-based) | Suspect (3) |
+| 4 | Drop (≥90% in one step) | Suspect (3) |
+| 5 | Rapid fluctuation (alternating) | Suspect (3) |
+| 6 | Truncated low (stuck at sensor floor) | Suspect (3) |
+| 7 | Truncated high (stuck at sensor cap) | Suspect (3) |
+| 8 | Combined spike (codes 2 + 3) | Rejected (4) |
+| 9 | Combined drop + negative/truncation | Rejected (4) |
+
+Ultrasonic and tidal gauges can legitimately record negative values. Disable
+the negative-flow check with `allow_negative = TRUE`:
+
+```{r promote-tidal}
+promote_to_silver(
+  bronze_data    = "data/hydrometric/bronze/hydrometric/EA/Q/2023/EA_tidal_Q_20260115.parquet",
+  output_dir     = "data/hydrometric",
+  allow_negative = TRUE
+)
+```
+
+Adjusting spike sensitivity (e.g., for a naturally flashy catchment):
+
+```{r promote-flashy}
+promote_to_silver(
+  bronze_data          = "data/hydrometric/bronze/hydrometric/EA/Q/2023/EA_39001_Q_20260115.parquet",
+  output_dir           = "data/hydrometric",
+  relative_spike_ratio = 20,   # require 20× increase before flagging
+  absolute_spike_k     = 8     # 8 MADs rather than 5
+)
+```
+
+### 2.2 Stage / level (H) — H-digit codes
+
+| H-code | Anomaly | Default flag |
+|---|---|---|
+| 0 | Clean | Good (1) |
+| 1 | Out-of-range (below datum / above credible max) | Suspect (3) |
+| 2 | Spike-and-return (debris, ice contact) | Suspect (3) |
+| 3 | Implausible rate of change (>0.5 m per step) | Suspect (3) |
+| 4 | Flatline (≥4 identical consecutive values) | Suspect (3) |
+| 5 | Datum shift (persistent offset between windows) | Suspect (3) |
+
+All H anomalies produce Suspect (3), not Rejected — stage is noisier than
+flow and manual review is expected before rejection.
+
+Setting datum bounds for a specific gauge:
+
+```{r promote-level}
+promote_to_silver(
+  bronze_data  = "data/hydrometric/bronze/hydrometric/EA/H/2023/EA_39001_H_20260115.parquet",
+  output_dir   = "data/hydrometric",
+  min_datum    = -2.0,    # below -2 mAOD is physically implausible
+  max_credible = 8.5      # above 8.5 mAOD is above bank-full
+)
+```
+
+### 2.3 Rainfall (P) — P-digit codes
+
+| P-code | Anomaly | Default flag |
+|---|---|---|
+| 0 | Clean | Good (1) |
+| 1 | Negative value | Rejected (4) |
+| 2 | Intensity spike (>50 mm/15min) | Suspect (3) |
+| 3 | Daily cap exceeded (>300 mm/24hr) | Suspect (3) |
+| 4 | Dry-run during wet period | Suspect (3) |
+| 5 | Tipping-bucket reset spike | Rejected (4) |
+
+```{r promote-rainfall}
+promote_to_silver(
+  bronze_data         = "data/hydrometric/bronze/hydrometric/EA/P/2023/EA_39001_P_20260115.parquet",
+  output_dir          = "data/hydrometric",
+  max_intensity_15min = 30,   # lower threshold for typical upland gauge
+  max_daily_mm        = 200
+)
+```
+
+---
+
+## 3. Standalone QC checks
+
+Three checks require additional context (a paired series or neighbouring
+gauge data) and so are not called automatically inside `promote_to_silver()`.
+They can be applied to the Silver `data.table` after promotion.
+
+### 3.1 Stage–flow consistency
+
+Flags periods where stage and flow move in sustained opposing directions
+(e.g., rising stage but falling flow, suggesting a blockage or rating error):
+
+```{r stage-flow}
+silver_q <- promote_to_silver(
+  "data/hydrometric/bronze/hydrometric/EA/Q/2023/EA_39001_Q_20260115.parquet",
+  output_dir   = "data/hydrometric",
+  write_output = FALSE
+)
+silver_h <- promote_to_silver(
+  "data/hydrometric/bronze/hydrometric/EA/H/2023/EA_39001_H_20260115.parquet",
+  output_dir   = "data/hydrometric",
+  write_output = FALSE
+)
+
+# Align on timestamp then apply the check
+paired <- merge(
+  silver_q[, .(timestamp, flow  = qc_value)],
+  silver_h[, .(timestamp, stage = qc_value)],
+  by = "timestamp"
+)
+
+inconsistent <- qc_h_stage_flow_consistency(
+  stage = paired$stage,
+  flow  = paired$flow,
+  consistency_window = 4L   # 4 consecutive opposing steps required
+)
+
+sum(inconsistent, na.rm = TRUE)  # number of flagged timesteps
+```
+
+### 3.2 Rainfall dry-run detection
+
+Flags extended zero-rainfall periods at a gauge when nearby gauges are
+recording rain, suggesting a blocked or frozen tipping bucket:
+
+```{r dry-run}
+# Build a wet-period mask from a reference (neighbouring) gauge
+silver_ref <- arrow::read_parquet("data/hydrometric/silver/hydrometric/P/2023/EA_REF_P_20260115.parquet")
+wet_mask   <- silver_ref$qc_value > 0.2  # reference records > 0.2 mm = "wet"
+
+flagged <- qc_p_dry_run(
+  value         = silver_p$qc_value,
+  wet_period_mask = wet_mask,
+  dry_run_min_steps = 12L  # 3 hours of zeros during wet = suspicious
+)
+```
+
+### 3.3 Spatial consistency (temporal isolation)
+
+Flags rainfall that is isolated from neighbouring gauges — high at one
+gauge while all neighbours are dry:
+
+```{r spatial-consistency}
+# Build a neighbour matrix: one column per gauge, rows = timesteps
+neighbour_values <- cbind(
+  gauge_a = silver_a$qc_value,
+  gauge_b = silver_b$qc_value,
+  gauge_c = silver_c$qc_value
+)
+
+flagged <- qc_p_temporal_consistency(
+  value                = silver_p$qc_value,
+  neighbours           = neighbour_values,
+  isolation_threshold  = 0.2,   # > 0.2 mm counts as "wet"
+  isolation_fraction   = 0.8    # flag if ≥80% of neighbours are dry
+)
+```
+
+---
+
+## 4. Reading Silver data
+
+`read_silver()` locates Silver Parquet files, applies date and quality
+filters, and returns a typed S7 object consistent with `download_hydrology()`
+output.
+
+```{r read-silver-basic}
+# Read Good-only flow data for 2023
+flow_obj <- read_silver(
+  root      = "data/hydrometric",
+  gauge_id  = "39001",
+  data_type = "Q",
+  start     = "2023-01-01",
+  end       = "2023-12-31"
+)
+
+flow_obj
+#> <reach.io::Flow_15min>
+#> Slots (@):
+#>   @parameter      flow
+#>   @period_name    15min
+#>   @from_date      2023-01-01
+#>   @to_date        2023-12-31
+#>   @n_measures     1
+#>   @n_rows         34,891
+#>   @downloaded_at  2026-04-15 10:00:00 UTC
+#>   @readings       data.table [34,891 × 10]
+#>       $dateTime                POSIXct
+#>       $date                    Date
+#>       $value                   numeric      ← qc_value (NA = Rejected)
+#>       $measure_notation        character    ← dataset_id
+#>       $raw_value               numeric      ← original Bronze value
+#>       $supplier_flag           character
+#>       $site_id                 character
+#>       $qc_flag                 integer
+#>       $qc_y_code               integer
+#>       $qc_flagged_at           POSIXct
+```
+
+The `value` slot in `@readings` holds `qc_value` — the QC-accepted reading.
+The original Bronze value is always present as `raw_value` for transparency.
+
+### 4.1 Quality thresholds
+
+Control which flags are included via `min_quality`:
+
+```{r read-quality}
+# Good only (default) — excludes Suspect and Rejected
+good_only <- read_silver("data/hydrometric", "39001", "Q",
+                         min_quality = 1L)
+
+# Good + Suspect — useful for exploratory analysis
+incl_suspect <- read_silver("data/hydrometric", "39001", "Q",
+                            min_quality = 3L)
+
+# All readings including Rejected (raw_value always non-NA)
+all_flags <- read_silver("data/hydrometric", "39001", "Q",
+                         min_quality = NULL)
+
+# Compare coverage
+good_only@n_rows     # 34891
+incl_suspect@n_rows  # 35018
+all_flags@n_rows     # 35040
+```
+
+### 4.2 Inspecting flag distributions
+
+```{r flag-inspection}
+dt <- read_silver("data/hydrometric", "39001", "Q",
+                  min_quality = NULL)@readings
+
+# Count by flag
+dt[, .N, by = qc_flag][order(qc_flag)]
+#>    qc_flag     N
+#> 1:       1 34891
+#> 2:       3   127
+#> 3:       4    22
+
+# Percentage good
+dt[, .(pct_good = round(mean(qc_flag == 1L) * 100, 1))]
+#>    pct_good
+#> 1:     99.6
+
+# Flagged readings with their anomaly codes
+dt[qc_flag > 1L, .(timestamp, raw_value, qc_value, qc_flag, qc_y_code)]
+#>                timestamp raw_value qc_value qc_flag qc_y_code
+#> 1: 2023-03-14 06:15:00        892       NA       4         8
+#> 2: 2023-03-14 06:00:00        891       NA       4         8
+#> ...
+```
+
+### 4.3 Comparing raw and QC-accepted values
+
+```{r raw-vs-qc}
+library(ggplot2)
+
+dt <- read_silver("data/hydrometric", "39001", "Q",
+                  start = "2023-03-01", end = "2023-04-01",
+                  min_quality = NULL)@readings
+
+ggplot(dt, aes(x = dateTime)) +
+  geom_line(aes(y = raw_value), colour = "#AAAAAA", linewidth = 0.4) +
+  geom_line(aes(y = qc_value),  colour = "#005EB8", linewidth = 0.8,
+            na.rm = TRUE) +
+  labs(
+    title    = "Raw vs QC-accepted flow",
+    subtitle = "Grey = raw Bronze value; Blue = qc_value (NA gaps = Rejected)",
+    x        = NULL,
+    y        = "Flow (m\u00b3/s)"
+  ) +
+  theme_bw()
+```
+
+---
+
+## 5. Multiple gauges and catchment reads
+
+### 5.1 Multiple gauges
+
+`read_silver_multi()` reads several gauges in one call and returns a named
+list of S7 objects. Gauges with no Silver data are skipped with a warning
+rather than erroring.
+
+```{r read-multi}
+objs <- read_silver_multi(
+  root      = "data/hydrometric",
+  gauge_ids = c("39001", "39002", "39003"),
+  data_type = "Q",
+  start     = "2023-01-01",
+  end       = "2023-12-31"
+)
+
+names(objs)         # gauges with data present
+#> [1] "39001" "39002"   # 39003 had no Silver data — skipped with warning
+
+objs[["39001"]]@n_rows
+objs[["39002"]]@n_rows
+```
+
+### 5.2 All gauges in a catchment
+
+`read_silver_catchment()` looks up gauge IDs from a registry and delegates
+to `read_silver_multi()`:
+
+```{r read-catchment}
+reg  <- build_gauge_registry("data/gauge_registry.csv")
+
+objs <- read_silver_catchment(
+  root         = "data/hydrometric",
+  catchment_id = "Thames_Upper",
+  data_type    = "Q",
+  registry     = reg,
+  start        = "2023-01-01",
+  end          = "2023-12-31",
+  min_quality  = 3L   # Good + Suspect
+)
+
+# Row counts per gauge
+lapply(objs, function(x) x@n_rows)
+```
+
+### 5.3 Combining catchment gauges into a long table
+
+```{r combine-catchment}
+long_dt <- data.table::rbindlist(lapply(objs, as_long), fill = TRUE)
+
+# Daily mean per gauge
+daily <- long_dt[, .(mean_flow = mean(value, na.rm = TRUE)), by = .(site_id, date)]
+
+ggplot(daily, aes(x = date, y = mean_flow, colour = site_id)) +
+  geom_line(linewidth = 0.6) +
+  labs(title = "Daily mean flow — Thames Upper catchment",
+       x = NULL, y = "Flow (m\u00b3/s)", colour = "Gauge") +
+  theme_bw()
+```
+
+---
+
+## 6. Silver catalogue
+
+The catalogue functions let you query the Silver store without reading data.
+
+```{r silver-catalogue}
+# All gauges with Silver data
+list_silver_gauges(root = "data/hydrometric")
+#>    site_id  category     data_type  year_min year_max file_count
+#> 1: 39001    hydrometric  Q          2020     2024        5
+#> 2: 39002    hydrometric  Q          2021     2024        4
+#> 3: 39001    hydrometric  P          2020     2024        5
+
+# QC flag breakdown per gauge
+summarise_silver_coverage(root = "data/hydrometric", data_type = "Q")
+#>    site_id  data_type  start       end         n_rows  n_good n_estimated
+#> 1: 39001    Q          2020-01-01  2024-12-31  175200  174850           0
+#>    n_suspect n_rejected pct_good
+#>          310         40     99.8
+
+# Specific gauge
+summarise_silver_coverage(root = "data/hydrometric", site_id = "39001")
+```
+
+### 6.1 Gap detection
+
+```{r silver-gaps}
+check_silver_gaps(
+  root      = "data/hydrometric",
+  site_id   = "39001",
+  data_type = "Q"
+)
+#> Gap analysis (Silver): 39001 | Q
+#> Expected interval: 15min
+#> ─────────────────────────────────────────────────────────────────────
+#>    gap_start               gap_end                 n_missing
+#> 1: 2021-08-12 14:00:00 UTC 2021-08-12 14:45:00 UTC  4
+#> 2: 2022-11-03 09:00:00 UTC 2022-11-03 10:45:00 UTC  8
+```
+
+---
+
+## 7. Silver file paths
+
+`silver_path()` builds the canonical Silver Parquet file path for a dataset,
+following the same folder structure as Bronze:
+
+```
+silver/<category>/<data_type>/<year>/<dataset_id>.parquet
+```
+
+```{r silver-path}
+silver_path(
+  output_dir   = "data/hydrometric",
+  category     = "hydrometric",
+  data_type    = "Q",
+  dataset_id   = "EA_39001_Q_20260115"
+)
+#> [1] "data/hydrometric/silver/hydrometric/Q/2026/EA_39001_Q_20260115.parquet"
+```
+
+---
+
+## Summary of key functions
+
+| Task | Function |
+|---|---|
+| Promote Bronze → Silver | `promote_to_silver(bronze_data, output_dir, ...)` |
+| Stage–flow consistency check | `qc_h_stage_flow_consistency(stage, flow)` |
+| Rainfall dry-run check | `qc_p_dry_run(value, wet_period_mask)` |
+| Spatial consistency check | `qc_p_temporal_consistency(value, neighbours)` |
+| Read Silver data | `read_silver(root, gauge_id, data_type, start, end, min_quality)` |
+| Read multiple gauges | `read_silver_multi(root, gauge_ids, data_type, ...)` |
+| Read by catchment | `read_silver_catchment(root, catchment_id, data_type, registry, ...)` |
+| List Silver gauges | `list_silver_gauges(root)` |
+| QC coverage summary | `summarise_silver_coverage(root, data_type, site_id)` |
+| Find gaps | `check_silver_gaps(root, site_id, data_type)` |
+| Build file path | `silver_path(output_dir, category, data_type, dataset_id)` |
