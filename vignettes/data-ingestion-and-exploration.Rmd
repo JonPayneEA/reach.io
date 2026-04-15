@@ -107,7 +107,7 @@ result <- download_hydrology(
   parameters = c("flow", "rainfall"),
   from_date  = "2020-01-01",
   to_date    = "2023-12-31",
-  wiski_ids  = c("SS92F014", "S11512_FW")
+  wiski_ids  = c("SS92F014", "356337")
 )
 ```
 
