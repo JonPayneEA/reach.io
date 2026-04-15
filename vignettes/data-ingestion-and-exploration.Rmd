@@ -406,7 +406,7 @@ containing a `date` column.
 ```{r hydro-year}
 dt <- result$flow@readings
 
-dt <- reach.io::add_hydro_year(dt, start_month = 10L)
+dt <- reach.io::add_hydro_year(dt)
 
 # Summarise at daily level first, then by hydro year
 dt_daily <- dt[, .(mean_flow = mean(value, na.rm = TRUE),
