@@ -199,7 +199,7 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
 #' per ingest batch rather than the literal row count.
 #'
 #' To inspect actual record counts or detect individual missing timesteps, use
-#' [check_gaps()].
+#' `check_gaps()`.
 #'
 #' @param root Character. Root of the data store.
 #' @param site_id Character vector or `NULL`. Filter to one or more sites.

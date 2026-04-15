@@ -31,7 +31,7 @@ per ingest batch rather than the literal row count.
 }
 \details{
 To inspect actual record counts or detect individual missing timesteps, use
-\code{\link[=check_gaps]{check_gaps()}}.
+\code{check_gaps()}.
 }
 \examples{
 \dontrun{
