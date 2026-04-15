@@ -347,21 +347,36 @@ S7::method(as_long, HydroData) <- function(x) {
 
 # -- Print method -------------------------------------------------------------
 #
-# One method on the abstract parent covers all six classes since the print
-# output is identical in structure — the class name already carries the
-# parameter and timestep information.
+# One method on the abstract parent covers all six classes. Slot names are
+# printed explicitly so users can see what is available with @ without
+# relying on IDE autocomplete (which has limited S7 support).
 
 .print_HydroData <- function(x, ...) {
-  cat(sprintf(
-    "<%s>\n  Date range:  %s to %s\n  Measures:    %d\n  Rows:        %s\n  Downloaded:  %s\n",
-    class(x)[1L],
-    x@from_date, x@to_date,
-    x@n_measures,
-    format(x@n_rows, big.mark = ","),
-    format(x@downloaded_at, "%Y-%m-%d %H:%M:%S %Z")
-  ))
+  dt        <- x@readings
+  col_types <- vapply(dt, function(col) class(col)[1L], character(1L))
+  col_lines <- paste(
+    sprintf("      %-24s %s", paste0("$", names(col_types)), col_types),
+    collapse = "\n"
+  )
+  cat(
+    sprintf("<reach.io::%s>\n", class(x)[1L]),
+    "Slots (@):\n",
+    sprintf("  @parameter      %s\n",  x@parameter),
+    sprintf("  @period_name    %s\n",  x@period_name),
+    sprintf("  @from_date      %s\n",  x@from_date),
+    sprintf("  @to_date        %s\n",  x@to_date),
+    sprintf("  @n_measures     %d\n",  x@n_measures),
+    sprintf("  @n_rows         %s\n",  format(x@n_rows, big.mark = ",")),
+    sprintf("  @downloaded_at  %s\n",  format(x@downloaded_at,
+                                              "%Y-%m-%d %H:%M:%S %Z")),
+    sprintf("  @readings       data.table [%s \u00d7 %d]\n%s\n",
+            format(nrow(dt), big.mark = ","), ncol(dt), col_lines),
+    sep = ""
+  )
   invisible(x)
 }
+
+S7::method(print, HydroData) <- .print_HydroData
 
 
 # =============================================================================
@@ -644,20 +659,33 @@ S7::method(as_data_table, PotEvapData) <- function(x) x@readings
 # -- Print method -------------------------------------------------------------
 
 .print_PotEvapData <- function(x, ...) {
-  calc_tag <- if (S7::S7_inherits(x, PotEvap_15min)) {
-    sprintf("  Disagg method: %s\n", x@disagg_method)
-  } else {
-    ""
-  }
+  dt        <- x@readings
+  col_types <- vapply(dt, function(col) class(col)[1L], character(1L))
+  col_lines <- paste(
+    sprintf("      %-24s %s", paste0("$", names(col_types)), col_types),
+    collapse = "\n"
+  )
+  disagg_line <- if (S7::S7_inherits(x, PotEvap_15min))
+    sprintf("  @disagg_method  %s\n  @is_calculated  %s\n",
+            x@disagg_method, x@is_calculated)
+  else ""
 
-  cat(sprintf(
-    "<%s>\n  Source:      %s\n  Date range:  %s to %s\n  Rows:        %s\n%s  Created:     %s\n",
-    class(x)[1L],
-    x@source_name,
-    x@from_date, x@to_date,
-    format(x@n_rows, big.mark = ","),
-    calc_tag,
-    format(x@created_at, "%Y-%m-%d %H:%M:%S %Z")
-  ))
+  cat(
+    sprintf("<reach.io::%s>\n", class(x)[1L]),
+    "Slots (@):\n",
+    sprintf("  @source_name    %s\n",  x@source_name),
+    sprintf("  @period_name    %s\n",  x@period_name),
+    sprintf("  @from_date      %s\n",  x@from_date),
+    sprintf("  @to_date        %s\n",  x@to_date),
+    sprintf("  @n_rows         %s\n",  format(x@n_rows, big.mark = ",")),
+    disagg_line,
+    sprintf("  @created_at     %s\n",  format(x@created_at,
+                                              "%Y-%m-%d %H:%M:%S %Z")),
+    sprintf("  @readings       data.table [%s \u00d7 %d]\n%s\n",
+            format(nrow(dt), big.mark = ","), ncol(dt), col_lines),
+    sep = ""
+  )
   invisible(x)
 }
+
+S7::method(print, PotEvapData) <- .print_PotEvapData
