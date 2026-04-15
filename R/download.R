@@ -221,6 +221,10 @@ download_hydrology <- function(
           "No %s measures found for the supplied stations after filtering.",
           param
         ))
+        all_summaries[[param]] <- data.table::data.table(
+          parameter = param, measure = NA_character_,
+          file = NA_character_, rows = 0L, ok = FALSE
+        )
         next
       }
 
@@ -235,6 +239,10 @@ download_hydrology <- function(
                                value_type  = p_valtype)
       if (nrow(measures) == 0) {
         message("  No measures — skipping.")
+        all_summaries[[param]] <- data.table::data.table(
+          parameter = param, measure = NA_character_,
+          file = NA_character_, rows = 0L, ok = FALSE
+        )
         next
       }
     }
