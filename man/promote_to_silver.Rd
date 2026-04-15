@@ -20,7 +20,23 @@ promote_to_silver(
   truncation_min_run = 4L,
   truncation_low_quantile = 0.1,
   truncation_high_quantile = 0.9,
-  write_output = TRUE
+  min_datum = -Inf,
+  max_credible = Inf,
+  spike_k = 5,
+  spike_return_window = 3L,
+  max_rise_per_step = 0.5,
+  max_fall_per_step = 0.5,
+  flatline_min_run = 4L,
+  shift_window = 24L,
+  shift_threshold = 0.1,
+  max_intensity_15min = 50,
+  max_daily_mm = 300,
+  steps_per_day = 96L,
+  reset_spike_k = 10,
+  reset_return_window = 2L,
+  write_output = TRUE,
+  dedup = TRUE,
+  annotate_gaps = TRUE
 )
 }
 \arguments{
@@ -72,10 +88,22 @@ high-flow truncation. Default 0.9.}
 
 \item{write_output}{Logical. If \code{TRUE} (default), write Silver Parquet to
 disk. Set \code{FALSE} to return the result without writing.}
+
+\item{dedup}{Logical. If \code{TRUE} (default), duplicate \verb{(site_id, timestamp)}
+rows are removed before QC, keeping the last row per pair. A warning is
+issued if any duplicates are found. Set \code{FALSE} to skip deduplication
+(e.g. when the caller has already deduplicated).}
+
+\item{annotate_gaps}{Logical. If \code{TRUE} (default), the number of missing
+timesteps per site is estimated from the median observed interval and
+attached as a named integer vector via \code{attr(result, "gap_counts")}. A
+warning is issued if any site has gaps. Set \code{FALSE} to skip annotation.}
 }
 \value{
 A \code{data.table} conforming to the Silver schema, invisibly when
-\code{write_output = TRUE}.
+\code{write_output = TRUE}. When \code{annotate_gaps = TRUE}, the result carries an
+attribute \code{"gap_counts"}: a named integer vector of missing-timestep
+counts keyed by \code{site_id}.
 }
 \description{
 Reads a Bronze Parquet file (or accepts a \code{data.table} directly), applies
