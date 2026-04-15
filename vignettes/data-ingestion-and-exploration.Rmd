@@ -1,0 +1,487 @@
+---
+title: "Data ingestion and exploration"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Data ingestion and exploration}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Overview
+
+This vignette walks through the interactive data workflow in reach.io:
+discovering stations, downloading flow, level, and rainfall data from the EA
+Hydrology API, and exploring the results. It assumes the package is installed
+and you have internet access to the EA API.
+
+```
+1. find_stations()        — discover stations and available measures
+2. download_hydrology()   — download readings into memory as S7 objects
+3. Inspect S7 objects     — understand the structure of returned data
+4. Explore readings       — filter, reshape, and plot the data
+5. Multiple gauges        — split a combined download by station
+6. check_gaps()           — identify missing timesteps in the Bronze store
+```
+
+For bulk pipeline ingestion (registry + Parquet store) see
+`vignette("bronze-ingestion")`.
+
+---
+
+## 1. Station discovery
+
+Before downloading, use `find_stations()` to confirm which stations are
+available and what measures each one carries. You can search by WISKI ID,
+River Levels on the Internet (RLOIid), station name, notation, or geographic
+proximity.
+
+```{r find-by-wiski}
+library(reach.io)
+
+# Look up a single station by its WISKI ID
+stns <- find_stations(wiski_ids = "SS92F014")
+stns
+#>    label    notation     wiskiID RLOIid     lat    long easting northing
+#> 1: ...      <uuid>       SS92F014  5022   51.47  -0.31  ...     ...
+#>    riverName   station.notation             parameter value_type period
+#> 1: Thames      <uuid>-flow-m-...  flow       mean       daily
+#> 2: Thames      <uuid>-flow-i-...  flow       instantaneous  15min
+#> 3: Thames      <uuid>-level-i-... level      instantaneous  15min
+```
+
+The returned table has **one row per measure** — not one row per station.
+The key columns are:
+
+| Column | Description |
+|---|---|
+| `notation` | Station UUID — use this to filter `@readings` after download |
+| `wiskiID` | WISKI identifier |
+| `station.notation` | Full measure notation passed to the readings endpoint |
+| `parameter` | `"flow"`, `"level"`, or `"rainfall"` |
+| `value_type` | `"mean"`, `"instantaneous"`, `"total"`, etc. |
+| `period` | `"daily"` or `"15min"` |
+
+```{r find-multiple}
+# Look up several stations at once — results are pooled and de-duplicated
+stns <- find_stations(wiski_ids = c("SS92F014", "S11512_FW"))
+
+# Fuzzy name search
+thames <- find_stations(names = "Thames")
+
+# By RLOIid
+stns_rloi <- find_stations(rloi_ids = c("5022", "7001"))
+
+# Proximity search — all stations within 15 km of a point
+nearby <- find_stations(lat = 51.47, long = -0.31, dist = 15)
+
+# Combine methods — any mix of identifiers is valid
+combined <- find_stations(wiski_ids = "SS92F014",
+                          lat = 51.47, long = -0.31, dist = 15)
+```
+
+To see only specific parameters after the lookup:
+
+```{r filter-measures}
+# All daily mean flow measures at these stations
+stns[parameter == "flow" & period == "daily" & value_type == "mean"]
+
+# Available 15-minute rainfall
+stns[parameter == "rainfall" & period == "15min"]
+```
+
+---
+
+## 2. Downloading data
+
+`download_hydrology()` fetches readings for one or more stations and returns
+typed S7 objects ready for analysis.
+
+### 2.1 In-memory download
+
+```{r download-basic}
+result <- download_hydrology(
+  parameters = c("flow", "rainfall"),
+  from_date  = "2020-01-01",
+  to_date    = "2023-12-31",
+  wiski_ids  = c("SS92F014", "S11512_FW")
+)
+```
+
+The return value is a named list — one element per requested parameter plus a
+`$summary` table:
+
+```{r result-names}
+names(result)
+#> [1] "flow"     "rainfall" "summary"
+```
+
+The summary gives a quick ingestion report:
+
+```{r result-summary}
+result$summary
+#>    parameter  measure                                      file rows  ok
+#> 1: flow       <uuid>-flow-m-86400-m3s-qualified            NA   1461  TRUE
+#> 2: flow       <uuid>-flow-m-86400-m3s-qualified            NA   1461  TRUE
+#> 3: rainfall   <uuid>-rainfall-t-86400-mm-qualified         NA   1461  TRUE
+#> 4: rainfall   <uuid>-rainfall-t-86400-mm-qualified         NA   1461  TRUE
+```
+
+### 2.2 Choosing period and value type
+
+The default period is `"daily"` for all parameters. Override with
+`period_name`:
+
+```{r download-15min}
+# 15-minute flow and level
+result_15 <- download_hydrology(
+  parameters  = c("flow", "level"),
+  from_date   = "2023-01-01",
+  to_date     = "2023-12-31",
+  period_name = "15min",
+  wiski_ids   = "SS92F014"
+)
+```
+
+`value_type` defaults to `"mean"` for flow, `"total"` for rainfall, and
+`"instantaneous"` for level. Pass `"all"` to retrieve every statistic for a
+parameter:
+
+```{r download-all-vt}
+# All level statistics (min, max, instantaneous)
+result_h <- download_hydrology(
+  parameters = "level",
+  from_date  = "2023-01-01",
+  to_date    = "2023-12-31",
+  value_type = "all",
+  wiski_ids  = "SS92F014"
+)
+```
+
+### 2.3 Saving to disk
+
+For large date ranges or routine extracts, write directly to CSV files:
+
+```{r download-disk}
+download_hydrology(
+  parameters       = c("flow", "level"),
+  from_date        = "2015-01-01",
+  to_date          = "2023-12-31",
+  output           = "disk",
+  out_dir          = "hydrology_data",
+  observation_type = "Qualified",
+  wiski_ids        = "SS92F014"
+)
+# Writes: hydrology_data/flow/*.csv, hydrology_data/level/*.csv
+#         hydrology_data/download_summary.csv
+```
+
+---
+
+## 3. Inspecting S7 objects
+
+Each element of `result` is a typed S7 object. Printing one at the console
+shows all available slots and the column names of `@readings`:
+
+```{r print-object}
+result$flow
+#> <reach.io::Flow_Daily>
+#> Slots (@):
+#>   @parameter      flow
+#>   @period_name    daily
+#>   @from_date      2020-01-01
+#>   @to_date        2023-12-31
+#>   @n_measures     2
+#>   @n_rows         2,922
+#>   @downloaded_at  2026-04-15 09:30:00 UTC
+#>   @readings       data.table [2,922 × 5]
+#>       $dateTime                POSIXct
+#>       $date                    Date
+#>       $value                   numeric
+#>       $measure_notation        character
+#>       $quality                 character
+```
+
+Access any slot with `@`:
+
+```{r slot-access}
+result$flow@parameter     # "flow"
+result$flow@period_name   # "daily"
+result$flow@n_measures    # 2
+result$flow@n_rows        # 2922
+result$flow@from_date     # "2020-01-01"
+```
+
+---
+
+## 4. Exploring readings
+
+`@readings` is a plain `data.table` — all standard `data.table` operations
+apply directly.
+
+```{r readings-head}
+result$flow@readings
+#>              dateTime       date  value         measure_notation quality
+#>    1: 2020-01-01 UTC 2020-01-01  12.34  <uuid>-flow-m-86400-...      G
+#>    2: 2020-01-02 UTC 2020-01-02  14.21  <uuid>-flow-m-86400-...      G
+#>  ...
+```
+
+```{r readings-filter}
+dt <- result$flow@readings
+
+# Filter by date
+dt[date >= as.Date("2022-01-01") & date <= as.Date("2022-12-31")]
+
+# Summary statistics
+dt[, .(mean_flow = mean(value, na.rm = TRUE),
+       max_flow  = max(value,  na.rm = TRUE),
+       n_days    = .N),
+   by = data.table::year(date)]
+
+# Check for missing values
+dt[is.na(value)]
+```
+
+### 4.1 Extract as a plain data.table
+
+```{r as-data-table}
+# Equivalent to result$flow@readings but more explicit
+dt <- as_data_table(result$flow)
+```
+
+### 4.2 Reshape to long format
+
+`as_long()` prepends a `parameter` column, making it easy to bind different
+parameter types into one table:
+
+```{r as-long}
+flow_long <- as_long(result$flow)
+rain_long <- as_long(result$rainfall)
+
+all_data <- rbind(flow_long, rain_long, fill = TRUE)
+all_data[, .(rows = .N), by = parameter]
+#>    parameter  rows
+#> 1: flow       2922
+#> 2: rainfall   2922
+```
+
+### 4.3 Basic plotting
+
+```{r plot-flow}
+library(ggplot2)
+
+dt <- result$flow@readings
+
+ggplot(dt, aes(x = date, y = value)) +
+  geom_line(colour = "#005EB8") +
+  labs(
+    title    = "Daily mean flow",
+    subtitle = "SS92F014",
+    x        = NULL,
+    y        = "Flow (m\u00b3/s)"
+  ) +
+  theme_bw()
+```
+
+```{r plot-flow-rain}
+# Flow and rainfall together (dual axis)
+dt_flow <- result$flow@readings[, .(date, flow_m3s = value)]
+dt_rain <- result$rainfall@readings[, .(date, rain_mm = value)]
+
+combined <- merge(dt_flow, dt_rain, by = "date", all = TRUE)
+
+rain_scale <- max(combined$flow_m3s, na.rm = TRUE) /
+              max(combined$rain_mm,  na.rm = TRUE)
+
+ggplot(combined, aes(x = date)) +
+  geom_col(aes(y = rain_mm * rain_scale), fill = "#5A9FD4", alpha = 0.6) +
+  geom_line(aes(y = flow_m3s), colour = "#005EB8", linewidth = 0.8) +
+  scale_y_continuous(
+    name     = "Flow (m\u00b3/s)",
+    sec.axis = ggplot2::sec_axis(~ . / rain_scale, name = "Rainfall (mm)")
+  ) +
+  labs(title = "Daily flow and rainfall", x = NULL) +
+  theme_bw()
+```
+
+---
+
+## 5. Working with multiple gauges
+
+When you download multiple WISKI IDs, all gauges for a parameter are combined
+into **one S7 object**. The `measure_notation` column identifies which gauge
+each row belongs to.
+
+```{r multi-gauge-download}
+result <- download_hydrology(
+  parameters = c("flow", "rainfall"),
+  from_date  = "2022-01-01",
+  to_date    = "2024-12-31",
+  wiski_ids  = c("SS92F014", "S11512_FW", "RAIN001")
+)
+
+result$flow@n_measures  # 2 (one per flow gauge)
+```
+
+### 5.1 Look up station UUIDs
+
+`measure_notation` is a UUID-based EA string
+(`<station-uuid>-flow-m-86400-m3s-qualified`). The `notation` column returned
+by `find_stations()` is the matching station UUID prefix.
+
+```{r uuid-lookup}
+stns <- find_stations(wiski_ids = c("SS92F014", "S11512_FW", "RAIN001"))
+stns[, .(wiskiID, notation, label)]
+#>        wiskiID                               notation  label
+#> 1:    SS92F014  47ed0d00-d4ab-4f3a-84c9-c9571d1a1cc1  ...
+#> 2:   S11512_FW  a3b4c5d6-...                           ...
+#> 3:     RAIN001  f1e2d3c4-...                           ...
+
+uuid_flow_a <- stns[wiskiID == "SS92F014",  notation[1L]]
+uuid_flow_b <- stns[wiskiID == "S11512_FW", notation[1L]]
+uuid_rain   <- stns[wiskiID == "RAIN001",   notation[1L]]
+```
+
+### 5.2 Split into per-gauge S7 objects
+
+```{r split-gauges}
+flow_a <- Flow_Daily(
+  readings  = result$flow@readings[startsWith(measure_notation, uuid_flow_a)],
+  from_date = result$flow@from_date,
+  to_date   = result$flow@to_date
+)
+
+flow_b <- Flow_Daily(
+  readings  = result$flow@readings[startsWith(measure_notation, uuid_flow_b)],
+  from_date = result$flow@from_date,
+  to_date   = result$flow@to_date
+)
+
+rain <- Rainfall_Daily(
+  readings  = result$rainfall@readings[startsWith(measure_notation, uuid_rain)],
+  from_date = result$rainfall@from_date,
+  to_date   = result$rainfall@to_date
+)
+
+flow_a@n_rows  # rows for SS92F014 only
+flow_b@n_rows  # rows for S11512_FW only
+```
+
+### 5.3 Compare gauges in one table
+
+```{r compare-gauges}
+dt_a <- flow_a@readings[, .(date, flow_a = value)]
+dt_b <- flow_b@readings[, .(date, flow_b = value)]
+
+comparison <- merge(dt_a, dt_b, by = "date", all = TRUE)
+comparison[, ratio := flow_a / flow_b]
+
+# Correlation
+cor(comparison$flow_a, comparison$flow_b, use = "complete.obs")
+```
+
+---
+
+## 6. Annual summaries and hydrological year
+
+`add_hydro_year()` appends a `hydro_year` integer and `hydro_doy`
+(day-of-hydrological-year, starting 1 = 1 October) to any `data.table`
+containing a `date` column.
+
+```{r hydro-year}
+dt <- result$flow@readings
+
+dt <- reach.io::add_hydro_year(dt, start_month = 10L)
+
+dt[, .(
+  mean_flow  = mean(value,  na.rm = TRUE),
+  total_days = .N
+), by = hydro_year]
+#>    hydro_year mean_flow total_days
+#> 1:       2022     23.14        365
+#> 2:       2023     18.92        365
+#> 3:       2024     29.71        366
+```
+
+---
+
+## 7. Double-mass plot
+
+`double_mass_plot()` compares cumulative volumes on two axes — useful for
+checking whether the flow record is consistent with the weighted rainfall
+input.
+
+```{r double-mass}
+p <- double_mass_plot(
+  x_data             = flow_a,
+  y_data             = list(rain),
+  catchment_area_km2 = 245.0,
+  output_units       = "Ml",
+  title              = "Flow vs areal rainfall — Thames tributary"
+)
+p
+
+# Inspect the underlying cumulative series
+attr(p, "data")
+```
+
+A straight line indicates a consistent ratio between flow and rainfall over the
+period. Systematic breaks or kinks may indicate gauge issues, land-use change,
+or abstractions not captured in the record.
+
+---
+
+## 8. Catalogue and gap detection
+
+If data has been ingested to a Bronze store, the catalogue functions let you
+query what is available without reading any Parquet files.
+
+```{r catalogue}
+# All gauges in the store
+list_available_gauges(root = "data/hydrometric")
+
+# Date coverage per gauge
+summarise_coverage(root = "data/hydrometric", data_type = "Q")
+#>    site_id  category     data_type  start       end         n_datasets
+#> 1: SS92F014 hydrometric  Q         2010-01-01  2024-12-31   15
+#> 2: S11512FW hydrometric  Q         2015-06-01  2024-12-31    9
+```
+
+`check_gaps()` reads the Parquet files for a gauge, deduplicates on
+timestamp, and reports runs of missing observations:
+
+```{r check-gaps}
+check_gaps(
+  root    = "data/hydrometric",
+  site_id = "SS92F014",
+  data_type = "Q"
+)
+#> Gap analysis: SS92F014 | Q
+#> Expected interval: daily
+#> ─────────────────────────────────────────────────────────────────────
+#>    gap_start   gap_end    n_missing
+#> 1: 2018-03-01  2018-03-04  3
+#> 2: 2020-11-15  2020-11-15  1
+```
+
+---
+
+## Summary of key functions
+
+| Task | Function |
+|---|---|
+| Discover stations | `find_stations(wiski_ids, rloi_ids, names, lat/long/dist)` |
+| List measures | `get_measures(parameter, period_name, value_type)` |
+| Download to memory | `download_hydrology(..., output = "memory")` |
+| Download to disk | `download_hydrology(..., output = "disk", out_dir)` |
+| Extract data.table | `as_data_table(obj)` or `obj@readings` |
+| Long format | `as_long(obj)` |
+| Add hydrological year | `add_hydro_year(dt, start_month)` |
+| Double-mass plot | `double_mass_plot(x_data, y_data, catchment_area_km2)` |
+| List Bronze gauges | `list_available_gauges(root)` |
+| Date coverage | `summarise_coverage(root)` |
+| Find data gaps | `check_gaps(root, site_id, data_type)` |
