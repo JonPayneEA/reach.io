@@ -47,10 +47,10 @@ stns <- find_stations(wiski_ids = "SS92F014")
 stns
 #>    label    notation     wiskiID RLOIid     lat    long easting northing
 #> 1: ...      <uuid>       SS92F014  5022   51.47  -0.31  ...     ...
-#>    riverName   station.notation             parameter value_type period
-#> 1: Thames      <uuid>-flow-m-...  flow       mean       daily
-#> 2: Thames      <uuid>-flow-i-...  flow       instantaneous  15min
-#> 3: Thames      <uuid>-level-i-... level      instantaneous  15min
+#>    riverName   station.notation               parameter value_type period
+#> 1: Thames      <uuid>-flow-i-900-m3s-...      flow      instantaneous  15min
+#> 2: Thames      <uuid>-flow-m-86400-m3s-...    flow      mean           daily
+#> 3: Thames      <uuid>-level-i-900-mASD-...    level     instantaneous  15min
 ```
 
 The returned table has **one row per measure** — not one row per station.
@@ -67,7 +67,7 @@ The key columns are:
 
 ```{r find-multiple}
 # Look up several stations at once — results are pooled and de-duplicated
-stns <- find_stations(wiski_ids = c("SS92F014", "S11512_FW"))
+stns <- find_stations(wiski_ids = c("SS92F014", "356337"))
 
 # Fuzzy name search
 thames <- find_stations(names = "Thames")
@@ -86,11 +86,11 @@ combined <- find_stations(wiski_ids = "SS92F014",
 To see only specific parameters after the lookup:
 
 ```{r filter-measures}
-# All daily mean flow measures at these stations
-stns[parameter == "flow" & period == "daily" & value_type == "mean"]
+# All 15-minute instantaneous flow measures at these stations
+stns[parameter == "flow" & period == "15min" & value_type == "instantaneous"]
 
-# Available 15-minute rainfall
-stns[parameter == "rainfall" & period == "15min"]
+# Available daily rainfall
+stns[parameter == "rainfall" & period == "daily"]
 ```
 
 ---
@@ -123,41 +123,40 @@ The summary gives a quick ingestion report:
 
 ```{r result-summary}
 result$summary
-#>    parameter  measure                                      file rows  ok
-#> 1: flow       <uuid>-flow-m-86400-m3s-qualified            NA   1461  TRUE
-#> 2: flow       <uuid>-flow-m-86400-m3s-qualified            NA   1461  TRUE
-#> 3: rainfall   <uuid>-rainfall-t-86400-mm-qualified         NA   1461  TRUE
-#> 4: rainfall   <uuid>-rainfall-t-86400-mm-qualified         NA   1461  TRUE
+#>    parameter  measure                                     file  rows    ok
+#> 1: flow       <uuid>-flow-i-900-m3s-qualified              NA  140256  TRUE
+#> 2: rainfall   <uuid>-rainfall-t-900-mm-qualified           NA  140256  TRUE
 ```
 
 ### 2.2 Choosing period and value type
 
-The default period is `"daily"` for all parameters. Override with
-`period_name`:
+The default period is **`"15min"`** for all parameters. Override with
+`period_name` when daily aggregates are preferred:
 
-```{r download-15min}
-# 15-minute flow and level
-result_15 <- download_hydrology(
+```{r download-daily}
+# Daily aggregates for flow and level
+result_daily <- download_hydrology(
   parameters  = c("flow", "level"),
   from_date   = "2023-01-01",
   to_date     = "2023-12-31",
-  period_name = "15min",
+  period_name = "daily",
   wiski_ids   = "SS92F014"
 )
 ```
 
-`value_type` defaults to `"mean"` for flow, `"total"` for rainfall, and
-`"instantaneous"` for level. Pass `"all"` to retrieve every statistic for a
-parameter:
+`value_type` defaults to `"instantaneous"` for flow and level, and `"total"`
+for rainfall (the only type available). Pass `"all"` to retrieve every
+statistic for a parameter:
 
 ```{r download-all-vt}
-# All level statistics (min, max, instantaneous)
+# All daily level statistics (mean, min, max, instantaneous)
 result_h <- download_hydrology(
-  parameters = "level",
-  from_date  = "2023-01-01",
-  to_date    = "2023-12-31",
-  value_type = "all",
-  wiski_ids  = "SS92F014"
+  parameters  = "level",
+  from_date   = "2023-01-01",
+  to_date     = "2023-12-31",
+  period_name = "daily",
+  value_type  = "all",
+  wiski_ids   = "SS92F014"
 )
 ```
 
@@ -188,16 +187,16 @@ shows all available slots and the column names of `@readings`:
 
 ```{r print-object}
 result$flow
-#> <reach.io::Flow_Daily>
+#> <reach.io::Flow_15min>
 #> Slots (@):
 #>   @parameter      flow
-#>   @period_name    daily
+#>   @period_name    15min
 #>   @from_date      2020-01-01
 #>   @to_date        2023-12-31
-#>   @n_measures     2
-#>   @n_rows         2,922
+#>   @n_measures     1
+#>   @n_rows         140,256
 #>   @downloaded_at  2026-04-15 09:30:00 UTC
-#>   @readings       data.table [2,922 × 5]
+#>   @readings       data.table [140,256 × 5]
 #>       $dateTime                POSIXct
 #>       $date                    Date
 #>       $value                   numeric
@@ -209,9 +208,9 @@ Access any slot with `@`:
 
 ```{r slot-access}
 result$flow@parameter     # "flow"
-result$flow@period_name   # "daily"
-result$flow@n_measures    # 2
-result$flow@n_rows        # 2922
+result$flow@period_name   # "15min"
+result$flow@n_measures    # 1
+result$flow@n_rows        # 140256
 result$flow@from_date     # "2020-01-01"
 ```
 
@@ -224,23 +223,24 @@ apply directly.
 
 ```{r readings-head}
 result$flow@readings
-#>              dateTime       date  value         measure_notation quality
-#>    1: 2020-01-01 UTC 2020-01-01  12.34  <uuid>-flow-m-86400-...      G
-#>    2: 2020-01-02 UTC 2020-01-02  14.21  <uuid>-flow-m-86400-...      G
+#>                    dateTime       date  value         measure_notation quality
+#>    1: 2020-01-01 00:00:00 UTC 2020-01-01  12.34  <uuid>-flow-i-900-...      G
+#>    2: 2020-01-01 00:15:00 UTC 2020-01-01  12.41  <uuid>-flow-i-900-...      G
+#>    3: 2020-01-01 00:30:00 UTC 2020-01-01  12.38  <uuid>-flow-i-900-...      G
 #>  ...
 ```
 
 ```{r readings-filter}
 dt <- result$flow@readings
 
-# Filter by date
+# Filter by date range
 dt[date >= as.Date("2022-01-01") & date <= as.Date("2022-12-31")]
 
-# Summary statistics
+# Daily summary statistics from 15-minute data
 dt[, .(mean_flow = mean(value, na.rm = TRUE),
        max_flow  = max(value,  na.rm = TRUE),
-       n_days    = .N),
-   by = data.table::year(date)]
+       n_obs     = .N),
+   by = date]
 
 # Check for missing values
 dt[is.na(value)]
@@ -265,21 +265,27 @@ rain_long <- as_long(result$rainfall)
 all_data <- rbind(flow_long, rain_long, fill = TRUE)
 all_data[, .(rows = .N), by = parameter]
 #>    parameter  rows
-#> 1: flow       2922
-#> 2: rainfall   2922
+#> 1: flow       140256
+#> 2: rainfall   140256
 ```
 
 ### 4.3 Basic plotting
 
+For most plots it is easier to aggregate 15-minute data to daily resolution
+first. With 15-minute data, merging directly by `date` would produce multiple
+matches per day — always aggregate or merge by `dateTime` instead.
+
 ```{r plot-flow}
 library(ggplot2)
 
-dt <- result$flow@readings
+# Aggregate to daily mean before plotting
+dt_daily <- result$flow@readings[, .(value = mean(value, na.rm = TRUE)),
+                                  by = date]
 
-ggplot(dt, aes(x = date, y = value)) +
+ggplot(dt_daily, aes(x = date, y = value)) +
   geom_line(colour = "#005EB8") +
   labs(
-    title    = "Daily mean flow",
+    title    = "Daily mean flow (aggregated from 15-minute)",
     subtitle = "SS92F014",
     x        = NULL,
     y        = "Flow (m\u00b3/s)"
@@ -288,9 +294,11 @@ ggplot(dt, aes(x = date, y = value)) +
 ```
 
 ```{r plot-flow-rain}
-# Flow and rainfall together (dual axis)
-dt_flow <- result$flow@readings[, .(date, flow_m3s = value)]
-dt_rain <- result$rainfall@readings[, .(date, rain_mm = value)]
+# Aggregate both series to daily before merging
+dt_flow <- result$flow@readings[,
+             .(flow_m3s = mean(value, na.rm = TRUE)), by = date]
+dt_rain <- result$rainfall@readings[,
+             .(rain_mm  = sum(value,  na.rm = TRUE)), by = date]
 
 combined <- merge(dt_flow, dt_rain, by = "date", all = TRUE)
 
@@ -321,47 +329,48 @@ result <- download_hydrology(
   parameters = c("flow", "rainfall"),
   from_date  = "2022-01-01",
   to_date    = "2024-12-31",
-  wiski_ids  = c("SS92F014", "S11512_FW", "RAIN001")
+  wiski_ids  = c("SS92F014", "S11512_FW", "356337")
 )
 
-result$flow@n_measures  # 2 (one per flow gauge)
+result$flow@n_measures     # 2 (one per flow gauge)
+result$rainfall@n_measures # 1
 ```
 
 ### 5.1 Look up station UUIDs
 
 `measure_notation` is a UUID-based EA string
-(`<station-uuid>-flow-m-86400-m3s-qualified`). The `notation` column returned
+(`<station-uuid>-flow-i-900-m3s-qualified`). The `notation` column returned
 by `find_stations()` is the matching station UUID prefix.
 
 ```{r uuid-lookup}
-stns <- find_stations(wiski_ids = c("SS92F014", "S11512_FW", "RAIN001"))
+stns <- find_stations(wiski_ids = c("SS92F014", "S11512_FW", "356337"))
 stns[, .(wiskiID, notation, label)]
 #>        wiskiID                               notation  label
 #> 1:    SS92F014  47ed0d00-d4ab-4f3a-84c9-c9571d1a1cc1  ...
 #> 2:   S11512_FW  a3b4c5d6-...                           ...
-#> 3:     RAIN001  f1e2d3c4-...                           ...
+#> 3:      356337  f1e2d3c4-...                           ...
 
 uuid_flow_a <- stns[wiskiID == "SS92F014",  notation[1L]]
 uuid_flow_b <- stns[wiskiID == "S11512_FW", notation[1L]]
-uuid_rain   <- stns[wiskiID == "RAIN001",   notation[1L]]
+uuid_rain   <- stns[wiskiID == "356337",    notation[1L]]
 ```
 
 ### 5.2 Split into per-gauge S7 objects
 
 ```{r split-gauges}
-flow_a <- Flow_Daily(
+flow_a <- Flow_15min(
   readings  = result$flow@readings[startsWith(measure_notation, uuid_flow_a)],
   from_date = result$flow@from_date,
   to_date   = result$flow@to_date
 )
 
-flow_b <- Flow_Daily(
+flow_b <- Flow_15min(
   readings  = result$flow@readings[startsWith(measure_notation, uuid_flow_b)],
   from_date = result$flow@from_date,
   to_date   = result$flow@to_date
 )
 
-rain <- Rainfall_Daily(
+rain <- Rainfall_15min(
   readings  = result$rainfall@readings[startsWith(measure_notation, uuid_rain)],
   from_date = result$rainfall@from_date,
   to_date   = result$rainfall@to_date
@@ -373,14 +382,16 @@ flow_b@n_rows  # rows for S11512_FW only
 
 ### 5.3 Compare gauges in one table
 
+Aggregate to daily before comparing to avoid multiple rows per date:
+
 ```{r compare-gauges}
-dt_a <- flow_a@readings[, .(date, flow_a = value)]
-dt_b <- flow_b@readings[, .(date, flow_b = value)]
+dt_a <- flow_a@readings[, .(flow_a = mean(value, na.rm = TRUE)), by = date]
+dt_b <- flow_b@readings[, .(flow_b = mean(value, na.rm = TRUE)), by = date]
 
 comparison <- merge(dt_a, dt_b, by = "date", all = TRUE)
 comparison[, ratio := flow_a / flow_b]
 
-# Correlation
+# Correlation of daily means
 cor(comparison$flow_a, comparison$flow_b, use = "complete.obs")
 ```
 
@@ -397,9 +408,14 @@ dt <- result$flow@readings
 
 dt <- reach.io::add_hydro_year(dt, start_month = 10L)
 
-dt[, .(
-  mean_flow  = mean(value,  na.rm = TRUE),
-  total_days = .N
+# Summarise at daily level first, then by hydro year
+dt_daily <- dt[, .(mean_flow = mean(value, na.rm = TRUE),
+                   hydro_year = hydro_year[1L]),
+               by = date]
+
+dt_daily[, .(
+  mean_flow  = mean(mean_flow, na.rm = TRUE),
+  total_days = data.table::uniqueN(date)
 ), by = hydro_year]
 #>    hydro_year mean_flow total_days
 #> 1:       2022     23.14        365
@@ -456,16 +472,16 @@ timestamp, and reports runs of missing observations:
 
 ```{r check-gaps}
 check_gaps(
-  root    = "data/hydrometric",
-  site_id = "SS92F014",
+  root      = "data/hydrometric",
+  site_id   = "SS92F014",
   data_type = "Q"
 )
 #> Gap analysis: SS92F014 | Q
-#> Expected interval: daily
+#> Expected interval: 15min
 #> ─────────────────────────────────────────────────────────────────────
-#>    gap_start   gap_end    n_missing
-#> 1: 2018-03-01  2018-03-04  3
-#> 2: 2020-11-15  2020-11-15  1
+#>    gap_start               gap_end                 n_missing
+#> 1: 2018-03-01 06:00:00 UTC 2018-03-01 09:45:00 UTC 16
+#> 2: 2020-11-15 12:00:00 UTC 2020-11-15 12:00:00 UTC  1
 ```
 
 ---
