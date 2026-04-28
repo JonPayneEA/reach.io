@@ -1016,14 +1016,14 @@ snap_offgrid_timestamps <- function(dt) {
     origin = "1970-01-01", tz = "UTC"
   )]
 
-  # Integer key: site_id + 15-min slot index (Unix seconds / 900).
-  # Dividing by 900 keeps values well within 32-bit integer range past 2100.
+  # Key: site_id + slot index (Unix seconds / 900). Pipe separator is safe
+  # because site_id values are alphanumeric and slot indices are integers.
   occupied      <- on_grid[, paste(site_id,
                                    as.integer(as.numeric(timestamp) / 900),
-                                   sep = "\x00")]
+                                   sep = "|")]
   off_grid[, .snap_key := paste(site_id,
                                 as.integer(as.numeric(snap_ts) / 900),
-                                sep = "\x00")]
+                                sep = "|")]
   off_grid[, .covered  := .snap_key %in% occupied]
 
   n_dropped <- sum(off_grid$.covered)
