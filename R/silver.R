@@ -964,6 +964,99 @@ y_to_qc_flag <- function(y) {
 }
 
 
+# -- Off-grid timestamp resolution --------------------------------------------
+
+#' Snap or drop off-grid timestamps in a 15-min data.table
+#'
+#' Resolves timestamps that fall outside the expected 15-min grid
+#' (\code{:00 / :15 / :30 / :45}) by comparing each off-grid row against the
+#' on-grid readings already present for the same site:
+#'
+#' \itemize{
+#'   \item If the nearest 15-min slot is already occupied by an on-grid reading
+#'     for the same site, the off-grid row is \strong{dropped} (redundant copy).
+#'   \item Otherwise the timestamp is \strong{snapped} to the nearest slot and
+#'     the row is retained with \code{.snapped = TRUE}.
+#' }
+#'
+#' A \code{warning()} is emitted for each class of action taken (drops and
+#' snaps reported separately). The function is called automatically inside
+#' [promote_to_silver()], but can also be used standalone when cleaning data
+#' before ad-hoc analysis.
+#'
+#' @param dt A \code{data.table} with at least columns \code{site_id}
+#'   (character) and \code{timestamp} (POSIXct, UTC).
+#' @return The modified \code{data.table} with a \code{.snapped} logical column
+#'   appended (\code{TRUE} for rows whose timestamp was adjusted).
+#'
+#' @export
+#'
+#' @examples
+#' dt <- data.table::data.table(
+#'   site_id   = "A",
+#'   timestamp = as.POSIXct(c("2022-01-01 00:01", "2022-01-01 00:15"), tz = "UTC"),
+#'   value     = c(1.5, 2.0)
+#' )
+#' snap_offgrid_timestamps(dt)
+snap_offgrid_timestamps <- function(dt) {
+  step_secs     <- 15L * 60L
+  mins          <- as.integer(format(dt[["timestamp"]], "%M"))
+  off_grid_mask <- !(mins %in% c(0L, 15L, 30L, 45L))
+
+  if (!any(off_grid_mask)) {
+    dt[, .snapped := FALSE]
+    return(dt[])
+  }
+
+  on_grid  <- dt[!off_grid_mask]
+  off_grid <- dt[ off_grid_mask]
+
+  off_grid[, snap_ts := as.POSIXct(
+    round(as.numeric(timestamp) / step_secs) * step_secs,
+    origin = "1970-01-01", tz = "UTC"
+  )]
+
+  # Integer key: site_id + 15-min slot index (Unix seconds / 900).
+  # Dividing by 900 keeps values well within 32-bit integer range past 2100.
+  occupied      <- on_grid[, paste(site_id,
+                                   as.integer(as.numeric(timestamp) / 900),
+                                   sep = "\x00")]
+  off_grid[, .snap_key := paste(site_id,
+                                as.integer(as.numeric(snap_ts) / 900),
+                                sep = "\x00")]
+  off_grid[, .covered  := .snap_key %in% occupied]
+
+  n_dropped <- sum(off_grid$.covered)
+  n_snapped <- sum(!off_grid$.covered)
+
+  to_snap <- off_grid[!(.covered)]
+  to_snap[, timestamp  := snap_ts]
+  to_snap[, c("snap_ts", ".snap_key", ".covered") := NULL]
+  to_snap[, .snapped   := TRUE]
+
+  on_grid[, .snapped := FALSE]
+
+  if (n_dropped > 0L)
+    warning(
+      sprintf(
+        "%d off-grid timestamp(s) dropped (on-grid slot already occupied).",
+        n_dropped
+      ),
+      call. = FALSE
+    )
+  if (n_snapped > 0L)
+    warning(
+      sprintf(
+        "%d off-grid timestamp(s) snapped to nearest 15-min slot; flagged Estimated.",
+        n_snapped
+      ),
+      call. = FALSE
+    )
+
+  data.table::rbindlist(list(on_grid, to_snap))
+}
+
+
 # -- Silver file path ---------------------------------------------------------
 
 #' Build the Silver Parquet file path for a dataset
@@ -1016,8 +1109,9 @@ silver_path <- function(output_dir, category, data_type, dataset_id) {
 #' @section QC flag definitions:
 #' \describe{
 #'   \item{1 — Good}{No anomaly detected.}
-#'   \item{2 — Estimated}{Reserved for manually corrected or gap-filled
-#'     values; not assigned by this function.}
+#'   \item{2 — Estimated}{Assigned to records whose timestamp was off the
+#'     15-min grid and snapped to the nearest slot. Also used for manually
+#'     corrected or gap-filled values.}
 #'   \item{3 — Suspect}{Anomaly detected but value may still be physically
 #'     plausible. Y-digit codes 2–7.}
 #'   \item{4 — Rejected}{Value is almost certainly erroneous. Y-digit codes
@@ -1175,6 +1269,9 @@ promote_to_silver <- function(bronze_data,
                  paste(missing, collapse = ", ")))
   }
 
+  # -- Resolve off-grid timestamps ---------------------------------------------
+  dt <- snap_offgrid_timestamps(dt)
+
   # -- Apply QC per site (dispatch by data_type) --------------------------------
   data.table::setorder(dt, site_id, timestamp)
 
@@ -1239,6 +1336,10 @@ promote_to_silver <- function(bronze_data,
     dt[, qc_flag := 1L]
     code_col <- NULL
   }
+
+  # Snapped rows inherit at least Estimated quality unless QC found a worse problem
+  dt[.snapped == TRUE & qc_flag == 1L, qc_flag := 2L]
+  dt[, .snapped := NULL]
 
   dt[, qc_value      := data.table::fifelse(qc_flag < 4L, value, NA_real_)]
   dt[, qc_flagged_at := flagged_at]

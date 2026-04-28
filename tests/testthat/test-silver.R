@@ -383,6 +383,100 @@ test_that("promote_to_silver does not attach gap_counts when annotate_gaps = FAL
 })
 
 
+# ---- Off-grid timestamp resolution ------------------------------------------
+
+test_that("snap_offgrid_timestamps returns dt unchanged when all timestamps are on-grid", {
+  dt <- data.table::data.table(
+    site_id   = "A",
+    timestamp = seq(as.POSIXct("2022-01-01 00:00", tz = "UTC"),
+                    by = "15 min", length.out = 8L),
+    value     = 1:8
+  )
+  out <- snap_offgrid_timestamps(data.table::copy(dt))
+  expect_equal(nrow(out), 8L)
+  expect_true(all(!out$.snapped))
+})
+
+test_that("snap_offgrid_timestamps drops off-grid row when on-grid slot is occupied", {
+  ts_base <- as.POSIXct("2022-01-01 00:00", tz = "UTC")
+  dt <- data.table::data.table(
+    site_id   = "A",
+    timestamp = ts_base + c(0L, 60L, 900L),   # :00, :01, :15
+    value     = c(1.0, 1.1, 2.0)
+  )
+  out <- suppressWarnings(snap_offgrid_timestamps(data.table::copy(dt)))
+  expect_equal(nrow(out), 2L)
+  expect_equal(sort(out$timestamp), ts_base + c(0L, 900L))
+  expect_true(all(!out$.snapped))
+})
+
+test_that("snap_offgrid_timestamps snaps off-grid row when target slot is empty", {
+  ts_base <- as.POSIXct("2022-01-01 00:00", tz = "UTC")
+  dt <- data.table::data.table(
+    site_id   = "A",
+    timestamp = ts_base + c(60L, 900L),   # :01, :15 — no :00
+    value     = c(1.0, 2.0)
+  )
+  out <- suppressWarnings(snap_offgrid_timestamps(data.table::copy(dt)))
+  expect_equal(nrow(out), 2L)
+  expect_equal(nrow(out[.snapped == TRUE]), 1L)
+  expect_equal(out[.snapped == TRUE, timestamp], ts_base)   # snapped :01 → :00
+})
+
+test_that("snap_offgrid_timestamps handles the mixed case: 00, 01, 15, 30, 43, 45", {
+  ts_base <- as.POSIXct("2022-01-01 00:00", tz = "UTC")
+  # :01 snaps to :00 (occupied) → dropped; :43 snaps to :45 (occupied) → dropped
+  dt <- data.table::data.table(
+    site_id   = "A",
+    timestamp = ts_base + c(0L, 60L, 900L, 1800L, 2580L, 2700L),
+    value     = seq_len(6L) * 1.0
+  )
+  out <- suppressWarnings(snap_offgrid_timestamps(data.table::copy(dt)))
+  expect_equal(nrow(out), 4L)
+  expect_true(all(!out$.snapped))
+  expect_equal(sort(out$timestamp), ts_base + c(0L, 900L, 1800L, 2700L))
+})
+
+test_that("promote_to_silver sets qc_flag = 2 for a snapped off-grid timestamp", {
+  ts_base <- as.POSIXct("2022-01-01 00:00", tz = "UTC")
+  # :01 snaps to :00 (empty) and should emerge with qc_flag = 2
+  dt <- data.table::data.table(
+    timestamp     = ts_base + c(60L, 900L, 1800L, 2700L),
+    value         = c(1.5, 1.6, 1.7, 1.8),
+    supplier_flag = NA_character_,
+    dataset_id    = "EA_39001_Q_20220101",
+    site_id       = "39001",
+    data_type     = "Q"
+  )
+  out <- suppressWarnings(
+    promote_to_silver(dt, output_dir = tempdir(), write_output = FALSE,
+                      annotate_gaps = FALSE)
+  )
+  snapped_row <- out[timestamp == ts_base]
+  expect_equal(nrow(snapped_row), 1L)
+  expect_equal(snapped_row$qc_flag, 2L)
+})
+
+test_that("promote_to_silver drops off-grid row when on-grid slot is occupied", {
+  n       <- 100L
+  ts_base <- as.POSIXct("2022-01-01 00:00", tz = "UTC")
+  on_grid <- seq(ts_base, by = "15 min", length.out = n)
+  dt <- data.table::data.table(
+    timestamp     = sort(c(on_grid, ts_base + 60L)),   # inject :01 off-grid
+    value         = runif(n + 1L),
+    supplier_flag = NA_character_,
+    dataset_id    = "EA_39001_Q_20220101",
+    site_id       = "39001",
+    data_type     = "Q"
+  )
+  out <- suppressWarnings(
+    promote_to_silver(dt, output_dir = tempdir(), write_output = FALSE,
+                      annotate_gaps = FALSE)
+  )
+  expect_equal(nrow(out), n)
+})
+
+
 # ---- Stage / Level (H) QC checks --------------------------------------------
 
 # Helper: 200-row Bronze data.table for stage data

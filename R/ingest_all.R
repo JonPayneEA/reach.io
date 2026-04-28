@@ -293,7 +293,26 @@
         as.character(dt[[flag_col]]) else NA_character_
     )
     pre_dt <- pre_dt[!is.na(datetime) & !is.na(value)]
-    
+
+    # Guard: warn when off-grid timestamps appear in a 15-min series.
+    # Bronze is written unchanged; resolution is deferred to Silver tier.
+    if (identical(period_str, "15min")) {
+      off_mins <- which(!as.integer(format(pre_dt[["datetime"]], "%M")) %in%
+                          c(0L, 15L, 30L, 45L))
+      if (length(off_mins) > 0L) {
+        sample_ts <- head(
+          format(pre_dt[["datetime"]][off_mins], "%Y-%m-%d %H:%M:%S"), 5L
+        )
+        warning(
+          sprintf(
+            "[%s] %d off-grid timestamp(s) in 15-min series (not :00/:15/:30/:45); written to Bronze unchanged. Sample: %s",
+            station, length(off_mins), paste(sample_ts, collapse = ", ")
+          ),
+          call. = FALSE
+        )
+      }
+    }
+
     # -- Apply Bronze schema and write to framework folder structure ----------
     supplier_code <- "WISKI"
     dataset_id    <- make_dataset_id(supplier_code, station, data_type,
