@@ -127,8 +127,9 @@ automatically; they can be added to the output manually via the
 
 \describe{
 \item{1 — Good}{No anomaly detected.}
-\item{2 — Estimated}{Reserved for manually corrected or gap-filled
-values; not assigned by this function.}
+\item{2 — Estimated}{Assigned to records whose timestamp was off the
+15-min grid and snapped to the nearest slot. Also used for manually
+corrected or gap-filled values.}
 \item{3 — Suspect}{Anomaly detected but value may still be physically
 plausible. Y-digit codes 2–7.}
 \item{4 — Rejected}{Value is almost certainly erroneous. Y-digit codes
