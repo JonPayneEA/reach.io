@@ -385,45 +385,45 @@ test_that("promote_to_silver does not attach gap_counts when annotate_gaps = FAL
 
 # ---- Off-grid timestamp resolution ------------------------------------------
 
-test_that(".snap_offgrid_timestamps returns dt unchanged when all timestamps are on-grid", {
+test_that("snap_offgrid_timestamps returns dt unchanged when all timestamps are on-grid", {
   dt <- data.table::data.table(
     site_id   = "A",
     timestamp = seq(as.POSIXct("2022-01-01 00:00", tz = "UTC"),
                     by = "15 min", length.out = 8L),
     value     = 1:8
   )
-  out <- .snap_offgrid_timestamps(data.table::copy(dt))
+  out <- snap_offgrid_timestamps(data.table::copy(dt))
   expect_equal(nrow(out), 8L)
   expect_true(all(!out$.snapped))
 })
 
-test_that(".snap_offgrid_timestamps drops off-grid row when on-grid slot is occupied", {
+test_that("snap_offgrid_timestamps drops off-grid row when on-grid slot is occupied", {
   ts_base <- as.POSIXct("2022-01-01 00:00", tz = "UTC")
   dt <- data.table::data.table(
     site_id   = "A",
     timestamp = ts_base + c(0L, 60L, 900L),   # :00, :01, :15
     value     = c(1.0, 1.1, 2.0)
   )
-  out <- suppressWarnings(.snap_offgrid_timestamps(data.table::copy(dt)))
+  out <- suppressWarnings(snap_offgrid_timestamps(data.table::copy(dt)))
   expect_equal(nrow(out), 2L)
   expect_equal(sort(out$timestamp), ts_base + c(0L, 900L))
   expect_true(all(!out$.snapped))
 })
 
-test_that(".snap_offgrid_timestamps snaps off-grid row when target slot is empty", {
+test_that("snap_offgrid_timestamps snaps off-grid row when target slot is empty", {
   ts_base <- as.POSIXct("2022-01-01 00:00", tz = "UTC")
   dt <- data.table::data.table(
     site_id   = "A",
     timestamp = ts_base + c(60L, 900L),   # :01, :15 — no :00
     value     = c(1.0, 2.0)
   )
-  out <- suppressWarnings(.snap_offgrid_timestamps(data.table::copy(dt)))
+  out <- suppressWarnings(snap_offgrid_timestamps(data.table::copy(dt)))
   expect_equal(nrow(out), 2L)
   expect_equal(nrow(out[.snapped == TRUE]), 1L)
   expect_equal(out[.snapped == TRUE, timestamp], ts_base)   # snapped :01 → :00
 })
 
-test_that(".snap_offgrid_timestamps handles the mixed case: 00, 01, 15, 30, 43, 45", {
+test_that("snap_offgrid_timestamps handles the mixed case: 00, 01, 15, 30, 43, 45", {
   ts_base <- as.POSIXct("2022-01-01 00:00", tz = "UTC")
   # :01 snaps to :00 (occupied) → dropped; :43 snaps to :45 (occupied) → dropped
   dt <- data.table::data.table(
@@ -431,7 +431,7 @@ test_that(".snap_offgrid_timestamps handles the mixed case: 00, 01, 15, 30, 43, 
     timestamp = ts_base + c(0L, 60L, 900L, 1800L, 2580L, 2700L),
     value     = seq_len(6L) * 1.0
   )
-  out <- suppressWarnings(.snap_offgrid_timestamps(data.table::copy(dt)))
+  out <- suppressWarnings(snap_offgrid_timestamps(data.table::copy(dt)))
   expect_equal(nrow(out), 4L)
   expect_true(all(!out$.snapped))
   expect_equal(sort(out$timestamp), ts_base + c(0L, 900L, 1800L, 2700L))

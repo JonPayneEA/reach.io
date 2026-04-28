@@ -966,28 +966,39 @@ y_to_qc_flag <- function(y) {
 
 # -- Off-grid timestamp resolution --------------------------------------------
 
-#' Snap or drop off-grid timestamps in a Bronze 15-min data.table
+#' Snap or drop off-grid timestamps in a 15-min data.table
 #'
-#' Internal. Called by [promote_to_silver()] after deduplication and schema
-#' validation.
+#' Resolves timestamps that fall outside the expected 15-min grid
+#' (\code{:00 / :15 / :30 / :45}) by comparing each off-grid row against the
+#' on-grid readings already present for the same site:
 #'
-#' For each row whose minute is not in \{0, 15, 30, 45\}:
 #' \itemize{
 #'   \item If the nearest 15-min slot is already occupied by an on-grid reading
 #'     for the same site, the off-grid row is \strong{dropped} (redundant copy).
 #'   \item Otherwise the timestamp is \strong{snapped} to the nearest slot and
-#'     a \code{.snapped} flag is set to \code{TRUE}. \code{promote_to_silver()}
-#'     uses this to set \code{qc_flag = 2} (Estimated) after standard QC runs.
+#'     the row is retained with \code{.snapped = TRUE}.
 #' }
 #'
-#' Emits a \code{warning()} for each class of action taken.
+#' A \code{warning()} is emitted for each class of action taken (drops and
+#' snaps reported separately). The function is called automatically inside
+#' [promote_to_silver()], but can also be used standalone when cleaning data
+#' before ad-hoc analysis.
 #'
-#' @param dt data.table with at least columns \code{site_id} (character) and
-#'   \code{timestamp} (POSIXct, UTC).
-#' @return The modified data.table with a \code{.snapped} logical column
-#'   appended.
-#' @noRd
-.snap_offgrid_timestamps <- function(dt) {
+#' @param dt A \code{data.table} with at least columns \code{site_id}
+#'   (character) and \code{timestamp} (POSIXct, UTC).
+#' @return The modified \code{data.table} with a \code{.snapped} logical column
+#'   appended (\code{TRUE} for rows whose timestamp was adjusted).
+#'
+#' @export
+#'
+#' @examples
+#' dt <- data.table::data.table(
+#'   site_id   = "A",
+#'   timestamp = as.POSIXct(c("2022-01-01 00:01", "2022-01-01 00:15"), tz = "UTC"),
+#'   value     = c(1.5, 2.0)
+#' )
+#' snap_offgrid_timestamps(dt)
+snap_offgrid_timestamps <- function(dt) {
   step_secs     <- 15L * 60L
   mins          <- as.integer(format(dt[["timestamp"]], "%M"))
   off_grid_mask <- !(mins %in% c(0L, 15L, 30L, 45L))
@@ -1259,7 +1270,7 @@ promote_to_silver <- function(bronze_data,
   }
 
   # -- Resolve off-grid timestamps ---------------------------------------------
-  dt <- .snap_offgrid_timestamps(dt)
+  dt <- snap_offgrid_timestamps(dt)
 
   # -- Apply QC per site (dispatch by data_type) --------------------------------
   data.table::setorder(dt, site_id, timestamp)
