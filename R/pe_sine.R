@@ -358,6 +358,10 @@ regionalise_pe_sine <- function(params_list, weights = NULL) {
 #'   \item{`plot`}{A `ggplot` object (only present when `plot = TRUE`).}
 #' }
 #'
+#' @note The `plot = TRUE` functionality will be moved to the `reach.viz`
+#'   package in a future release. The diagnostic return values (`rmse`,
+#'   `bias`, `r_squared`, `fitted`) will remain in `reach.io`.
+#'
 #' @export
 #'
 #' @examples

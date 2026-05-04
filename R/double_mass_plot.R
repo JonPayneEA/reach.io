@@ -209,6 +209,9 @@ cumsum_na <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
 #'   to build the plot is attached as `attr(p, "data")` for inspection or
 #'   further processing.
 #'
+#' @note This function will be moved to the `reach.viz` package in a future
+#'   release and deprecated here once that package is available.
+#'
 #' @export
 #'
 #' @examples
