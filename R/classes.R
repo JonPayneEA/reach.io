@@ -64,19 +64,19 @@ NULL
 #' Not exported. Holds the properties and validator shared by all six
 #' concrete classes. Every concrete class inherits from this.
 #'
-#' @slot readings A `data.table` of readings. Must contain columns
+#' @prop readings A `data.table` of readings. Must contain columns
 #'   `dateTime` (POSIXct), `date` (Date), `value` (numeric), and
 #'   `measure_notation` (character).
-#' @slot parameter Character scalar. One of `"rainfall"`, `"flow"`,
+#' @prop parameter Character scalar. One of `"rainfall"`, `"flow"`,
 #'   `"level"`.
-#' @slot period_name Character scalar. `"daily"` or `"15min"`.
-#' @slot from_date Character scalar. Start of the requested date range
+#' @prop period_name Character scalar. `"daily"` or `"15min"`.
+#' @prop from_date Character scalar. Start of the requested date range
 #'   (YYYY-MM-DD).
-#' @slot to_date Character scalar. End of the requested date range
+#' @prop to_date Character scalar. End of the requested date range
 #'   (YYYY-MM-DD).
-#' @slot n_measures Integer. Number of distinct measure notations present.
-#' @slot n_rows Integer. Total reading rows.
-#' @slot downloaded_at POSIXct. When the object was constructed.
+#' @prop n_measures Integer. Number of distinct measure notations present.
+#' @prop n_rows Integer. Total reading rows.
+#' @prop downloaded_at POSIXct. When the object was constructed.
 #'
 #' @noRd
 HydroData <- S7::new_class(
@@ -168,16 +168,17 @@ HydroData <- S7::new_class(
 #' Wraps daily cumulative rainfall readings from [download_hydrology()].
 #' Typical units: mm. One row per day per measure.
 #'
-#' @slot readings `data.table` with columns `dateTime` (POSIXct),
+#' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, mm), `measure_notation` (character),
 #'   and optionally `quality` and `completeness`.
-#' @slot parameter Always `"rainfall"`.
-#' @slot period_name Always `"daily"`.
-#' @slot from_date,to_date Requested date range (YYYY-MM-DD).
-#' @slot n_measures Number of distinct measure notations.
-#' @slot n_rows Total reading rows.
-#' @slot downloaded_at POSIXct timestamp of object construction.
+#' @param from_date,to_date Requested date range (YYYY-MM-DD). Default `NA`.
+#' @prop parameter Always `"rainfall"`.
+#' @prop period_name Always `"daily"`.
+#' @prop n_measures Number of distinct measure notations.
+#' @prop n_rows Total reading rows.
+#' @prop downloaded_at POSIXct timestamp of object construction.
 #'
+#' @returns A `Rainfall_Daily` S7 object.
 #' @export
 Rainfall_Daily <- .new_hydro_class("Rainfall_Daily", "rainfall", "daily")
 
@@ -186,16 +187,17 @@ Rainfall_Daily <- .new_hydro_class("Rainfall_Daily", "rainfall", "daily")
 #' Wraps 15-minute cumulative rainfall readings from [download_hydrology()].
 #' Typical units: mm. One row per 15-minute interval per measure.
 #'
-#' @slot readings `data.table` with columns `dateTime` (POSIXct),
+#' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, mm), `measure_notation` (character),
 #'   and optionally `quality` and `completeness`.
-#' @slot parameter Always `"rainfall"`.
-#' @slot period_name Always `"15min"`.
-#' @slot from_date,to_date Requested date range (YYYY-MM-DD).
-#' @slot n_measures Number of distinct measure notations.
-#' @slot n_rows Total reading rows.
-#' @slot downloaded_at POSIXct timestamp of object construction.
+#' @param from_date,to_date Requested date range (YYYY-MM-DD). Default `NA`.
+#' @prop parameter Always `"rainfall"`.
+#' @prop period_name Always `"15min"`.
+#' @prop n_measures Number of distinct measure notations.
+#' @prop n_rows Total reading rows.
+#' @prop downloaded_at POSIXct timestamp of object construction.
 #'
+#' @returns A `Rainfall_15min` S7 object.
 #' @export
 Rainfall_15min <- .new_hydro_class("Rainfall_15min", "rainfall", "15min")
 
@@ -204,16 +206,17 @@ Rainfall_15min <- .new_hydro_class("Rainfall_15min", "rainfall", "15min")
 #' Wraps daily mean flow readings from [download_hydrology()].
 #' Typical units: m3/s. One row per day per measure.
 #'
-#' @slot readings `data.table` with columns `dateTime` (POSIXct),
+#' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, m3/s), `measure_notation` (character),
 #'   and optionally `quality` and `completeness`.
-#' @slot parameter Always `"flow"`.
-#' @slot period_name Always `"daily"`.
-#' @slot from_date,to_date Requested date range (YYYY-MM-DD).
-#' @slot n_measures Number of distinct measure notations.
-#' @slot n_rows Total reading rows.
-#' @slot downloaded_at POSIXct timestamp of object construction.
+#' @param from_date,to_date Requested date range (YYYY-MM-DD). Default `NA`.
+#' @prop parameter Always `"flow"`.
+#' @prop period_name Always `"daily"`.
+#' @prop n_measures Number of distinct measure notations.
+#' @prop n_rows Total reading rows.
+#' @prop downloaded_at POSIXct timestamp of object construction.
 #'
+#' @returns A `Flow_Daily` S7 object.
 #' @export
 Flow_Daily <- .new_hydro_class("Flow_Daily", "flow", "daily")
 
@@ -222,16 +225,17 @@ Flow_Daily <- .new_hydro_class("Flow_Daily", "flow", "daily")
 #' Wraps 15-minute flow readings from [download_hydrology()].
 #' Typical units: m3/s. One row per 15-minute interval per measure.
 #'
-#' @slot readings `data.table` with columns `dateTime` (POSIXct),
+#' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, m3/s), `measure_notation` (character),
 #'   and optionally `quality` and `completeness`.
-#' @slot parameter Always `"flow"`.
-#' @slot period_name Always `"15min"`.
-#' @slot from_date,to_date Requested date range (YYYY-MM-DD).
-#' @slot n_measures Number of distinct measure notations.
-#' @slot n_rows Total reading rows.
-#' @slot downloaded_at POSIXct timestamp of object construction.
+#' @param from_date,to_date Requested date range (YYYY-MM-DD). Default `NA`.
+#' @prop parameter Always `"flow"`.
+#' @prop period_name Always `"15min"`.
+#' @prop n_measures Number of distinct measure notations.
+#' @prop n_rows Total reading rows.
+#' @prop downloaded_at POSIXct timestamp of object construction.
 #'
+#' @returns A `Flow_15min` S7 object.
 #' @export
 Flow_15min <- .new_hydro_class("Flow_15min", "flow", "15min")
 
@@ -242,16 +246,17 @@ Flow_15min <- .new_hydro_class("Flow_15min", "flow", "15min")
 #' instantaneous) may be present depending on the `value_type` argument
 #' used when downloading.
 #'
-#' @slot readings `data.table` with columns `dateTime` (POSIXct),
+#' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, m), `measure_notation` (character),
 #'   and optionally `quality` and `completeness`.
-#' @slot parameter Always `"level"`.
-#' @slot period_name Always `"daily"`.
-#' @slot from_date,to_date Requested date range (YYYY-MM-DD).
-#' @slot n_measures Number of distinct measure notations.
-#' @slot n_rows Total reading rows.
-#' @slot downloaded_at POSIXct timestamp of object construction.
+#' @param from_date,to_date Requested date range (YYYY-MM-DD). Default `NA`.
+#' @prop parameter Always `"level"`.
+#' @prop period_name Always `"daily"`.
+#' @prop n_measures Number of distinct measure notations.
+#' @prop n_rows Total reading rows.
+#' @prop downloaded_at POSIXct timestamp of object construction.
 #'
+#' @returns A `Level_Daily` S7 object.
 #' @export
 Level_Daily <- .new_hydro_class("Level_Daily", "level", "daily")
 
@@ -260,16 +265,17 @@ Level_Daily <- .new_hydro_class("Level_Daily", "level", "daily")
 #' Wraps 15-minute water level readings from [download_hydrology()].
 #' Typical units: mAOD or mASD. One row per 15-minute interval per measure.
 #'
-#' @slot readings `data.table` with columns `dateTime` (POSIXct),
+#' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, m), `measure_notation` (character),
 #'   and optionally `quality` and `completeness`.
-#' @slot parameter Always `"level"`.
-#' @slot period_name Always `"15min"`.
-#' @slot from_date,to_date Requested date range (YYYY-MM-DD).
-#' @slot n_measures Number of distinct measure notations.
-#' @slot n_rows Total reading rows.
-#' @slot downloaded_at POSIXct timestamp of object construction.
+#' @param from_date,to_date Requested date range (YYYY-MM-DD). Default `NA`.
+#' @prop parameter Always `"level"`.
+#' @prop period_name Always `"15min"`.
+#' @prop n_measures Number of distinct measure notations.
+#' @prop n_rows Total reading rows.
+#' @prop downloaded_at POSIXct timestamp of object construction.
 #'
+#' @returns A `Level_15min` S7 object.
 #' @export
 Level_15min <- .new_hydro_class("Level_15min", "level", "15min")
 
@@ -293,13 +299,15 @@ HYDRO_CLASS <- list(
 
 #' Extract the readings data.table from a HydroData object
 #'
-#' Returns the inner `data.table` from any `HydroData`-derived object for
-#' direct use with `data.table` or `arrow` without touching `@readings`.
+#' `as_data_table()` is an S7 generic. Returns the inner `data.table` from
+#' any `HydroData`- or `PotEvapData`-derived object for direct use with
+#' `data.table` or `arrow` without touching `@readings`.
 #'
 #' @param x A [Rainfall_Daily], [Rainfall_15min], [Flow_Daily], [Flow_15min],
-#'   [Level_Daily], or [Level_15min] object.
+#'   [Level_Daily], [Level_15min], [PotEvap_Daily], [PotEvap_Hourly], or
+#'   [PotEvap_15min] object.
 #'
-#' @return A `data.table` of readings.
+#' @returns A `data.table` of readings.
 #'
 #' @export
 #'
@@ -316,13 +324,13 @@ S7::method(as_data_table, HydroData) <- function(x) x@readings
 
 #' Reshape a HydroData object to long format
 #'
-#' Adds a `parameter` column and reorders so results from multiple
-#' parameter objects can be combined with `rbind()`.
+#' `as_long()` is an S7 generic. Adds a `parameter` column and reorders so
+#' results from multiple parameter objects can be combined with `rbind()`.
 #'
 #' @param x A [Rainfall_Daily], [Rainfall_15min], [Flow_Daily], [Flow_15min],
 #'   [Level_Daily], or [Level_15min] object.
 #'
-#' @return A `data.table` with columns `parameter`, `measure_notation`,
+#' @returns A `data.table` with columns `parameter`, `measure_notation`,
 #'   `date`, `dateTime`, `value`, and any other columns present in the
 #'   readings (e.g. `quality`, `completeness`).
 #'
@@ -390,16 +398,16 @@ S7::method(print, HydroData) <- .print_HydroData
 #' Not exported. Holds the properties and validator shared by all three
 #' concrete PE classes. Every concrete class inherits from this.
 #'
-#' @slot readings A `data.table` of readings. Must contain columns
+#' @prop readings A `data.table` of readings. Must contain columns
 #'   `dateTime` (POSIXct), `date` (Date), and `value` (numeric).
-#' @slot period_name Character scalar. `"daily"`, `"hourly"`, or `"15min"`.
-#' @slot source_name Character scalar. Identifies the data origin (e.g.
+#' @prop period_name Character scalar. `"daily"`, `"hourly"`, or `"15min"`.
+#' @prop source_name Character scalar. Identifies the data origin (e.g.
 #'   `"CHESS-PE"`, `"MORECS"`, `"bespoke"`). Free-text; used for
 #'   provenance tracking and printing.
-#' @slot from_date Character scalar. Start of the data range (YYYY-MM-DD).
-#' @slot to_date Character scalar. End of the data range (YYYY-MM-DD).
-#' @slot n_rows Integer. Total reading rows.
-#' @slot created_at POSIXct. When the object was constructed.
+#' @prop from_date Character scalar. Start of the data range (YYYY-MM-DD).
+#' @prop to_date Character scalar. End of the data range (YYYY-MM-DD).
+#' @prop n_rows Integer. Total reading rows.
+#' @prop created_at POSIXct. When the object was constructed.
 #'
 #' @noRd
 PotEvapData <- S7::new_class(
@@ -487,15 +495,16 @@ PotEvapData <- S7::new_class(
 #' Wraps daily PE values sourced directly from an external PE dataset
 #' (e.g. CEH CHESS-PE, MORECS). Units are typically mm/day.
 #'
-#' @slot readings `data.table` with columns `dateTime` (POSIXct),
+#' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, mm/day), and optionally any
 #'   additional columns present in the source (e.g. `quality`).
-#' @slot period_name Always `"daily"`.
-#' @slot source_name Character. Origin of the PE data.
-#' @slot from_date,to_date Data range (YYYY-MM-DD).
-#' @slot n_rows Total reading rows.
-#' @slot created_at POSIXct timestamp of object construction.
+#' @param source_name Character. Origin of the PE data. Default `NA`.
+#' @param from_date,to_date Data range (YYYY-MM-DD). Default `NA`.
+#' @prop period_name Always `"daily"`.
+#' @prop n_rows Total reading rows.
+#' @prop created_at POSIXct timestamp of object construction.
 #'
+#' @returns A `PotEvap_Daily` S7 object.
 #' @export
 PotEvap_Daily <- .new_pe_class("PotEvap_Daily", "daily")
 
@@ -504,15 +513,16 @@ PotEvap_Daily <- .new_pe_class("PotEvap_Daily", "daily")
 #' Wraps hourly PE values sourced directly from an external PE dataset.
 #' Units are typically mm/hr. One row per hour.
 #'
-#' @slot readings `data.table` with columns `dateTime` (POSIXct),
+#' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, mm/hr), and optionally any
 #'   additional columns present in the source.
-#' @slot period_name Always `"hourly"`.
-#' @slot source_name Character. Origin of the PE data.
-#' @slot from_date,to_date Data range (YYYY-MM-DD).
-#' @slot n_rows Total reading rows.
-#' @slot created_at POSIXct timestamp of object construction.
+#' @param source_name Character. Origin of the PE data. Default `NA`.
+#' @param from_date,to_date Data range (YYYY-MM-DD). Default `NA`.
+#' @prop period_name Always `"hourly"`.
+#' @prop n_rows Total reading rows.
+#' @prop created_at POSIXct timestamp of object construction.
 #'
+#' @returns A `PotEvap_Hourly` S7 object.
 #' @export
 PotEvap_Hourly <- .new_pe_class("PotEvap_Hourly", "hourly")
 
@@ -522,20 +532,19 @@ PotEvap_Hourly <- .new_pe_class("PotEvap_Hourly", "hourly")
 #' coarser timestep via [disagg_to_15min()]. This class is not intended
 #' to be constructed directly; use `disagg_to_15min()` instead.
 #'
-#' @slot readings `data.table` with columns `dateTime` (POSIXct),
+#' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, mm/15min).
-#' @slot period_name Always `"15min"`.
-#' @slot source_name Character. Inherited from the parent object.
-#' @slot from_date,to_date Data range (YYYY-MM-DD).
-#' @slot n_rows Total reading rows.
-#' @slot created_at POSIXct timestamp of object construction.
-#' @slot is_calculated Logical. Always `TRUE` — 15-min PE is never
+#' @param source_name Character. Inherited from the parent object. Default `NA`.
+#' @param from_date,to_date Data range (YYYY-MM-DD). Default `NA`.
+#' @param disagg_method Character. How disaggregation was performed.
+#'   One of `"uniform_hourly"` or `"uniform_daily"`. Default `NA`.
+#' @prop period_name Always `"15min"`.
+#' @prop n_rows Total reading rows.
+#' @prop created_at POSIXct timestamp of object construction.
+#' @prop is_calculated Logical. Always `TRUE` — 15-min PE is never
 #'   sourced directly; it is always derived.
-#' @slot disagg_method Character. How disaggregation was performed.
-#'   One of `"uniform_hourly"` (each hourly value split into four equal
-#'   15-min intervals) or `"uniform_daily"` (each daily value split into
-#'   96 equal 15-min intervals).
 #'
+#' @returns A `PotEvap_15min` S7 object.
 #' @export
 PotEvap_15min <- S7::new_class(
   "PotEvap_15min",
@@ -582,8 +591,9 @@ PotEvap_15min <- S7::new_class(
 
 #' Disaggregate potential evaporation to 15-minute intervals
 #'
-#' Converts a [PotEvap_Daily] or [PotEvap_Hourly] object to a [PotEvap_15min]
-#' object using uniform disaggregation:
+#' `disagg_to_15min()` is an S7 generic. Converts a [PotEvap_Daily] or
+#' [PotEvap_Hourly] object to a [PotEvap_15min] object using uniform
+#' disaggregation:
 #'
 #' * **From hourly**: each hourly value is divided equally across four
 #'   consecutive 15-minute intervals (method `"uniform_hourly"`).
@@ -596,7 +606,7 @@ PotEvap_15min <- S7::new_class(
 #'
 #' @param x A [PotEvap_Daily] or [PotEvap_Hourly] object.
 #'
-#' @return A [PotEvap_15min] object whose readings contain columns
+#' @returns A [PotEvap_15min] object whose readings contain columns
 #'   `dateTime` (POSIXct), `date` (Date), and `value` (numeric).
 #'
 #' @export

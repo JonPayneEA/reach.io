@@ -159,7 +159,8 @@ make_date_chunks <- function(from_date, to_date) {
 #'   mode), `file` (`NA` in memory mode), `rows`, `ok`.
 #'
 #' @noRd
-run_sync <- function(mid, chunks, output, out_dir, param, observation_type) {
+run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
+                     site_id = NA_character_, period = NA_character_) {
 
   chunk_list <- list()
   total_rows <- 0L
@@ -181,26 +182,17 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type) {
 
       if (nrow(dt) == 0) {
         message("    No data for this chunk — skipping.")
-        return()
+        next
       }
 
       if (nrow(dt) >= API_HARD_LIMIT) {
         warning(sprintf(
-          "Chunk %d/%d for '%s' hit the API row limit (%d). ",
-          "Data may be truncated — consider method = 'batch'.",
+          "Chunk %d/%d for '%s' hit the API row limit (%d). Data may be truncated — consider method = 'batch'.",
           j, nrow(chunks), mid, API_HARD_LIMIT
         ))
       }
 
-      if (output == "memory") {
-        # Defer combining until all chunks are done to avoid repeated copies
-        chunk_list[[j]] <- dt
-      } else {
-        # Append immediately; first chunk writes the header
-        dest <- handle_output(dt, output, out_dir, param, mid,
-                              append = (total_rows > 0L))
-      }
-
+      chunk_list[[length(chunk_list) + 1L]] <- dt
       total_rows <- total_rows + nrow(dt)
       message(sprintf("    %d rows (running total: %d)", nrow(dt), total_rows))
 
@@ -212,14 +204,21 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type) {
     })
   }
 
-  # Combine all in-memory chunks in one shot — much faster than incremental
-  # rbind inside the loop
-  combined <- if (output == "memory" && length(chunk_list) > 0) {
+  # Combine all chunks in one shot — much faster than incremental rbind
+  combined <- if (length(chunk_list) > 0L) {
     data.table::rbindlist(chunk_list, fill = TRUE)
   } else {
     NULL
   }
 
-  list(measure = mid, data = combined, file = dest,
-       rows = total_rows, ok = ok)
+  if (output == "disk" && !is.null(combined) && nrow(combined) > 0L) {
+    dest <- handle_output(combined, "disk", out_dir, param, mid,
+                          site_id = site_id, period = period)
+  }
+
+  list(measure = mid,
+       data    = if (output == "memory") combined else NULL,
+       file    = dest,
+       rows    = total_rows,
+       ok      = ok)
 }
