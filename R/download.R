@@ -37,9 +37,10 @@
 #' - **`"memory"`** — Returns a named list with one `data.table` per
 #'   parameter (e.g. `result$flow`, `result$rainfall`) plus a `summary`
 #'   element. No files are written.
-#' - **`"disk"`** — Writes one CSV per measure into per-parameter
-#'   subdirectories under `out_dir` and returns the summary `data.table`
-#'   invisibly.
+#' - **`"disk"`** — Writes one Bronze-tier Parquet file per measure under
+#'   `out_dir`, following the path convention
+#'   `bronze/hydrometric/EA/<data_type>/<YYYY>/<dataset_id>.parquet`.
+#'   Returns the summary `data.table` invisibly.
 #'
 #' The EA API fair-use guidance asks that automated users issue only one
 #' request at a time. Both methods are intentionally sequential.
@@ -50,9 +51,9 @@
 #' @param to_date Character. End date (exclusive) in `"YYYY-MM-DD"` format.
 #' @param method Character. `"sync"` (default) or `"batch"`.
 #' @param output Character. `"memory"` (default) or `"disk"`.
-#' @param out_dir Character or `NULL`. Root output directory. Required when
-#'   `output = "disk"`. Each parameter gets its own subdirectory, e.g.
-#'   `out_dir/flow/`.
+#' @param out_dir Character or `NULL`. Root store directory. Required when
+#'   `output = "disk"`. Bronze Parquet files are written under
+#'   `out_dir/bronze/hydrometric/EA/<data_type>/`.
 #' @param period_name Character. Temporal resolution: `"daily"` (default)
 #'   or `"15min"`.
 #' @param value_type Character or `NULL`. Value statistic filter, e.g.
@@ -228,7 +229,10 @@ download_hydrology <- function(
         next
       }
 
-      # Use station.notation as the measure ID for fetch_readings()
+      # Preserve the station identifier as site_id before overwriting notation
+      # with the measure notation. wiskiID preferred; fall back to station SUID.
+      measures[, site_id  := data.table::fifelse(
+        !is.na(wiskiID) & nzchar(wiskiID), wiskiID, notation)]
       measures[, notation := station.notation]
 
     } else {
@@ -245,6 +249,14 @@ download_hydrology <- function(
         )
         next
       }
+      # get_measures() returns station.wiskiID; use it as the site identifier
+      if ("station.wiskiID" %in% names(measures)) {
+        measures[, site_id := data.table::fifelse(
+          !is.na(station.wiskiID) & nzchar(station.wiskiID),
+          station.wiskiID, notation)]
+      } else {
+        measures[, site_id := notation]
+      }
     }
 
     message(sprintf("  Processing %d measures.", nrow(measures)))
@@ -255,12 +267,14 @@ download_hydrology <- function(
     # ── Loop over each measure ───────────────────────────────────────────────
     for (i in seq_len(nrow(measures))) {
 
-      mid <- measures$notation[i]
+      mid         <- measures$notation[i]
+      site_id_val <- measures$site_id[i]
       message(sprintf("\n  [%d/%d] %s", i, nrow(measures), mid))
 
       # Dispatch to the appropriate worker based on method
       result <- if (method == "sync") {
-        run_sync(mid, chunks, output, out_dir, param, observation_type)
+        run_sync(mid, chunks, output, out_dir, param, observation_type,
+                 site_id = site_id_val, period = p_period)
       } else {
         run_batch(mid, from_date, to_date, output, out_dir, param, max_wait_s)
       }

@@ -17,46 +17,61 @@
 
 #' Handle output of a completed data.table of readings
 #'
-#' Internal helper that either writes a `data.table` of readings to a CSV
-#' on disk or returns it unchanged for in-memory use, depending on the
-#' `output` mode. When appending chunks to an existing file, the header is
-#' suppressed so the CSV has exactly one header row.
+#' Internal helper that either returns a `data.table` of readings unchanged
+#' (memory mode) or writes it as a Bronze-tier Parquet file following the
+#' framework path convention:
+#' `bronze/hydrometric/EA/<data_type>/<YYYY>/<dataset_id>.parquet`
 #'
-#' Uses `data.table::fwrite()` rather than `write.csv()` for substantially
-#' faster writes on large time series files.
+#' Applies [apply_bronze_schema()] to standardise columns before writing.
 #'
-#' @param dt A `data.table` of readings.
+#' @param dt A `data.table` of readings with at least `dateTime`, `value`,
+#'   and optionally `quality` columns (as returned by [fetch_readings()]).
 #' @param output Character. `"memory"` or `"disk"`.
-#' @param out_dir Character or `NULL`. Root directory (disk mode only).
-#' @param parameter Character. Parameter type; names the subdirectory.
-#' @param measure_id Character. Measure notation; used to construct the
-#'   filename. Non-alphanumeric characters are replaced with underscores.
-#' @param append Logical. Append to an existing file? Default `FALSE`.
-#'   Used when writing annual chunks so the full date range ends up in one
-#'   file.
+#' @param out_dir Character or `NULL`. Root store directory (disk mode only).
+#' @param parameter Character. Parameter name (`"rainfall"`, `"flow"`,
+#'   `"level"`); mapped to a framework data type code via
+#'   [param_to_data_type()].
+#' @param measure_id Character. Measure notation; used as fallback `site_id`
+#'   when `site_id` is `NA` or empty.
+#' @param append Logical. Ignored — kept for signature compatibility.
+#' @param site_id Character. Supplier site identifier (e.g. WISKI ID).
+#'   Defaults to `measure_id` when `NA` or empty.
+#' @param period Character. Temporal resolution stored in the Bronze schema
+#'   `period` column, e.g. `"15min"`, `"daily"`.
 #'
 #' @return In `"memory"` mode, the `data.table` unchanged. In `"disk"` mode,
-#'   the file path as a character string.
+#'   the Bronze Parquet file path as a character string (invisibly).
 #'
 #' @noRd
 handle_output <- function(dt, output, out_dir, parameter, measure_id,
-                           append = FALSE) {
+                           append = FALSE, site_id = NA_character_,
+                           period = NA_character_) {
 
   if (output == "memory") return(dt)
 
-  param_dir <- file.path(out_dir, parameter)
-  dir.create(param_dir, showWarnings = FALSE, recursive = TRUE)
+  data_type     <- param_to_data_type(parameter)
+  supplier_code <- "EA"
+  category      <- "hydrometric"
 
-  # Sanitise measure ID for use as a filename — replace anything that isn't
-  # alphanumeric, underscore, or hyphen with an underscore
-  safe_name <- gsub("[^A-Za-z0-9_-]", "_", measure_id)
-  dest      <- file.path(param_dir, paste0(safe_name, ".csv"))
+  sid        <- if (!is.na(site_id) && nzchar(site_id)) site_id else measure_id
+  dataset_id <- make_dataset_id(supplier_code, sid, data_type)
 
-  # fwrite() is substantially faster than write.csv() for large time series;
-  # append = TRUE suppresses the header on subsequent chunk writes
-  data.table::fwrite(dt, dest, append = append)
+  bronze_dt <- apply_bronze_schema(
+    dt,
+    dataset_id        = dataset_id,
+    site_id           = sid,
+    data_type         = data_type,
+    timestamp_col     = "dateTime",
+    value_col         = "value",
+    supplier_flag_col = "quality",
+    period            = period
+  )
 
-  dest
+  path <- bronze_path(out_dir, category, supplier_code, data_type, dataset_id)
+  dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
+  arrow::write_parquet(bronze_dt, path)
+
+  invisible(path)
 }
 
 
