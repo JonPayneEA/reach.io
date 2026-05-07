@@ -261,6 +261,11 @@ apply_bronze_schema <- function(dt,
 #' @param supplier_code Character. Supplier code, e.g. `"EA"`.
 #' @param data_type Character. Framework data type code.
 #' @param dataset_id Character. Full Bronze dataset ID.
+#' @param year Character or integer or `NULL`. Year directory to use. When
+#'   `NULL` (default) the year is extracted from the date portion of
+#'   `dataset_id`. Supply an explicit value to partition by data year rather
+#'   than ingest year (e.g. when writing one file per calendar year of
+#'   observations).
 #'
 #' @return Character. Full file path including filename.
 #'
@@ -268,9 +273,13 @@ apply_bronze_schema <- function(dt,
 #'
 #' @examples
 #' bronze_path("data/hydrometric", "hydrometric", "EA", "Q", "EA_39001_Q_20260115")
-bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_id) {
-  year <- substr(dataset_id, nchar(dataset_id) - 7L, nchar(dataset_id) - 4L)
-  file.path(output_dir, "bronze", category, supplier_code, data_type, year,
+#' bronze_path("data/hydrometric", "hydrometric", "EA", "Q", "EA_39001_Q_20260115", year = 2020)
+bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_id,
+                        year = NULL) {
+  if (is.null(year)) {
+    year <- substr(dataset_id, nchar(dataset_id) - 7L, nchar(dataset_id) - 4L)
+  }
+  file.path(output_dir, "bronze", category, supplier_code, data_type, as.character(year),
             paste0(dataset_id, ".parquet"))
 }
 
