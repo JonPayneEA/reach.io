@@ -28,7 +28,7 @@ subdirectories (\verb{gauge_id=<id>/}) are created inside this path.}
 50000. Reduce if memory is constrained; increase for faster I/O on
 large disks.}
 
-\item{encoding}{Character. File encoding passed to \code{\link[base:connections]{base::file()}}. Default
+\item{encoding}{Character. File encoding passed to \code{\link[base:file]{base::file()}}. Default
 \code{"latin1"}, which covers Windows-1252 — the encoding used by WISKI
 exports from EA Windows systems. Change to \code{"UTF-8"} if your \code{.all}
 files are known to be UTF-8 encoded.}

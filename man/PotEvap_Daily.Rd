@@ -11,25 +11,29 @@ PotEvap_Daily(
   to_date = NA_character_
 )
 }
+\arguments{
+\item{readings}{A \code{data.table} with columns \code{dateTime} (POSIXct),
+\code{date} (Date), \code{value} (numeric, mm/day), and optionally any
+additional columns present in the source (e.g. \code{quality}).}
+
+\item{source_name}{Character. Origin of the PE data. Default \code{NA}.}
+
+\item{from_date, to_date}{Data range (YYYY-MM-DD). Default \code{NA}.}
+}
+\value{
+A \code{PotEvap_Daily} S7 object.
+}
 \description{
 Wraps daily PE values sourced directly from an external PE dataset
 (e.g. CEH CHESS-PE, MORECS). Units are typically mm/day.
 }
-\section{Slots}{
+\section{Additional properties}{
 
 \describe{
-\item{\code{readings}}{\code{data.table} with columns \code{dateTime} (POSIXct),
-\code{date} (Date), \code{value} (numeric, mm/day), and optionally any
-additional columns present in the source (e.g. \code{quality}).}
+\item{\code{@period_name}}{Always \code{"daily"}.}
 
-\item{\code{period_name}}{Always \code{"daily"}.}
+\item{\code{@n_rows}}{Total reading rows.}
 
-\item{\code{source_name}}{Character. Origin of the PE data.}
-
-\item{\code{from_date,to_date}}{Data range (YYYY-MM-DD).}
-
-\item{\code{n_rows}}{Total reading rows.}
-
-\item{\code{created_at}}{POSIXct timestamp of object construction.}
+\item{\code{@created_at}}{POSIXct timestamp of object construction.}
 }}
 

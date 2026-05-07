@@ -12,33 +12,35 @@ PotEvap_15min(
   disagg_method = NA_character_
 )
 }
+\arguments{
+\item{readings}{A \code{data.table} with columns \code{dateTime} (POSIXct),
+\code{date} (Date), \code{value} (numeric, mm/15min).}
+
+\item{source_name}{Character. Inherited from the parent object. Default \code{NA}.}
+
+\item{from_date, to_date}{Data range (YYYY-MM-DD). Default \code{NA}.}
+
+\item{disagg_method}{Character. How disaggregation was performed.
+One of \code{"uniform_hourly"} or \code{"uniform_daily"}. Default \code{NA}.}
+}
+\value{
+A \code{PotEvap_15min} S7 object.
+}
 \description{
 Wraps 15-minute PE values that have been \strong{disaggregated} from a
 coarser timestep via \code{\link[=disagg_to_15min]{disagg_to_15min()}}. This class is not intended
 to be constructed directly; use \code{disagg_to_15min()} instead.
 }
-\section{Slots}{
+\section{Additional properties}{
 
 \describe{
-\item{\code{readings}}{\code{data.table} with columns \code{dateTime} (POSIXct),
-\code{date} (Date), \code{value} (numeric, mm/15min).}
+\item{\code{@period_name}}{Always \code{"15min"}.}
 
-\item{\code{period_name}}{Always \code{"15min"}.}
+\item{\code{@n_rows}}{Total reading rows.}
 
-\item{\code{source_name}}{Character. Inherited from the parent object.}
+\item{\code{@created_at}}{POSIXct timestamp of object construction.}
 
-\item{\code{from_date,to_date}}{Data range (YYYY-MM-DD).}
-
-\item{\code{n_rows}}{Total reading rows.}
-
-\item{\code{created_at}}{POSIXct timestamp of object construction.}
-
-\item{\code{is_calculated}}{Logical. Always \code{TRUE} — 15-min PE is never
+\item{\code{@is_calculated}}{Logical. Always \code{TRUE} — 15-min PE is never
 sourced directly; it is always derived.}
-
-\item{\code{disagg_method}}{Character. How disaggregation was performed.
-One of \code{"uniform_hourly"} (each hourly value split into four equal
-15-min intervals) or \code{"uniform_daily"} (each daily value split into
-96 equal 15-min intervals).}
 }}
 

@@ -11,25 +11,29 @@ PotEvap_Hourly(
   to_date = NA_character_
 )
 }
+\arguments{
+\item{readings}{A \code{data.table} with columns \code{dateTime} (POSIXct),
+\code{date} (Date), \code{value} (numeric, mm/hr), and optionally any
+additional columns present in the source.}
+
+\item{source_name}{Character. Origin of the PE data. Default \code{NA}.}
+
+\item{from_date, to_date}{Data range (YYYY-MM-DD). Default \code{NA}.}
+}
+\value{
+A \code{PotEvap_Hourly} S7 object.
+}
 \description{
 Wraps hourly PE values sourced directly from an external PE dataset.
 Units are typically mm/hr. One row per hour.
 }
-\section{Slots}{
+\section{Additional properties}{
 
 \describe{
-\item{\code{readings}}{\code{data.table} with columns \code{dateTime} (POSIXct),
-\code{date} (Date), \code{value} (numeric, mm/hr), and optionally any
-additional columns present in the source.}
+\item{\code{@period_name}}{Always \code{"hourly"}.}
 
-\item{\code{period_name}}{Always \code{"hourly"}.}
+\item{\code{@n_rows}}{Total reading rows.}
 
-\item{\code{source_name}}{Character. Origin of the PE data.}
-
-\item{\code{from_date,to_date}}{Data range (YYYY-MM-DD).}
-
-\item{\code{n_rows}}{Total reading rows.}
-
-\item{\code{created_at}}{POSIXct timestamp of object construction.}
+\item{\code{@created_at}}{POSIXct timestamp of object construction.}
 }}
 

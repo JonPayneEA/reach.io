@@ -6,27 +6,31 @@
 \usage{
 Flow_15min(readings, from_date = NA_character_, to_date = NA_character_)
 }
+\arguments{
+\item{readings}{A \code{data.table} with columns \code{dateTime} (POSIXct),
+\code{date} (Date), \code{value} (numeric, m3/s), \code{measure_notation} (character),
+and optionally \code{quality} and \code{completeness}.}
+
+\item{from_date, to_date}{Requested date range (YYYY-MM-DD). Default \code{NA}.}
+}
+\value{
+A \code{Flow_15min} S7 object.
+}
 \description{
 Wraps 15-minute flow readings from \code{\link[=download_hydrology]{download_hydrology()}}.
 Typical units: m3/s. One row per 15-minute interval per measure.
 }
-\section{Slots}{
+\section{Additional properties}{
 
 \describe{
-\item{\code{readings}}{\code{data.table} with columns \code{dateTime} (POSIXct),
-\code{date} (Date), \code{value} (numeric, m3/s), \code{measure_notation} (character),
-and optionally \code{quality} and \code{completeness}.}
+\item{\code{@parameter}}{Always \code{"flow"}.}
 
-\item{\code{parameter}}{Always \code{"flow"}.}
+\item{\code{@period_name}}{Always \code{"15min"}.}
 
-\item{\code{period_name}}{Always \code{"15min"}.}
+\item{\code{@n_measures}}{Number of distinct measure notations.}
 
-\item{\code{from_date,to_date}}{Requested date range (YYYY-MM-DD).}
+\item{\code{@n_rows}}{Total reading rows.}
 
-\item{\code{n_measures}}{Number of distinct measure notations.}
-
-\item{\code{n_rows}}{Total reading rows.}
-
-\item{\code{downloaded_at}}{POSIXct timestamp of object construction.}
+\item{\code{@downloaded_at}}{POSIXct timestamp of object construction.}
 }}
 

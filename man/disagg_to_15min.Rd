@@ -14,8 +14,9 @@ A \link{PotEvap_15min} object whose readings contain columns
 \code{dateTime} (POSIXct), \code{date} (Date), and \code{value} (numeric).
 }
 \description{
-Converts a \link{PotEvap_Daily} or \link{PotEvap_Hourly} object to a \link{PotEvap_15min}
-object using uniform disaggregation:
+\code{disagg_to_15min()} is an S7 generic. Converts a \link{PotEvap_Daily} or
+\link{PotEvap_Hourly} object to a \link{PotEvap_15min} object using uniform
+disaggregation:
 }
 \details{
 \itemize{

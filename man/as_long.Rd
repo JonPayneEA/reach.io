@@ -16,8 +16,8 @@ A \code{data.table} with columns \code{parameter}, \code{measure_notation},
 readings (e.g. \code{quality}, \code{completeness}).
 }
 \description{
-Adds a \code{parameter} column and reorders so results from multiple
-parameter objects can be combined with \code{rbind()}.
+\code{as_long()} is an S7 generic. Adds a \code{parameter} column and reorders so
+results from multiple parameter objects can be combined with \code{rbind()}.
 }
 \examples{
 \dontrun{

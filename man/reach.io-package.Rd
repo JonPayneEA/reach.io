@@ -67,5 +67,10 @@ Useful links:
 \author{
 \strong{Maintainer}: Jonathan Payne \email{jonathan.payne@environment-agency.gov.uk}
 
+Authors:
+\itemize{
+  \item Jonathan Payne \email{jonathan.payne@environment-agency.gov.uk}
+}
+
 }
 \keyword{internal}

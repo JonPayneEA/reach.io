@@ -38,6 +38,11 @@ Evaluates the goodness-of-fit of a sine curve (defined by parameters
 and \eqn{R^2}, and optionally a \code{ggplot2} plot overlaying the observed
 and fitted series.
 }
+\note{
+The \code{plot = TRUE} functionality will be moved to the \code{reach.viz}
+package in a future release. The diagnostic return values (\code{rmse},
+\code{bias}, \code{r_squared}, \code{fitted}) will remain in \code{reach.io}.
+}
 \examples{
 dates  <- seq(as.Date("2010-01-01"), as.Date("2019-12-31"), by = "day")
 doy    <- as.integer(format(dates, "\%j"))

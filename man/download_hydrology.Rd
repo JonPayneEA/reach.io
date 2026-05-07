@@ -33,9 +33,9 @@ download_hydrology(
 
 \item{output}{Character. \code{"memory"} (default) or \code{"disk"}.}
 
-\item{out_dir}{Character or \code{NULL}. Root output directory. Required when
-\code{output = "disk"}. Each parameter gets its own subdirectory, e.g.
-\verb{out_dir/flow/}.}
+\item{out_dir}{Character or \code{NULL}. Root store directory. Required when
+\code{output = "disk"}. Bronze Parquet files are written under
+\verb{out_dir/bronze/hydrometric/EA/<data_type>/}.}
 
 \item{period_name}{Character. Temporal resolution: \code{"daily"} (default)
 or \code{"15min"}.}
@@ -95,9 +95,10 @@ out.
 \item \strong{\code{"memory"}} — Returns a named list with one \code{data.table} per
 parameter (e.g. \code{result$flow}, \code{result$rainfall}) plus a \code{summary}
 element. No files are written.
-\item \strong{\code{"disk"}} — Writes one CSV per measure into per-parameter
-subdirectories under \code{out_dir} and returns the summary \code{data.table}
-invisibly.
+\item \strong{\code{"disk"}} — Writes one Bronze-tier Parquet file per measure under
+\code{out_dir}, following the path convention
+\verb{bronze/hydrometric/EA/<data_type>/<YYYY>/<dataset_id>.parquet}.
+Returns the summary \code{data.table} invisibly.
 }
 
 The EA API fair-use guidance asks that automated users issue only one

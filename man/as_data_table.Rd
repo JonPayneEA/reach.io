@@ -8,14 +8,16 @@ as_data_table(x, ...)
 }
 \arguments{
 \item{x}{A \link{Rainfall_Daily}, \link{Rainfall_15min}, \link{Flow_Daily}, \link{Flow_15min},
-\link{Level_Daily}, or \link{Level_15min} object.}
+\link{Level_Daily}, \link{Level_15min}, \link{PotEvap_Daily}, \link{PotEvap_Hourly}, or
+\link{PotEvap_15min} object.}
 }
 \value{
 A \code{data.table} of readings.
 }
 \description{
-Returns the inner \code{data.table} from any \code{HydroData}-derived object for
-direct use with \code{data.table} or \code{arrow} without touching \verb{@readings}.
+\code{as_data_table()} is an S7 generic. Returns the inner \code{data.table} from
+any \code{HydroData}- or \code{PotEvapData}-derived object for direct use with
+\code{data.table} or \code{arrow} without touching \verb{@readings}.
 }
 \examples{
 \dontrun{

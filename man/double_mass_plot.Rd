@@ -67,6 +67,10 @@ series. A perfectly consistent volume ratio plots as a straight line.
 Dashed reference lines are drawn at 1:1 and at ±(final Y − final X)
 to give a visual sense of overall balance and drift.
 }
+\note{
+This function will be moved to the \code{reach.viz} package in a future
+release and deprecated here once that package is available.
+}
 \section{PE subtraction}{
 
 When \code{pe} is supplied, the daily PE signal is subtracted from every
