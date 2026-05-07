@@ -56,22 +56,33 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
   sid        <- if (!is.na(site_id) && nzchar(site_id)) site_id else measure_id
   dataset_id <- make_dataset_id(supplier_code, sid, data_type)
 
-  bronze_dt <- apply_bronze_schema(
-    dt,
-    dataset_id        = dataset_id,
-    site_id           = sid,
-    data_type         = data_type,
-    timestamp_col     = "dateTime",
-    value_col         = "value",
-    supplier_flag_col = "quality",
-    period            = period
-  )
+  # Partition by data year — one Parquet file per calendar year of observations
+  data_years <- sort(unique(data.table::year(dt[["dateTime"]])))
+  paths      <- character(length(data_years))
 
-  path <- bronze_path(out_dir, category, supplier_code, data_type, dataset_id)
-  dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
-  arrow::write_parquet(bronze_dt, path)
+  for (i in seq_along(data_years)) {
+    yr      <- data_years[i]
+    yr_dt   <- dt[data.table::year(dateTime) == yr]
 
-  invisible(path)
+    bronze_dt <- apply_bronze_schema(
+      yr_dt,
+      dataset_id        = dataset_id,
+      site_id           = sid,
+      data_type         = data_type,
+      timestamp_col     = "dateTime",
+      value_col         = "value",
+      supplier_flag_col = "quality",
+      period            = period
+    )
+
+    path <- bronze_path(out_dir, category, supplier_code, data_type, dataset_id,
+                        year = yr)
+    dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
+    arrow::write_parquet(bronze_dt, path)
+    paths[i] <- path
+  }
+
+  invisible(paths)
 }
 
 
