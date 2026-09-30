@@ -126,4 +126,9 @@ VALID_SOURCES <- c("HDE", "WISKI", "WISKI_ALL")
   registerS3method("print", "reach.io::RatingSet",    .print_RatingSet,    envir = asNamespace(pkgname))
   registerS3method("print", "reach.io::HydroData",    .print_HydroData,    envir = asNamespace(pkgname))
   registerS3method("print", "reach.io::PotEvapData",  .print_PotEvapData,  envir = asNamespace(pkgname))
+
+  # Register this package's pipeline activities so reach.utils::run_pipeline()
+  # can dispatch to them by name from a pipeline YAML config.
+  reach.utils::register_activity("backfill",    run_backfill,    package = pkgname)
+  reach.utils::register_activity("incremental", run_incremental, package = pkgname)
 }
