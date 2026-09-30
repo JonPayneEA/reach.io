@@ -20,7 +20,7 @@ reach.io/
 │   ├── package.R       # Package constants: PARAMETER_CONFIG, VALID_SOURCES, VALID_CATEGORIES
 │   ├── schema.R        # Bronze schema, dataset IDs, supplier codes, provenance
 │   ├── setup.R         # setup_hydro_store()
-│   ├── classes.R       # S7 HydroData classes (Rainfall_Daily, Flow_15min, etc.)
+│   ├── classes.R       # S7 FlodeHydroData classes (FlodeRainfall_Daily, FlodeFlow_15min, etc.)
 │   ├── lookup.R        # find_stations(), get_measures()
 │   ├── download.R      # download_hydrology()
 │   ├── sync.R          # fetch_readings(), make_date_chunks(), run_sync()

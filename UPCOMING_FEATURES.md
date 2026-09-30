@@ -385,7 +385,7 @@ read_silver(
 ```
 
 Key behaviours:
-- Returns the appropriate S7 class (`Flow_15min`, `Level_Daily`, etc.) consistent with Bronze reads
+- Returns the appropriate S7 class (`FlodeFlow_15min`, `FlodeLevel_Daily`, etc.) consistent with Bronze reads
 - `min_quality` maps to `qc_flag` thresholds: `1` = Good only, `2` = include Estimated, `3` = include Suspect, `NULL` = all flags including Rejected
 - Uses Arrow lazy evaluation — only materialises the subset matching the date and quality filter
 - Raises a clear error if no Silver data exists for the gauge (rather than silently returning empty)

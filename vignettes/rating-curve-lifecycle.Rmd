@@ -26,8 +26,8 @@ are often extrapolated beyond measured gaugings and are flagged as **doubtful**.
 Ratings change over time as channels shift, structures are modified, or
 resurveys are carried out. reach.io tracks this through:
 
-- **`RatingCurve`** — a single set of limbs with an optional validity window.
-- **`RatingSet`** — an ordered collection of `RatingCurve` objects covering
+- **`FlodeRatingCurve`** — a single set of limbs with an optional validity window.
+- **`FlodeRatingSet`** — an ordered collection of `FlodeRatingCurve` objects covering
   non-overlapping periods.
 
 The provenance register captures how each rating was derived via the
@@ -61,7 +61,7 @@ Gold     Approved for production use. Default tier for apply_rating().
 
 ## 1. Building a rating curve
 
-Construct a `RatingCurve` from a `data.table` of limb parameters. The
+Construct a `FlodeRatingCurve` from a `data.table` of limb parameters. The
 constructor accepts common column name variants (`Lower.level`, `multiplier`,
 `Exponent`, etc.) so real-world exports rarely need pre-processing.
 
@@ -78,7 +78,7 @@ limbs <- data.table(
   doubtful = c(FALSE,   FALSE,   TRUE)   # upper limb = out-of-bank
 )
 
-rc <- RatingCurve(
+rc <- FlodeRatingCurve(
   limbs      = limbs,
   valid_from = as.Date("2019-10-01"),
   station_id = "510310",
@@ -89,7 +89,7 @@ rc
 ```
 
 ```
-<RatingCurve>
+<FlodeRatingCurve>
   Station:  510310
   Source:   WISKI
   Valid:    2019-10-01 to open
@@ -172,7 +172,7 @@ save_rating(
   derivation_method = "spot gaugings",
   notes             = "WISKI export 2023-11-01, version 3.2"
 )
-# Saved RatingCurve [bronze] v1 for site '510310'
+# Saved FlodeRatingCurve [bronze] v1 for site '510310'
 #   -> data/hydro/bronze/hydrometric/ratings/ratings.parquet
 ```
 
@@ -192,7 +192,7 @@ save_rating(
   derivation_method = "spot gaugings",
   notes             = "Limb 2 C corrected for continuity with fix_limb_continuity()"
 )
-# Saved RatingCurve [silver] v1 for site '510310'
+# Saved FlodeRatingCurve [silver] v1 for site '510310'
 ```
 
 ---
@@ -213,7 +213,7 @@ save_rating(
   derivation_method = "spot gaugings",
   notes             = "Approved by lead hydrologist 2023-11-15"
 )
-# Saved RatingCurve [gold] v1 for site '510310'
+# Saved FlodeRatingCurve [gold] v1 for site '510310'
 ```
 
 If the rating was produced by a hydraulic model rather than field gaugings,
@@ -261,12 +261,12 @@ previous row automatically flips to `Superseded`:
 
 ## 7. Applying to level data
 
-Load the approved curve and apply it to a `Level_Daily` or `Level_15min`
-object. The output is a `Flow_Daily` or `Flow_15min` with an additional
+Load the approved curve and apply it to a `FlodeLevel_Daily` or `FlodeLevel_15min`
+object. The output is a `FlodeFlow_Daily` or `FlodeFlow_15min` with an additional
 `doubtful` column flagging flows derived from extrapolated limbs.
 
 ```{r apply}
-rc_gold <- load_rating("510310", root = root)   # returns RatingSet
+rc_gold <- load_rating("510310", root = root)   # returns FlodeRatingSet
 flow    <- apply_rating(level_obj, rc_gold)
 
 # Inspect
@@ -286,13 +286,13 @@ flow@readings[doubtful == TRUE]
 ## 8. Time-varying ratings
 
 When the channel has changed — due to a flood event, maintenance works, or a
-resurvey — create a new `RatingCurve` for the new period and combine them into
-a `RatingSet`. `apply_rating()` automatically selects the correct curve for
+resurvey — create a new `FlodeRatingCurve` for the new period and combine them into
+a `FlodeRatingSet`. `apply_rating()` automatically selects the correct curve for
 each observation date.
 
 ```{r rating-set}
 # Original curve: valid 2019-10-01 to 2022-06-30
-rc_v1 <- RatingCurve(
+rc_v1 <- FlodeRatingCurve(
   limbs      = limbs_v1,
   valid_from = as.Date("2019-10-01"),
   valid_to   = as.Date("2022-06-30"),
@@ -301,14 +301,14 @@ rc_v1 <- RatingCurve(
 )
 
 # Post-survey curve: valid from 2022-07-01 onwards
-rc_v2 <- RatingCurve(
+rc_v2 <- FlodeRatingCurve(
   limbs      = limbs_v2,
   valid_from = as.Date("2022-07-01"),
   station_id = "510310",
   source     = "WISKI"
 )
 
-rs <- RatingSet(curves = list(rc_v1, rc_v2), station_id = "510310")
+rs <- FlodeRatingSet(curves = list(rc_v1, rc_v2), station_id = "510310")
 
 # Save both to Gold in one call
 save_rating(rs, root = root, tier = "gold", saved_by = "J.Payne")

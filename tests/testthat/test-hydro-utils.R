@@ -101,7 +101,7 @@ make_limbs_inv <- function() {
 }
 
 make_rc_inv <- function() {
-  RatingCurve(limbs = make_limbs_inv(), station_id = "510310", source = "WISKI")
+  FlodeRatingCurve(limbs = make_limbs_inv(), station_id = "510310", source = "WISKI")
 }
 
 make_level_15min_inv <- function(stages) {
@@ -111,7 +111,7 @@ make_level_15min_inv <- function(stages) {
     value            = stages,
     measure_notation = "level"
   )
-  Level_15min(readings = dt, from_date = "2020-01-01", to_date = "2020-01-02")
+  FlodeLevel_15min(readings = dt, from_date = "2020-01-01", to_date = "2020-01-02")
 }
 
 test_that("apply_inverse_rating round-trips with apply_rating (< 0.001 m error)", {
@@ -125,12 +125,12 @@ test_that("apply_inverse_rating round-trips with apply_rating (< 0.001 m error)"
   expect_true(max(abs(orig - back), na.rm = TRUE) < 0.001)
 })
 
-test_that("apply_inverse_rating returns Level_15min from Flow_15min", {
+test_that("apply_inverse_rating returns FlodeLevel_15min from FlodeFlow_15min", {
   rc   <- make_rc_inv()
   lvl  <- make_level_15min_inv(c(0.5, 1.0))
   flow <- apply_rating(lvl, rc)
   out  <- apply_inverse_rating(flow, rc)
-  expect_true(S7::S7_inherits(out, Level_15min))
+  expect_true(S7::S7_inherits(out, FlodeLevel_15min))
 })
 
 test_that("apply_inverse_rating propagates NA", {
@@ -144,14 +144,14 @@ test_that("apply_inverse_rating propagates NA", {
 test_that("apply_inverse_rating errors on non-Flow input", {
   rc  <- make_rc_inv()
   lvl <- make_level_15min_inv(c(0.5))
-  expect_error(apply_inverse_rating(lvl, rc), "Flow_Daily or Flow_15min")
+  expect_error(apply_inverse_rating(lvl, rc), "FlodeFlow_Daily or FlodeFlow_15min")
 })
 
 test_that("apply_inverse_rating errors on non-rating input", {
   rc   <- make_rc_inv()
   lvl  <- make_level_15min_inv(c(0.5))
   flow <- apply_rating(lvl, rc)
-  expect_error(apply_inverse_rating(flow, "not_a_rating"), "RatingCurve or RatingSet")
+  expect_error(apply_inverse_rating(flow, "not_a_rating"), "FlodeRatingCurve or FlodeRatingSet")
 })
 
 
@@ -208,7 +208,7 @@ test_that("format_for_pdm errors on non-data.frame input", {
 # format_for_fmp()
 # =============================================================================
 
-# Helper: make a small Flow_15min object with known values
+# Helper: make a small FlodeFlow_15min object with known values
 make_flow_15min_fmp <- function(values, start = as.POSIXct("2024-01-01 09:00:00", tz = "UTC")) {
   n  <- length(values)
   dt <- data.table(
@@ -217,7 +217,7 @@ make_flow_15min_fmp <- function(values, start = as.POSIXct("2024-01-01 09:00:00"
     value            = values,
     measure_notation = "test_flow"
   )
-  Flow_15min(readings = dt, from_date = "2024-01-01", to_date = "2024-01-02")
+  FlodeFlow_15min(readings = dt, from_date = "2024-01-01", to_date = "2024-01-02")
 }
 
 test_that("format_for_fmp: single site produces 4 header rows + n data rows", {
@@ -329,7 +329,7 @@ test_that("format_for_fmp: writes to file when out_file is provided", {
 })
 
 test_that("format_for_fmp: errors on non-Flow input", {
-  expect_error(format_for_fmp(list(1, 2, 3)), "Flow_Daily or Flow_15min")
+  expect_error(format_for_fmp(list(1, 2, 3)), "FlodeFlow_Daily or FlodeFlow_15min")
 })
 
 test_that("format_for_fmp: errors when gauge_ids length mismatches flows", {

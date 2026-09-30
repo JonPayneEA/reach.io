@@ -187,7 +187,7 @@ shows all available slots and the column names of `@readings`:
 
 ```{r print-object}
 result$flow
-#> <reach.io::Flow_15min>
+#> <reach.io::FlodeFlow_15min>
 #> Slots (@):
 #>   @parameter      flow
 #>   @period_name    15min
@@ -358,19 +358,19 @@ uuid_rain   <- stns[wiskiID == "356337",    notation[1L]]
 ### 5.2 Split into per-gauge S7 objects
 
 ```{r split-gauges}
-flow_a <- Flow_15min(
+flow_a <- FlodeFlow_15min(
   readings  = result$flow@readings[startsWith(measure_notation, uuid_flow_a)],
   from_date = result$flow@from_date,
   to_date   = result$flow@to_date
 )
 
-flow_b <- Flow_15min(
+flow_b <- FlodeFlow_15min(
   readings  = result$flow@readings[startsWith(measure_notation, uuid_flow_b)],
   from_date = result$flow@from_date,
   to_date   = result$flow@to_date
 )
 
-rain <- Rainfall_15min(
+rain <- FlodeRainfall_15min(
   readings  = result$rainfall@readings[startsWith(measure_notation, uuid_rain)],
   from_date = result$rainfall@from_date,
   to_date   = result$rainfall@to_date

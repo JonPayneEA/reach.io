@@ -95,10 +95,10 @@ test_that("read_silver errors on unsupported data_type", {
   )
 })
 
-test_that("read_silver returns an S7 HydroData object", {
+test_that("read_silver returns an S7 FlodeHydroData object", {
   root <- make_silver_store()
   obj  <- read_silver(root, "39001", "Q")
-  expect_true(S7::S7_inherits(obj, Flow_15min))
+  expect_true(S7::S7_inherits(obj, FlodeFlow_15min))
 })
 
 test_that("read_silver readings slot is a data.table", {
@@ -107,7 +107,7 @@ test_that("read_silver readings slot is a data.table", {
   expect_true(data.table::is.data.table(obj@readings))
 })
 
-test_that("read_silver readings contains required HydroData columns", {
+test_that("read_silver readings contains required FlodeHydroData columns", {
   root <- make_silver_store()
   obj  <- read_silver(root, "39001", "Q")
   expected <- c("dateTime", "date", "value", "measure_notation",

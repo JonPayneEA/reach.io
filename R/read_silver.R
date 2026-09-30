@@ -1,7 +1,7 @@
 # ============================================================
 # Tool:        Silver Tier Data Retrieval
 # Description: Functions to read QC-flagged data back out of
-#              the Silver store. Returns S7 HydroData objects
+#              the Silver store. Returns S7 FlodeHydroData objects
 #              consistent with Bronze-tier reads so downstream
 #              code works unchanged regardless of which tier
 #              data comes from.
@@ -60,7 +60,7 @@
   "daily"
 }
 
-# Build a readings data.table conforming to the HydroData validator:
+# Build a readings data.table conforming to the FlodeHydroData validator:
 #   required columns: dateTime (POSIXct), date (Date), value (numeric),
 #                     measure_notation (character)
 # Extra Silver columns (qc_flag, qc_y_code, raw_value, etc.) are appended
@@ -149,7 +149,7 @@
 #' Read QC-flagged data for a single gauge from the Silver store
 #'
 #' Locates all Silver Parquet files for the specified gauge and data type,
-#' applies optional date and quality filters, and returns an S7 `HydroData`
+#' applies optional date and quality filters, and returns an S7 `FlodeHydroData`
 #' object consistent with the output of [download_hydrology()].
 #'
 #' The primary `value` column in `@readings` is `qc_value` (the QC-accepted
@@ -174,8 +174,8 @@
 #'   schema to include in `@readings` beyond the defaults. `NULL` returns all
 #'   columns.
 #'
-#' @return An S7 object of the appropriate `HydroData` subclass
-#'   ([Flow_15min], [Level_15min], [Rainfall_15min], [Flow_Daily], etc.),
+#' @return An S7 object of the appropriate `FlodeHydroData` subclass
+#'   ([FlodeFlow_15min], [FlodeLevel_15min], [FlodeRainfall_15min], [FlodeFlow_Daily], etc.),
 #'   depending on the data type and observed timestep. The `@readings`
 #'   slot is a `data.table` containing `dateTime`, `date`, `value`
 #'   (`qc_value`), `measure_notation`, `raw_value`, `supplier_flag`,
@@ -240,10 +240,10 @@ read_silver <- function(root, gauge_id, data_type,
 
   data.table::setorder(dt, site_id, timestamp)
 
-  # Build HydroData-compatible readings
+  # Build FlodeHydroData-compatible readings
   readings <- .build_silver_readings(dt)
 
-  # Column subset (always keep the required HydroData columns)
+  # Column subset (always keep the required FlodeHydroData columns)
   if (!is.null(cols)) {
     required_cols <- c("dateTime", "date", "value", "measure_notation")
     keep          <- unique(c(required_cols, cols))
@@ -289,7 +289,7 @@ read_silver <- function(root, gauge_id, data_type,
 #' @param ... Additional arguments passed to [read_silver()] (e.g. `start`,
 #'   `end`, `min_quality`).
 #'
-#' @return A named list of S7 `HydroData` objects, one per successfully read
+#' @return A named list of S7 `FlodeHydroData` objects, one per successfully read
 #'   gauge. Names match `gauge_ids`. Gauges with no data are omitted.
 #'
 #' @export
@@ -345,7 +345,7 @@ read_silver_multi <- function(root, gauge_ids, data_type, ...) {
 #'   catchment identifiers. Default `"catchment_id"`.
 #' @param ... Additional arguments passed to [read_silver_multi()].
 #'
-#' @return A named list of S7 `HydroData` objects, one per gauge in the
+#' @return A named list of S7 `FlodeHydroData` objects, one per gauge in the
 #'   catchment that has Silver data.
 #'
 #' @export

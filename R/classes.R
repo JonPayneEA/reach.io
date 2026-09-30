@@ -2,18 +2,18 @@
 # Tool:        S7 Hydrometric & Potential Evaporation Classes
 # Description: S7 class hierarchy for typed hydrometric
 #              reading objects and potential evaporation (PE)
-#              objects. Six concrete HydroData classes encode
+#              objects. Six concrete FlodeHydroData classes encode
 #              parameter type and timestep in the class name;
-#              three concrete PotEvapData classes cover daily,
+#              three concrete FlodePotEvapData classes cover daily,
 #              hourly, and 15-minute PE readings.
 # Flode Module: flode.io
 # Author:      [Hydrometric Data Lead]
 # Created:     2026-02-01
-# Modified:    2026-03-19 - JP: merged PotEvapData classes
+# Modified:    2026-03-19 - JP: merged FlodePotEvapData classes
 # Tier:        2
 # Inputs:      data.table of readings from download_hydrology()
 #              or an external PE source (e.g. CEH CHESS-PE)
-# Outputs:     Typed S7 objects (Rainfall_Daily, PotEvap_Daily
+# Outputs:     Typed S7 objects (FlodeRainfall_Daily, FlodePotEvap_Daily
 #              etc.)
 # Dependencies: S7, data.table
 # ============================================================
@@ -21,11 +21,11 @@
 # -- S7 classes for hydrometric data ------------------------------------------
 #
 # Six concrete classes cover every parameter/timestep combination:
-#   Rainfall_Daily, Rainfall_15min
-#   Flow_Daily,     Flow_15min
-#   Level_Daily,    Level_15min
+#   FlodeRainfall_Daily, FlodeRainfall_15min
+#   FlodeFlow_Daily,     FlodeFlow_15min
+#   FlodeLevel_Daily,    FlodeLevel_15min
 #
-# All inherit from the internal abstract parent HydroData, which holds the
+# All inherit from the internal abstract parent FlodeHydroData, which holds the
 # shared properties and validator. The timestep is encoded in the class name
 # so downstream code can dispatch on it directly rather than inspecting the
 # period_name slot.
@@ -36,25 +36,25 @@
 # -- S7 classes for potential evaporation data --------------------------------
 #
 # Three concrete classes cover every supported timestep:
-#   PotEvap_Daily   - daily   PE sourced directly
-#   PotEvap_Hourly  - hourly  PE sourced directly
-#   PotEvap_15min   - 15-min  PE calculated via disagg_to_15min()
+#   FlodePotEvap_Daily   - daily   PE sourced directly
+#   FlodePotEvap_Hourly  - hourly  PE sourced directly
+#   FlodePotEvap_15min   - 15-min  PE calculated via disagg_to_15min()
 #
-# All inherit from the internal abstract parent PotEvapData, which holds
+# All inherit from the internal abstract parent FlodePotEvapData, which holds
 # shared properties and validation logic.  The 15-min class adds two extra
 # slots that record how it was derived: `is_calculated` (always TRUE) and
 # `disagg_method` ("uniform_hourly" or "uniform_daily").
 #
 # Helper:
-#   disagg_to_15min(x)  - converts PotEvap_Daily or PotEvap_Hourly to
-#                         PotEvap_15min by uniform disaggregation.
+#   disagg_to_15min(x)  - converts FlodePotEvap_Daily or FlodePotEvap_Hourly to
+#                         FlodePotEvap_15min by uniform disaggregation.
 
 #' @import S7
 NULL
 
 
 # =============================================================================
-# HydroData
+# FlodeHydroData
 # =============================================================================
 
 # -- Abstract parent ----------------------------------------------------------
@@ -79,8 +79,8 @@ NULL
 #' @prop downloaded_at POSIXct. When the object was constructed.
 #'
 #' @noRd
-HydroData <- S7::new_class(
-  "HydroData",
+FlodeHydroData <- S7::new_class(
+  "FlodeHydroData",
   abstract   = TRUE,
   package    = "reach.io",
   properties = list(
@@ -141,7 +141,7 @@ HydroData <- S7::new_class(
   S7::new_class(
     class_name,
     package = "reach.io",
-    parent  = HydroData,
+    parent  = FlodeHydroData,
     constructor = function(readings,
                            from_date = NA_character_,
                            to_date   = NA_character_) {
@@ -178,9 +178,9 @@ HydroData <- S7::new_class(
 #' @prop n_rows Total reading rows.
 #' @prop downloaded_at POSIXct timestamp of object construction.
 #'
-#' @returns A `Rainfall_Daily` S7 object.
+#' @returns A `FlodeRainfall_Daily` S7 object.
 #' @export
-Rainfall_Daily <- .new_hydro_class("Rainfall_Daily", "rainfall", "daily")
+FlodeRainfall_Daily <- .new_hydro_class("FlodeRainfall_Daily", "rainfall", "daily")
 
 #' S7 class for 15-minute rainfall readings
 #'
@@ -197,9 +197,9 @@ Rainfall_Daily <- .new_hydro_class("Rainfall_Daily", "rainfall", "daily")
 #' @prop n_rows Total reading rows.
 #' @prop downloaded_at POSIXct timestamp of object construction.
 #'
-#' @returns A `Rainfall_15min` S7 object.
+#' @returns A `FlodeRainfall_15min` S7 object.
 #' @export
-Rainfall_15min <- .new_hydro_class("Rainfall_15min", "rainfall", "15min")
+FlodeRainfall_15min <- .new_hydro_class("FlodeRainfall_15min", "rainfall", "15min")
 
 #' S7 class for daily river flow readings
 #'
@@ -216,9 +216,9 @@ Rainfall_15min <- .new_hydro_class("Rainfall_15min", "rainfall", "15min")
 #' @prop n_rows Total reading rows.
 #' @prop downloaded_at POSIXct timestamp of object construction.
 #'
-#' @returns A `Flow_Daily` S7 object.
+#' @returns A `FlodeFlow_Daily` S7 object.
 #' @export
-Flow_Daily <- .new_hydro_class("Flow_Daily", "flow", "daily")
+FlodeFlow_Daily <- .new_hydro_class("FlodeFlow_Daily", "flow", "daily")
 
 #' S7 class for 15-minute river flow readings
 #'
@@ -235,9 +235,9 @@ Flow_Daily <- .new_hydro_class("Flow_Daily", "flow", "daily")
 #' @prop n_rows Total reading rows.
 #' @prop downloaded_at POSIXct timestamp of object construction.
 #'
-#' @returns A `Flow_15min` S7 object.
+#' @returns A `FlodeFlow_15min` S7 object.
 #' @export
-Flow_15min <- .new_hydro_class("Flow_15min", "flow", "15min")
+FlodeFlow_15min <- .new_hydro_class("FlodeFlow_15min", "flow", "15min")
 
 #' S7 class for daily water level readings
 #'
@@ -256,9 +256,9 @@ Flow_15min <- .new_hydro_class("Flow_15min", "flow", "15min")
 #' @prop n_rows Total reading rows.
 #' @prop downloaded_at POSIXct timestamp of object construction.
 #'
-#' @returns A `Level_Daily` S7 object.
+#' @returns A `FlodeLevel_Daily` S7 object.
 #' @export
-Level_Daily <- .new_hydro_class("Level_Daily", "level", "daily")
+FlodeLevel_Daily <- .new_hydro_class("FlodeLevel_Daily", "level", "daily")
 
 #' S7 class for 15-minute water level readings
 #'
@@ -275,9 +275,9 @@ Level_Daily <- .new_hydro_class("Level_Daily", "level", "daily")
 #' @prop n_rows Total reading rows.
 #' @prop downloaded_at POSIXct timestamp of object construction.
 #'
-#' @returns A `Level_15min` S7 object.
+#' @returns A `FlodeLevel_15min` S7 object.
 #' @export
-Level_15min <- .new_hydro_class("Level_15min", "level", "15min")
+FlodeLevel_15min <- .new_hydro_class("FlodeLevel_15min", "level", "15min")
 
 
 # -- Constructor lookup -------------------------------------------------------
@@ -286,26 +286,26 @@ Level_15min <- .new_hydro_class("Level_15min", "level", "15min")
 # Used by download_hydrology() to wrap output without a switch() block.
 #' @noRd
 HYDRO_CLASS <- list(
-  rainfall = list(daily  = Rainfall_Daily,
-                  `15min` = Rainfall_15min),
-  flow     = list(daily  = Flow_Daily,
-                  `15min` = Flow_15min),
-  level    = list(daily  = Level_Daily,
-                  `15min` = Level_15min)
+  rainfall = list(daily  = FlodeRainfall_Daily,
+                  `15min` = FlodeRainfall_15min),
+  flow     = list(daily  = FlodeFlow_Daily,
+                  `15min` = FlodeFlow_15min),
+  level    = list(daily  = FlodeLevel_Daily,
+                  `15min` = FlodeLevel_15min)
 )
 
 
 # -- Generics and methods -----------------------------------------------------
 
-#' Extract the readings data.table from a HydroData object
+#' Extract the readings data.table from a FlodeHydroData object
 #'
 #' `as_data_table()` is an S7 generic. Returns the inner `data.table` from
-#' any `HydroData`- or `PotEvapData`-derived object for direct use with
+#' any `FlodeHydroData`- or `FlodePotEvapData`-derived object for direct use with
 #' `data.table` or `arrow` without touching `@readings`.
 #'
-#' @param x A [Rainfall_Daily], [Rainfall_15min], [Flow_Daily], [Flow_15min],
-#'   [Level_Daily], [Level_15min], [PotEvap_Daily], [PotEvap_Hourly], or
-#'   [PotEvap_15min] object.
+#' @param x A [FlodeRainfall_Daily], [FlodeRainfall_15min], [FlodeFlow_Daily], [FlodeFlow_15min],
+#'   [FlodeLevel_Daily], [FlodeLevel_15min], [FlodePotEvap_Daily], [FlodePotEvap_Hourly], or
+#'   [FlodePotEvap_15min] object.
 #'
 #' @returns A `data.table` of readings.
 #'
@@ -319,16 +319,16 @@ HYDRO_CLASS <- list(
 #' }
 as_data_table <- S7::new_generic("as_data_table", "x")
 
-S7::method(as_data_table, HydroData) <- function(x) x@readings
+S7::method(as_data_table, FlodeHydroData) <- function(x) x@readings
 
 
-#' Reshape a HydroData object to long format
+#' Reshape a FlodeHydroData object to long format
 #'
 #' `as_long()` is an S7 generic. Adds a `parameter` column and reorders so
 #' results from multiple parameter objects can be combined with `rbind()`.
 #'
-#' @param x A [Rainfall_Daily], [Rainfall_15min], [Flow_Daily], [Flow_15min],
-#'   [Level_Daily], or [Level_15min] object.
+#' @param x A [FlodeRainfall_Daily], [FlodeRainfall_15min], [FlodeFlow_Daily], [FlodeFlow_15min],
+#'   [FlodeLevel_Daily], or [FlodeLevel_15min] object.
 #'
 #' @returns A `data.table` with columns `parameter`, `measure_notation`,
 #'   `date`, `dateTime`, `value`, and any other columns present in the
@@ -344,7 +344,7 @@ S7::method(as_data_table, HydroData) <- function(x) x@readings
 #' }
 as_long <- S7::new_generic("as_long", "x")
 
-S7::method(as_long, HydroData) <- function(x) {
+S7::method(as_long, FlodeHydroData) <- function(x) {
   dt <- data.table::copy(x@readings)
   dt[, parameter := x@parameter]
   data.table::setcolorder(dt, c("parameter", "measure_notation",
@@ -384,11 +384,11 @@ S7::method(as_long, HydroData) <- function(x) {
   invisible(x)
 }
 
-S7::method(print, HydroData) <- .print_HydroData
+S7::method(print, FlodeHydroData) <- .print_HydroData
 
 
 # =============================================================================
-# PotEvapData
+# FlodePotEvapData
 # =============================================================================
 
 # -- Abstract parent ----------------------------------------------------------
@@ -410,8 +410,8 @@ S7::method(print, HydroData) <- .print_HydroData
 #' @prop created_at POSIXct. When the object was constructed.
 #'
 #' @noRd
-PotEvapData <- S7::new_class(
-  "PotEvapData",
+FlodePotEvapData <- S7::new_class(
+  "FlodePotEvapData",
   abstract   = TRUE,
   package    = "reach.io",
   properties = list(
@@ -466,7 +466,7 @@ PotEvapData <- S7::new_class(
   S7::new_class(
     class_name,
     package    = "reach.io",
-    parent     = PotEvapData,
+    parent     = FlodePotEvapData,
     properties = extra_props,
     constructor = function(readings,
                            source_name = NA_character_,
@@ -504,9 +504,9 @@ PotEvapData <- S7::new_class(
 #' @prop n_rows Total reading rows.
 #' @prop created_at POSIXct timestamp of object construction.
 #'
-#' @returns A `PotEvap_Daily` S7 object.
+#' @returns A `FlodePotEvap_Daily` S7 object.
 #' @export
-PotEvap_Daily <- .new_pe_class("PotEvap_Daily", "daily")
+FlodePotEvap_Daily <- .new_pe_class("FlodePotEvap_Daily", "daily")
 
 #' S7 class for hourly potential evaporation readings
 #'
@@ -522,9 +522,9 @@ PotEvap_Daily <- .new_pe_class("PotEvap_Daily", "daily")
 #' @prop n_rows Total reading rows.
 #' @prop created_at POSIXct timestamp of object construction.
 #'
-#' @returns A `PotEvap_Hourly` S7 object.
+#' @returns A `FlodePotEvap_Hourly` S7 object.
 #' @export
-PotEvap_Hourly <- .new_pe_class("PotEvap_Hourly", "hourly")
+FlodePotEvap_Hourly <- .new_pe_class("FlodePotEvap_Hourly", "hourly")
 
 #' S7 class for 15-minute potential evaporation (calculated)
 #'
@@ -544,12 +544,12 @@ PotEvap_Hourly <- .new_pe_class("PotEvap_Hourly", "hourly")
 #' @prop is_calculated Logical. Always `TRUE` — 15-min PE is never
 #'   sourced directly; it is always derived.
 #'
-#' @returns A `PotEvap_15min` S7 object.
+#' @returns A `FlodePotEvap_15min` S7 object.
 #' @export
-PotEvap_15min <- S7::new_class(
-  "PotEvap_15min",
+FlodePotEvap_15min <- S7::new_class(
+  "FlodePotEvap_15min",
   package    = "reach.io",
-  parent     = PotEvapData,
+  parent     = FlodePotEvapData,
   properties = list(
     is_calculated = S7::new_property(class = S7::class_logical),
     disagg_method = S7::new_property(class = S7::class_character)
@@ -575,7 +575,7 @@ PotEvap_15min <- S7::new_class(
   },
   validator = function(self) {
     if (!self@is_calculated) {
-      return("`is_calculated` must be TRUE for PotEvap_15min.")
+      return("`is_calculated` must be TRUE for FlodePotEvap_15min.")
     }
     valid_methods <- c("uniform_hourly", "uniform_daily")
     if (!self@disagg_method %in% valid_methods) {
@@ -591,8 +591,8 @@ PotEvap_15min <- S7::new_class(
 
 #' Disaggregate potential evaporation to 15-minute intervals
 #'
-#' `disagg_to_15min()` is an S7 generic. Converts a [PotEvap_Daily] or
-#' [PotEvap_Hourly] object to a [PotEvap_15min] object using uniform
+#' `disagg_to_15min()` is an S7 generic. Converts a [FlodePotEvap_Daily] or
+#' [FlodePotEvap_Hourly] object to a [FlodePotEvap_15min] object using uniform
 #' disaggregation:
 #'
 #' * **From hourly**: each hourly value is divided equally across four
@@ -604,21 +604,21 @@ PotEvap_15min <- S7::new_class(
 #' proportionally. If your values are rates (mm/hr), convert to totals
 #' first.
 #'
-#' @param x A [PotEvap_Daily] or [PotEvap_Hourly] object.
+#' @param x A [FlodePotEvap_Daily] or [FlodePotEvap_Hourly] object.
 #'
-#' @returns A [PotEvap_15min] object whose readings contain columns
+#' @returns A [FlodePotEvap_15min] object whose readings contain columns
 #'   `dateTime` (POSIXct), `date` (Date), and `value` (numeric).
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' pe_hr  <- PotEvap_Hourly(readings = hourly_dt, source_name = "CHESS-PE")
+#' pe_hr  <- FlodePotEvap_Hourly(readings = hourly_dt, source_name = "CHESS-PE")
 #' pe_15m <- disagg_to_15min(pe_hr)
 #' }
 disagg_to_15min <- S7::new_generic("disagg_to_15min", "x")
 
-S7::method(disagg_to_15min, PotEvap_Hourly) <- function(x) {
+S7::method(disagg_to_15min, FlodePotEvap_Hourly) <- function(x) {
   dt <- data.table::copy(x@readings)
 
   offsets_sec <- c(0L, 900L, 1800L, 2700L)
@@ -628,7 +628,7 @@ S7::method(disagg_to_15min, PotEvap_Hourly) <- function(x) {
   rows[, date     := as.Date(dateTime)]
   rows[, value    := value / 4]
 
-  PotEvap_15min(
+  FlodePotEvap_15min(
     readings      = rows,
     source_name   = x@source_name,
     from_date     = x@from_date,
@@ -637,7 +637,7 @@ S7::method(disagg_to_15min, PotEvap_Hourly) <- function(x) {
   )
 }
 
-S7::method(disagg_to_15min, PotEvap_Daily) <- function(x) {
+S7::method(disagg_to_15min, FlodePotEvap_Daily) <- function(x) {
   dt  <- data.table::copy(x@readings)
   tz  <- attr(dt$dateTime, "tzone")
   tz  <- if (is.null(tz) || !nzchar(tz)) "UTC" else tz
@@ -650,7 +650,7 @@ S7::method(disagg_to_15min, PotEvap_Daily) <- function(x) {
   rows[, date     := as.Date(dateTime)]
   rows[, value    := value / 96]
 
-  PotEvap_15min(
+  FlodePotEvap_15min(
     readings      = rows,
     source_name   = x@source_name,
     from_date     = x@from_date,
@@ -663,7 +663,7 @@ S7::method(disagg_to_15min, PotEvap_Daily) <- function(x) {
 # -- Generics and methods -----------------------------------------------------
 
 #' @noRd
-S7::method(as_data_table, PotEvapData) <- function(x) x@readings
+S7::method(as_data_table, FlodePotEvapData) <- function(x) x@readings
 
 
 # -- Print method -------------------------------------------------------------
@@ -675,7 +675,7 @@ S7::method(as_data_table, PotEvapData) <- function(x) x@readings
     sprintf("      %-24s %s", paste0("$", names(col_types)), col_types),
     collapse = "\n"
   )
-  disagg_line <- if (S7::S7_inherits(x, PotEvap_15min))
+  disagg_line <- if (S7::S7_inherits(x, FlodePotEvap_15min))
     sprintf("  @disagg_method  %s\n  @is_calculated  %s\n",
             x@disagg_method, x@is_calculated)
   else ""
@@ -698,4 +698,4 @@ S7::method(as_data_table, PotEvapData) <- function(x) x@readings
   invisible(x)
 }
 
-S7::method(print, PotEvapData) <- .print_PotEvapData
+S7::method(print, FlodePotEvapData) <- .print_PotEvapData

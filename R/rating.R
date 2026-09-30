@@ -8,10 +8,10 @@
 # Author:      JP
 # Created:     2026-03-19
 # Tier:        2
-# Inputs:      data.table of rating limbs; Level_Daily or
-#              Level_15min S7 objects
-# Outputs:     RatingCurve / RatingSet S7 objects;
-#              Flow_Daily / Flow_15min rated output
+# Inputs:      data.table of rating limbs; FlodeLevel_Daily or
+#              FlodeLevel_15min S7 objects
+# Outputs:     FlodeRatingCurve / FlodeRatingSet S7 objects;
+#              FlodeFlow_Daily / FlodeFlow_15min rated output
 # Dependencies: S7, data.table
 # Notes:       Equation form: Q = C * (h - a)^b
 #              Limbs must be ordered and contiguous — upper[i]
@@ -78,7 +78,7 @@ NULL
 }
 
 # For each Date in `dates`, return the integer index of the applicable
-# RatingCurve in rating_set@curves (NA_integer_ if none applies).
+# FlodeRatingCurve in rating_set@curves (NA_integer_ if none applies).
 #' @noRd
 .find_valid_curve <- function(dates, rating_set) {
   curves <- rating_set@curves
@@ -112,7 +112,7 @@ NULL
 
 
 # =============================================================================
-# RatingCurve
+# FlodeRatingCurve
 # =============================================================================
 
 #' S7 class for a multi-limb stage-discharge rating curve
@@ -148,8 +148,8 @@ NULL
 #' @slot source Character. Origin of the curve (e.g. `"WISKI"`, `"manual"`).
 #'
 #' @export
-RatingCurve <- S7::new_class(
-  "RatingCurve",
+FlodeRatingCurve <- S7::new_class(
+  "FlodeRatingCurve",
   package    = "reach.io",
   properties = list(
     limbs      = S7::new_property(class = S7::class_any),
@@ -251,41 +251,41 @@ RatingCurve <- S7::new_class(
 
 
 # =============================================================================
-# RatingSet
+# FlodeRatingSet
 # =============================================================================
 
 #' S7 class for a time-varying collection of rating curves
 #'
-#' Groups multiple [RatingCurve] objects that each apply over a distinct
+#' Groups multiple [FlodeRatingCurve] objects that each apply over a distinct
 #' calendar period — for instance to account for channel changes, re-surveys,
 #' or shift corrections. [apply_rating()] uses `valid_from` / `valid_to` on
 #' each curve to select the correct rating for every observation.
 #'
-#' @slot curves A `list` of [RatingCurve] objects with non-overlapping
+#' @slot curves A `list` of [FlodeRatingCurve] objects with non-overlapping
 #'   validity periods.
 #' @slot station_id Character. Station identifier shared across all curves.
 #'
 #' @export
-RatingSet <- S7::new_class(
-  "RatingSet",
+FlodeRatingSet <- S7::new_class(
+  "FlodeRatingSet",
   package    = "reach.io",
   properties = list(
     curves     = S7::new_property(class = S7::class_list),
     station_id = S7::new_property(class = S7::class_character)
   ),
   constructor = function(curves, station_id = NA_character_) {
-    if (S7::S7_inherits(curves, RatingCurve)) curves <- list(curves)
+    if (S7::S7_inherits(curves, FlodeRatingCurve)) curves <- list(curves)
     S7::new_object(S7::S7_object(),
                    curves     = curves,
                    station_id = station_id)
   },
   validator = function(self) {
     if (length(self@curves) == 0L) {
-      return("`curves` must contain at least one RatingCurve.")
+      return("`curves` must contain at least one FlodeRatingCurve.")
     }
     for (i in seq_along(self@curves)) {
-      if (!S7::S7_inherits(self@curves[[i]], RatingCurve)) {
-        return(sprintf("Element %d of `curves` is not a RatingCurve.", i))
+      if (!S7::S7_inherits(self@curves[[i]], FlodeRatingCurve)) {
+        return(sprintf("Element %d of `curves` is not a FlodeRatingCurve.", i))
       }
     }
 
@@ -305,7 +305,7 @@ RatingSet <- S7::new_class(
         if (!is.na(fi) && !is.na(fj)) {
           if (fi <= tj && fj <= ti) {
             return(sprintf(
-              "RatingCurve %d and %d have overlapping validity periods.", i, j
+              "FlodeRatingCurve %d and %d have overlapping validity periods.", i, j
             ))
           }
         }
@@ -324,25 +324,25 @@ RatingSet <- S7::new_class(
 #' Convert stage readings to rated discharge using a rating curve
 #'
 #' Applies the stage-discharge rating equation \eqn{Q = C(h - a)^b} to each
-#' observation in a [Level_Daily] or [Level_15min] object and returns a
-#' [Flow_Daily] or [Flow_15min] object of the same period.
+#' observation in a [FlodeLevel_Daily] or [FlodeLevel_15min] object and returns a
+#' [FlodeFlow_Daily] or [FlodeFlow_15min] object of the same period.
 #'
-#' When `rating` is a [RatingSet], each observation is matched to whichever
-#' [RatingCurve] has a validity window that spans that observation's date.
+#' When `rating` is a [FlodeRatingSet], each observation is matched to whichever
+#' [FlodeRatingCurve] has a validity window that spans that observation's date.
 #' Observations that fall outside all validity windows are set to `NA`.
 #'
 #' The output `readings` data.table carries an extra `doubtful` column
 #' (`TRUE` where the applicable rating limb has its doubtful flag set).
 #'
-#' @param level A [Level_Daily] or [Level_15min] object.
-#' @param rating A [RatingCurve] or [RatingSet].
+#' @param level A [FlodeLevel_Daily] or [FlodeLevel_15min] object.
+#' @param rating A [FlodeRatingCurve] or [FlodeRatingSet].
 #' @param measure_notation Character scalar placed in the `measure_notation`
 #'   column of the output. Defaults to `"rated_flow"`.
 #'
-#' @return A [Flow_Daily] or [Flow_15min] object matching the timestep of
+#' @return A [FlodeFlow_Daily] or [FlodeFlow_15min] object matching the timestep of
 #'   `level`. Rated flows are in m³/s (consistent with the rating equation).
 #'   Stages below the lowest limb boundary, or outside the validity window of
-#'   any curve in a [RatingSet], are returned as `NA`.
+#'   any curve in a [FlodeRatingSet], are returned as `NA`.
 #'
 #' @export
 #'
@@ -356,26 +356,26 @@ RatingSet <- S7::new_class(
 #'   b        = c(1.641, 2.706),
 #'   doubtful = c(FALSE, TRUE)
 #' )
-#' rc    <- RatingCurve(limbs, station_id = "510310", source = "WISKI")
+#' rc    <- FlodeRatingCurve(limbs, station_id = "510310", source = "WISKI")
 #' flow  <- apply_rating(level_obj, rc)
 #' }
 #' @export
 
 apply_rating <- function(level, rating, measure_notation = "rated_flow") {
-  if (S7::S7_inherits(rating, RatingCurve)) {
+  if (S7::S7_inherits(rating, FlodeRatingCurve)) {
     .apply_rating_curve(level, rating, measure_notation)
-  } else if (S7::S7_inherits(rating, RatingSet)) {
+  } else if (S7::S7_inherits(rating, FlodeRatingSet)) {
     .apply_rating_set(level, rating, measure_notation)
   } else {
-    stop("`rating` must be a RatingCurve or RatingSet.")
+    stop("`rating` must be a FlodeRatingCurve or FlodeRatingSet.")
   }
 }
 
 #' @noRd
 .apply_rating_curve <- function(level, rating, measure_notation = "rated_flow") {
-  if (!S7::S7_inherits(level, Level_Daily) &&
-      !S7::S7_inherits(level, Level_15min)) {
-    stop("`level` must be a Level_Daily or Level_15min object.")
+  if (!S7::S7_inherits(level, FlodeLevel_Daily) &&
+      !S7::S7_inherits(level, FlodeLevel_15min)) {
+    stop("`level` must be a FlodeLevel_Daily or FlodeLevel_15min object.")
   }
 
   dt    <- data.table::copy(level@readings)
@@ -395,12 +395,12 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
   dt[, doubtful         := rated$doubtful]
   dt[, measure_notation := measure_notation]
 
-  if (S7::S7_inherits(level, Level_Daily)) {
-    Flow_Daily(readings  = dt,
+  if (S7::S7_inherits(level, FlodeLevel_Daily)) {
+    FlodeFlow_Daily(readings  = dt,
                from_date = level@from_date,
                to_date   = level@to_date)
   } else {
-    Flow_15min(readings  = dt,
+    FlodeFlow_15min(readings  = dt,
                from_date = level@from_date,
                to_date   = level@to_date)
   }
@@ -408,9 +408,9 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
 
 #' @noRd
 .apply_rating_set <- function(level, rating, measure_notation = "rated_flow") {
-  if (!S7::S7_inherits(level, Level_Daily) &&
-      !S7::S7_inherits(level, Level_15min)) {
-    stop("`level` must be a Level_Daily or Level_15min object.")
+  if (!S7::S7_inherits(level, FlodeLevel_Daily) &&
+      !S7::S7_inherits(level, FlodeLevel_15min)) {
+    stop("`level` must be a FlodeLevel_Daily or FlodeLevel_15min object.")
   }
 
   dt    <- data.table::copy(level@readings)
@@ -425,7 +425,7 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
   n_unmatched <- sum(is.na(curve_idx))
   if (n_unmatched > 0L) {
     warning(sprintf(
-      "%d observation(s) fall outside all RatingCurve validity windows and were rated as NA.",
+      "%d observation(s) fall outside all FlodeRatingCurve validity windows and were rated as NA.",
       n_unmatched
     ))
   }
@@ -451,12 +451,12 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
   dt[, doubtful         := dbt_out]
   dt[, measure_notation := measure_notation]
 
-  if (S7::S7_inherits(level, Level_Daily)) {
-    Flow_Daily(readings  = dt,
+  if (S7::S7_inherits(level, FlodeLevel_Daily)) {
+    FlodeFlow_Daily(readings  = dt,
                from_date = level@from_date,
                to_date   = level@to_date)
   } else {
-    Flow_15min(readings  = dt,
+    FlodeFlow_15min(readings  = dt,
                from_date = level@from_date,
                to_date   = level@to_date)
   }
@@ -477,7 +477,7 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
 #' Use [fix_limb_continuity()] to correct any discontinuities by adjusting
 #' the `C` parameters.
 #'
-#' @param x A [RatingCurve].
+#' @param x A [FlodeRatingCurve].
 #' @param tol_pct Numeric scalar. Percentage tolerance for declaring a junction
 #'   connected. Default `1` (i.e. 1 %).
 #'
@@ -502,7 +502,7 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
 #' }
 check_limb_continuity <- S7::new_generic("check_limb_continuity", "x")
 
-S7::method(check_limb_continuity, RatingCurve) <- function(x, tol_pct = 1) {
+S7::method(check_limb_continuity, FlodeRatingCurve) <- function(x, tol_pct = 1) {
   limbs <- x@limbs
   n     <- nrow(limbs)
 
@@ -562,9 +562,9 @@ S7::method(check_limb_continuity, RatingCurve) <- function(x, tol_pct = 1) {
 #' \eqn{C_2} feeds into the computation of \eqn{C_3}, and so on. The anchor
 #' limb's \eqn{C} is never modified.
 #'
-#' @param x A [RatingCurve].
+#' @param x A [FlodeRatingCurve].
 #'
-#' @return A new [RatingCurve] with updated `C` values. A message is printed
+#' @return A new [FlodeRatingCurve] with updated `C` values. A message is printed
 #'   for each limb showing the old and new `C` and the percentage change.
 #'
 #' @export
@@ -577,7 +577,7 @@ S7::method(check_limb_continuity, RatingCurve) <- function(x, tol_pct = 1) {
 #' }
 fix_limb_continuity <- S7::new_generic("fix_limb_continuity", "x")
 
-S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
+S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
   limbs <- data.table::copy(x@limbs)
   n     <- nrow(limbs)
 
@@ -619,7 +619,7 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
     ))
   }
 
-  RatingCurve(
+  FlodeRatingCurve(
     limbs      = limbs,
     valid_from = x@valid_from,
     valid_to   = x@valid_to,
@@ -638,7 +638,7 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
   vt <- if (inherits(x@valid_to,   "Date")) format(x@valid_to)   else "open"
 
   cat(sprintf(
-    "<RatingCurve>\n  Station:  %s\n  Source:   %s\n  Valid:    %s to %s\n  Limbs:    %d\n\n",
+    "<FlodeRatingCurve>\n  Station:  %s\n  Source:   %s\n  Valid:    %s to %s\n  Limbs:    %d\n\n",
     if (is.na(x@station_id)) "-" else x@station_id,
     if (is.na(x@source))     "-" else x@source,
     vf, vt,
@@ -720,9 +720,9 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
 #' @noRd
 .apply_inverse_rating_curve <- function(flow, rating,
                                         measure_notation = "rated_level") {
-  if (!S7::S7_inherits(flow, Flow_Daily) &&
-      !S7::S7_inherits(flow, Flow_15min)) {
-    stop("`flow` must be a Flow_Daily or Flow_15min object.")
+  if (!S7::S7_inherits(flow, FlodeFlow_Daily) &&
+      !S7::S7_inherits(flow, FlodeFlow_15min)) {
+    stop("`flow` must be a FlodeFlow_Daily or FlodeFlow_15min object.")
   }
 
   dt <- data.table::copy(flow@readings)
@@ -733,12 +733,12 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
   dt[, measure_notation := measure_notation]
   if ("doubtful" %in% names(dt)) dt[, doubtful := NULL]
 
-  if (S7::S7_inherits(flow, Flow_Daily)) {
-    Level_Daily(readings  = dt,
+  if (S7::S7_inherits(flow, FlodeFlow_Daily)) {
+    FlodeLevel_Daily(readings  = dt,
                 from_date = flow@from_date,
                 to_date   = flow@to_date)
   } else {
-    Level_15min(readings  = dt,
+    FlodeLevel_15min(readings  = dt,
                 from_date = flow@from_date,
                 to_date   = flow@to_date)
   }
@@ -747,9 +747,9 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
 #' @noRd
 .apply_inverse_rating_set <- function(flow, rating,
                                       measure_notation = "rated_level") {
-  if (!S7::S7_inherits(flow, Flow_Daily) &&
-      !S7::S7_inherits(flow, Flow_15min)) {
-    stop("`flow` must be a Flow_Daily or Flow_15min object.")
+  if (!S7::S7_inherits(flow, FlodeFlow_Daily) &&
+      !S7::S7_inherits(flow, FlodeFlow_15min)) {
+    stop("`flow` must be a FlodeFlow_Daily or FlodeFlow_15min object.")
   }
 
   dt  <- data.table::copy(flow@readings)
@@ -762,7 +762,7 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
   n_unmatched <- sum(is.na(curve_idx))
   if (n_unmatched > 0L) {
     warning(sprintf(
-      "%d observation(s) fall outside all RatingCurve validity windows and were inverted as NA.",
+      "%d observation(s) fall outside all FlodeRatingCurve validity windows and were inverted as NA.",
       n_unmatched
     ))
   }
@@ -777,12 +777,12 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
   dt[, measure_notation := measure_notation]
   if ("doubtful" %in% names(dt)) dt[, doubtful := NULL]
 
-  if (S7::S7_inherits(flow, Flow_Daily)) {
-    Level_Daily(readings  = dt,
+  if (S7::S7_inherits(flow, FlodeFlow_Daily)) {
+    FlodeLevel_Daily(readings  = dt,
                 from_date = flow@from_date,
                 to_date   = flow@to_date)
   } else {
-    Level_15min(readings  = dt,
+    FlodeLevel_15min(readings  = dt,
                 from_date = flow@from_date,
                 to_date   = flow@to_date)
   }
@@ -795,11 +795,11 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
 #'
 #' \deqn{h = \left(\frac{Q}{C}\right)^{1/b} + a}
 #'
-#' to each observation in a [Flow_Daily] or [Flow_15min] object and returns a
-#' [Level_Daily] or [Level_15min] object of the same period.
+#' to each observation in a [FlodeFlow_Daily] or [FlodeFlow_15min] object and returns a
+#' [FlodeLevel_Daily] or [FlodeLevel_15min] object of the same period.
 #'
-#' When `rating` is a [RatingSet], each observation is matched to the
-#' applicable [RatingCurve] by date, exactly as [apply_rating()] does for the
+#' When `rating` is a [FlodeRatingSet], each observation is matched to the
+#' applicable [FlodeRatingCurve] by date, exactly as [apply_rating()] does for the
 #' forward direction.
 #'
 #' **Discontinuity gaps:** Where consecutive limbs do not meet at their shared
@@ -808,12 +808,12 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
 #' (the upper boundary of the lower limb). Use [fix_limb_continuity()] to
 #' remove gaps before inverting if this behaviour is undesirable.
 #'
-#' @param flow A [Flow_Daily] or [Flow_15min] object.
-#' @param rating A [RatingCurve] or [RatingSet].
+#' @param flow A [FlodeFlow_Daily] or [FlodeFlow_15min] object.
+#' @param rating A [FlodeRatingCurve] or [FlodeRatingSet].
 #' @param measure_notation Character scalar placed in the `measure_notation`
 #'   column of the output. Defaults to `"rated_level"`.
 #'
-#' @return A [Level_Daily] or [Level_15min] object matching the timestep of
+#' @return A [FlodeLevel_Daily] or [FlodeLevel_15min] object matching the timestep of
 #'   `flow`. Stage values are in metres. Flow values of `NA` or below zero
 #'   are returned as `NA`.
 #'
@@ -832,18 +832,18 @@ S7::method(fix_limb_continuity, RatingCurve) <- function(x) {
 #'   b        = c(1.641, 2.706),
 #'   doubtful = c(FALSE, TRUE)
 #' )
-#' rc    <- RatingCurve(limbs, station_id = "510310", source = "WISKI")
+#' rc    <- FlodeRatingCurve(limbs, station_id = "510310", source = "WISKI")
 #' flow  <- apply_rating(level_obj, rc)
 #' level <- apply_inverse_rating(flow, rc)
 #' }
 apply_inverse_rating <- function(flow, rating,
                                  measure_notation = "rated_level") {
-  if (S7::S7_inherits(rating, RatingCurve)) {
+  if (S7::S7_inherits(rating, FlodeRatingCurve)) {
     .apply_inverse_rating_curve(flow, rating, measure_notation)
-  } else if (S7::S7_inherits(rating, RatingSet)) {
+  } else if (S7::S7_inherits(rating, FlodeRatingSet)) {
     .apply_inverse_rating_set(flow, rating, measure_notation)
   } else {
-    stop("`rating` must be a RatingCurve or RatingSet.")
+    stop("`rating` must be a FlodeRatingCurve or FlodeRatingSet.")
   }
 }
 
@@ -856,7 +856,7 @@ apply_inverse_rating <- function(flow, rating,
   fmt_date <- function(d) if (inherits(d, "Date")) format(d) else "-"
 
   cat(sprintf(
-    "<RatingSet>\n  Station:  %s\n  Curves:   %d\n\n",
+    "<FlodeRatingSet>\n  Station:  %s\n  Curves:   %d\n\n",
     if (is.na(x@station_id)) "-" else x@station_id,
     length(x@curves)
   ))

@@ -122,10 +122,10 @@ VALID_SOURCES <- c("HDE", "WISKI", "WISKI_ALL")
 # table where they are found before print.S7_object.
 
 .onLoad <- function(libname, pkgname) {
-  registerS3method("print", "reach.io::RatingCurve",  .print_RatingCurve,  envir = asNamespace(pkgname))
-  registerS3method("print", "reach.io::RatingSet",    .print_RatingSet,    envir = asNamespace(pkgname))
-  registerS3method("print", "reach.io::HydroData",    .print_HydroData,    envir = asNamespace(pkgname))
-  registerS3method("print", "reach.io::PotEvapData",  .print_PotEvapData,  envir = asNamespace(pkgname))
+  registerS3method("print", "reach.io::FlodeRatingCurve",  .print_RatingCurve,  envir = asNamespace(pkgname))
+  registerS3method("print", "reach.io::FlodeRatingSet",    .print_RatingSet,    envir = asNamespace(pkgname))
+  registerS3method("print", "reach.io::FlodeHydroData",    .print_HydroData,    envir = asNamespace(pkgname))
+  registerS3method("print", "reach.io::FlodePotEvapData",  .print_PotEvapData,  envir = asNamespace(pkgname))
 
   # Register this package's pipeline activities so reach.utils::run_pipeline()
   # can dispatch to them by name from a pipeline YAML config.

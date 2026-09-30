@@ -18,7 +18,7 @@ make_limbs <- function() {
 }
 
 make_rc <- function() {
-  RatingCurve(
+  FlodeRatingCurve(
     limbs      = make_limbs(),
     valid_from = as.Date("2019-10-01"),
     station_id = "510310",
@@ -33,7 +33,7 @@ make_level_daily <- function(stages) {
     value             = stages,
     measure_notation  = "level"
   )
-  Level_Daily(readings = dt, from_date = "2020-01-01", to_date = "2020-12-31")
+  FlodeLevel_Daily(readings = dt, from_date = "2020-01-01", to_date = "2020-12-31")
 }
 
 make_level_15min <- function(stages) {
@@ -43,105 +43,105 @@ make_level_15min <- function(stages) {
     value             = stages,
     measure_notation  = "level"
   )
-  Level_15min(readings = dt, from_date = "2020-01-01", to_date = "2020-01-02")
+  FlodeLevel_15min(readings = dt, from_date = "2020-01-01", to_date = "2020-01-02")
 }
 
 # ==============================================================================
-# RatingCurve construction
+# FlodeRatingCurve construction
 # ==============================================================================
 
-test_that("RatingCurve constructs from valid limbs", {
+test_that("FlodeRatingCurve constructs from valid limbs", {
   rc <- make_rc()
-  expect_true(S7::S7_inherits(rc, RatingCurve))
+  expect_true(S7::S7_inherits(rc, FlodeRatingCurve))
   expect_equal(nrow(rc@limbs), 3L)
   expect_equal(rc@station_id, "510310")
   expect_equal(rc@source, "WISKI")
 })
 
-test_that("RatingCurve rejects missing columns", {
+test_that("FlodeRatingCurve rejects missing columns", {
   bad <- data.table(lower = 0, upper = 1, C = 1, a = 0, b = 1)
-  expect_error(RatingCurve(limbs = bad), "missing column")
+  expect_error(FlodeRatingCurve(limbs = bad), "missing column")
 })
 
-test_that("RatingCurve rejects non-contiguous boundaries", {
+test_that("FlodeRatingCurve rejects non-contiguous boundaries", {
   bad <- data.table(
     lower = c(0, 1), upper = c(0.5, 2),
     C = c(1, 1), a = c(0, 0), b = c(1, 1),
     doubtful = c(FALSE, FALSE)
   )
-  expect_error(RatingCurve(limbs = bad), "not contiguous")
+  expect_error(FlodeRatingCurve(limbs = bad), "not contiguous")
 })
 
-test_that("RatingCurve rejects lower >= upper", {
+test_that("FlodeRatingCurve rejects lower >= upper", {
   bad <- data.table(
     lower = 1, upper = 0.5,
     C = 1, a = 0, b = 1, doubtful = FALSE
   )
-  expect_error(RatingCurve(limbs = bad), "lower.*less than")
+  expect_error(FlodeRatingCurve(limbs = bad), "lower.*less than")
 })
 
-test_that("RatingCurve rejects C <= 0", {
+test_that("FlodeRatingCurve rejects C <= 0", {
   bad <- data.table(
     lower = 0, upper = Inf,
     C = -1, a = 0, b = 1, doubtful = FALSE
   )
-  expect_error(RatingCurve(limbs = bad), "positive")
+  expect_error(FlodeRatingCurve(limbs = bad), "positive")
 })
 
-test_that("RatingCurve rejects b <= 0", {
+test_that("FlodeRatingCurve rejects b <= 0", {
   bad <- data.table(
     lower = 0, upper = Inf,
     C = 1, a = 0, b = 0, doubtful = FALSE
   )
-  expect_error(RatingCurve(limbs = bad), "positive")
+  expect_error(FlodeRatingCurve(limbs = bad), "positive")
 })
 
-test_that("RatingCurve rejects NaN in parameters", {
+test_that("FlodeRatingCurve rejects NaN in parameters", {
   bad <- data.table(
     lower = 0, upper = Inf,
     C = NaN, a = 0, b = 1, doubtful = FALSE
   )
-  expect_error(RatingCurve(limbs = bad), "finite")
+  expect_error(FlodeRatingCurve(limbs = bad), "finite")
 })
 
-test_that("RatingCurve normalises common column name variants", {
+test_that("FlodeRatingCurve normalises common column name variants", {
   limbs <- data.table(
     lower_level = 0, upper_level = Inf,
     multiplier  = 10, offset = 0, exponent = 2,
     flag        = FALSE
   )
-  rc <- RatingCurve(limbs = limbs)
+  rc <- FlodeRatingCurve(limbs = limbs)
   expect_true(all(c("lower", "upper", "C", "a", "b", "doubtful") %in% names(rc@limbs)))
 })
 
 # ==============================================================================
-# RatingSet construction
+# FlodeRatingSet construction
 # ==============================================================================
 
-test_that("RatingSet wraps a single RatingCurve", {
+test_that("FlodeRatingSet wraps a single FlodeRatingCurve", {
   rc <- make_rc()
-  rs <- RatingSet(curves = rc, station_id = "510310")
-  expect_true(S7::S7_inherits(rs, RatingSet))
+  rs <- FlodeRatingSet(curves = rc, station_id = "510310")
+  expect_true(S7::S7_inherits(rs, FlodeRatingSet))
   expect_equal(length(rs@curves), 1L)
 })
 
-test_that("RatingSet wraps a list of RatingCurves", {
+test_that("FlodeRatingSet wraps a list of RatingCurves", {
   limbs <- make_limbs()
-  rc1 <- RatingCurve(limbs = limbs, valid_from = as.Date("2019-01-01"),
+  rc1 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2019-01-01"),
                      valid_to = as.Date("2020-12-31"), station_id = "X")
-  rc2 <- RatingCurve(limbs = limbs, valid_from = as.Date("2021-01-01"),
+  rc2 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2021-01-01"),
                      station_id = "X")
-  rs <- RatingSet(curves = list(rc1, rc2), station_id = "X")
+  rs <- FlodeRatingSet(curves = list(rc1, rc2), station_id = "X")
   expect_equal(length(rs@curves), 2L)
 })
 
-test_that("RatingSet rejects overlapping validity periods", {
+test_that("FlodeRatingSet rejects overlapping validity periods", {
   limbs <- make_limbs()
-  rc1 <- RatingCurve(limbs = limbs, valid_from = as.Date("2019-01-01"),
+  rc1 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2019-01-01"),
                      valid_to = as.Date("2021-12-31"), station_id = "X")
-  rc2 <- RatingCurve(limbs = limbs, valid_from = as.Date("2021-01-01"),
+  rc2 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2021-01-01"),
                      station_id = "X")
-  expect_error(RatingSet(curves = list(rc1, rc2)), "overlapping")
+  expect_error(FlodeRatingSet(curves = list(rc1, rc2)), "overlapping")
 })
 
 # ==============================================================================
@@ -204,33 +204,33 @@ test_that("NA stage returns NA", {
 # apply_rating
 # ==============================================================================
 
-test_that("apply_rating with Level_Daily returns Flow_Daily", {
+test_that("apply_rating with FlodeLevel_Daily returns FlodeFlow_Daily", {
   rc    <- make_rc()
   level <- make_level_daily(c(0.5, 1.0, 1.5))
   flow  <- apply_rating(level, rc)
-  expect_true(S7::S7_inherits(flow, Flow_Daily))
+  expect_true(S7::S7_inherits(flow, FlodeFlow_Daily))
   expect_equal(nrow(flow@readings), 3L)
   expect_true("doubtful" %in% names(flow@readings))
 })
 
-test_that("apply_rating with Level_15min returns Flow_15min", {
+test_that("apply_rating with FlodeLevel_15min returns FlodeFlow_15min", {
   rc    <- make_rc()
   level <- make_level_15min(c(0.5, 1.0, 1.5))
   flow  <- apply_rating(level, rc)
-  expect_true(S7::S7_inherits(flow, Flow_15min))
+  expect_true(S7::S7_inherits(flow, FlodeFlow_15min))
   expect_equal(nrow(flow@readings), 3L)
 })
 
-test_that("apply_rating with RatingSet dispatches correctly", {
+test_that("apply_rating with FlodeRatingSet dispatches correctly", {
   limbs <- make_limbs()
-  rc1 <- RatingCurve(limbs = limbs, valid_from = as.Date("2019-01-01"),
+  rc1 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2019-01-01"),
                      valid_to = as.Date("2020-06-30"), station_id = "X")
-  rc2 <- RatingCurve(limbs = limbs, valid_from = as.Date("2020-07-01"),
+  rc2 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2020-07-01"),
                      station_id = "X")
-  rs    <- RatingSet(curves = list(rc1, rc2), station_id = "X")
+  rs    <- FlodeRatingSet(curves = list(rc1, rc2), station_id = "X")
   level <- make_level_daily(c(0.5, 1.0, 1.5))
   flow  <- apply_rating(level, rs)
-  expect_true(S7::S7_inherits(flow, Flow_Daily))
+  expect_true(S7::S7_inherits(flow, FlodeFlow_Daily))
 })
 
 test_that("apply_rating warns about below-limb stages", {
@@ -238,7 +238,7 @@ test_that("apply_rating warns about below-limb stages", {
     lower = 0.5, upper = Inf,
     C = 10, a = 0, b = 2, doubtful = FALSE
   )
-  rc    <- RatingCurve(limbs = limbs)
+  rc    <- FlodeRatingCurve(limbs = limbs)
   level <- make_level_daily(c(0.1, 1.0))
   expect_warning(apply_rating(level, rc), "below the lowest limb")
 })
@@ -261,7 +261,7 @@ test_that("check_limb_continuity reports all connected for perfect limbs", {
     C = c(10, 10), a = c(0, 0), b = c(2, 2),
     doubtful = c(FALSE, FALSE)
   )
-  rc  <- RatingCurve(limbs = limbs)
+  rc  <- FlodeRatingCurve(limbs = limbs)
   out <- expect_message(check_limb_continuity(rc), "All.*connect")
   expect_true(all(out$connected))
 })
@@ -271,7 +271,7 @@ test_that("check_limb_continuity handles single limb", {
     lower = 0, upper = Inf,
     C = 10, a = 0, b = 2, doubtful = FALSE
   )
-  rc  <- RatingCurve(limbs = limbs)
+  rc  <- FlodeRatingCurve(limbs = limbs)
   out <- expect_message(check_limb_continuity(rc), "Only one limb")
   expect_equal(nrow(out), 0L)
 })
@@ -305,19 +305,19 @@ test_that("fix_limb_continuity preserves anchor limb C", {
 # Print methods
 # ==============================================================================
 
-test_that("RatingCurve prints formatted output", {
+test_that("FlodeRatingCurve prints formatted output", {
   rc  <- make_rc()
   out <- capture.output(print(rc))
-  expect_true(any(grepl("RatingCurve", out)))
+  expect_true(any(grepl("FlodeRatingCurve", out)))
   expect_true(any(grepl("510310", out)))
   expect_true(any(grepl("WISKI", out)))
   expect_true(any(grepl("Lower", out)))
 })
 
-test_that("RatingSet prints formatted output", {
+test_that("FlodeRatingSet prints formatted output", {
   rc <- make_rc()
-  rs <- RatingSet(curves = rc, station_id = "510310")
+  rs <- FlodeRatingSet(curves = rc, station_id = "510310")
   out <- capture.output(print(rs))
-  expect_true(any(grepl("RatingSet", out)))
+  expect_true(any(grepl("FlodeRatingSet", out)))
   expect_true(any(grepl("510310", out)))
 })

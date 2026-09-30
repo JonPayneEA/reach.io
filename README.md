@@ -45,7 +45,7 @@ reach.io/
 │   ├── package.R      # constants, PARAMETER_CONFIG, VALID_SOURCES, VALID_CATEGORIES
 │   ├── schema.R       # Bronze schema, dataset IDs, supplier codes, provenance
 │   ├── setup.R        # setup_hydro_store()
-│   ├── classes.R      # S7 HydroData classes (Rainfall_Daily etc.)
+│   ├── classes.R      # S7 FlodeHydroData classes (FlodeRainfall_Daily etc.)
 │   ├── lookup.R       # find_stations(), get_measures()
 │   ├── download.R     # download_hydrology()
 │   ├── sync.R         # fetch_readings(), make_date_chunks(), run_sync()
@@ -132,7 +132,7 @@ identifier and a date range.
 
 | Output | Returns |
 |--------|---------|
-| `"memory"` (default) | Named list of typed S7 objects (`Flow_15min` etc.) plus a summary. |
+| `"memory"` (default) | Named list of typed S7 objects (`FlodeFlow_15min` etc.) plus a summary. |
 | `"disk"` | One CSV per measure under `out_dir/<parameter>/`. |
 
 ```r
@@ -144,7 +144,7 @@ result <- download_hydrology(
   wiski_ids  = c("SS92F014", "S11512_FW")
 )
 
-result$flow              # <Flow_15min> object
+result$flow              # <FlodeFlow_15min> object
 result$flow@readings     # the readings data.table
 as_data_table(result$flow)   # same, via generic
 as_long(result$flow)         # adds a parameter column
@@ -176,14 +176,14 @@ download_hydrology(
 
 | Parameter | Period | Class |
 |-----------|--------|-------|
-| `flow` | `15min` | `Flow_15min` |
-| `flow` | `daily` | `Flow_Daily` |
-| `level` | `15min` | `Level_15min` |
-| `level` | `daily` | `Level_Daily` |
-| `rainfall` | `15min` | `Rainfall_15min` |
-| `rainfall` | `daily` | `Rainfall_Daily` |
+| `flow` | `15min` | `FlodeFlow_15min` |
+| `flow` | `daily` | `FlodeFlow_Daily` |
+| `level` | `15min` | `FlodeLevel_15min` |
+| `level` | `daily` | `FlodeLevel_Daily` |
+| `rainfall` | `15min` | `FlodeRainfall_15min` |
+| `rainfall` | `daily` | `FlodeRainfall_Daily` |
 
-All six inherit from the abstract `HydroData` class. Downstream code can
+All six inherit from the abstract `FlodeHydroData` class. Downstream code can
 dispatch on the class name to handle daily and sub-daily data differently.
 
 #### Working with S7 objects
@@ -191,7 +191,7 @@ dispatch on the class name to handle daily and sub-daily data differently.
 Data and metadata are stored in slots accessed with `@`:
 
 ```r
-obj <- result$flow   # a Flow_15min object
+obj <- result$flow   # a FlodeFlow_15min object
 
 # ── Readings ──────────────────────────────────────────────────────────────────
 obj@readings            # data.table of all readings
