@@ -26,7 +26,7 @@ It provides three groups of tools:
 ```r
 # Install dependencies
 install.packages(c("httr", "data.table", "arrow",
-                   "future", "future.apply", "lubridate", "S7"))
+                   "future", "future.apply", "S7"))
 
 # Install reach.io from source
 devtools::install("path/to/reach.io")
@@ -624,7 +624,6 @@ automated.
 | `httr` | EA API and KiWIS HTTP requests |
 | `future` | Parallel worker setup |
 | `future.apply` | `future_lapply()` for backfill and incremental sync |
-| `lubridate` | Multi-format datetime parsing |
 | `parallel` | `detectCores()` default for `n_workers` |
 | `S7` | Typed classes for downloaded hydrometric data |
 

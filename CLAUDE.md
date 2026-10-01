@@ -126,7 +126,8 @@ regardless of which store tier data comes from.
 ### Language & Dependencies
 - **R** package; uses `S7` for OOP, `data.table` for tabular data, `arrow` for Parquet I/O
 - `future` / `future.apply` for parallelism
-- `httr` for API calls, `ggplot2` for plots, `lubridate` for dates
+- `httr` for API calls, `ggplot2` for plots; dates use base R
+  and data.table (`lubridate` is confined to reach.utils)
 
 ### Testing
 Run tests with:
