@@ -303,14 +303,14 @@
     data_type <- .wiski_param_to_type(raw_param)
     if (is.na(data_type)) {
       warning(sprintf(
-        "[%s] Unrecognised parameter '%s' — series skipped (supported: flow/discharge, level/stage, rainfall).",
+        "[%s] Unrecognised parameter '%s' - series skipped (supported: flow/discharge, level/stage, rainfall).",
         station, raw_param), call. = FALSE)
       skipped[[length(skipped) + 1L]] <- data.table::data.table(
         station = station, parameter = raw_param, reason = "unrecognised parameter")
       next
     }
     if (is.na(value_col)) {
-      warning(sprintf("[%s] No usable value column — series skipped.", station),
+      warning(sprintf("[%s] No usable value column - series skipped.", station),
               call. = FALSE)
       skipped[[length(skipped) + 1L]] <- data.table::data.table(
         station = station, parameter = raw_param, reason = "no value column")
@@ -379,7 +379,7 @@
       off_mins <- which(!as.integer(format(pre_dt[["datetime"]], "%M", tz = "UTC")) %in%
                           c(0L, 15L, 30L, 45L))
       if (length(off_mins) > 0L) {
-        sample_ts <- head(
+        sample_ts <- utils::head(
           format(pre_dt[["datetime"]][off_mins], "%Y-%m-%d %H:%M:%S", tz = "UTC"), 5L
         )
         warning(

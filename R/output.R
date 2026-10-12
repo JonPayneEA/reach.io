@@ -44,6 +44,10 @@
 #'   Default `"EA"` (the Hydrology API).
 #' @param category Character. Data category for the path. Default
 #'   `"hydrometric"`.
+#' @param register_path Character or `NULL`. Hydrometric Data Register CSV. When
+#'   supplied, a provenance record is appended for every file written.
+#' @param method_of_receipt Character. Recorded in the register. Default
+#'   `"API pull"`.
 #'
 #' @return In `"memory"` mode, the `data.table` unchanged. In `"disk"` mode,
 #'   a character vector of the Bronze Parquet paths written (invisibly), one
@@ -54,7 +58,9 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
                            append = FALSE, site_id = NA_character_,
                            period = NA_character_,
                            supplier_code = "EA",
-                           category = "hydrometric") {
+                           category = "hydrometric",
+                           register_path = NULL,
+                           method_of_receipt = "API pull") {
 
   if (output == "memory") return(dt)
 
@@ -78,6 +84,19 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
 
   files <- .write_bronze_by_year(bronze_dt, out_dir, category, supplier_code,
                                  data_type, dataset_id)
+
+  if (!is.null(register_path) && nrow(files) > 0L) {
+    .write_provenance_rows(
+      .bronze_prov_rows(files, dataset_id,
+                        supplier            = "HDE",
+                        supplier_code       = supplier_code,
+                        site_id             = sid,
+                        data_type           = data_type,
+                        temporal_resolution = period,
+                        method_of_receipt   = method_of_receipt),
+      register_path
+    )
+  }
 
   invisible(files$path)
 }
@@ -292,7 +311,7 @@ format_for_fmp <- function(flows,
     warning(
       "Mixed period_names detected (",
       paste(unique(periods), collapse = ", "),
-      "). Merging by dateTime — gaps will appear where timesteps differ."
+      "). Merging by dateTime - gaps will appear where timesteps differ."
     )
   }
 

@@ -112,7 +112,7 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
 
     start_date <- if (is.na(hwm)) {
       # No existing data — treat as a mini-backfill from default_start
-      message(sprintf("  [%s] No existing data — using default_start: %s",
+      message(sprintf("  [%s] No existing data - using default_start: %s",
                       gauge$gauge_id, default_start))
       default_start
     } else {

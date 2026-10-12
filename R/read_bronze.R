@@ -178,11 +178,12 @@
 #' @param supplier_code Character. Supplier code used when the data was
 #'   ingested. Default `"EA"` (HDE downloads).
 #' @param category Character. Data category. Default `"hydrometric"`.
-#' @param start Date or character (`"YYYY-MM-DD"`) or `NULL`. Earliest
-#'   timestamp to include. `NULL` reads from the beginning of the record.
-#' @param end Date or character (`"YYYY-MM-DD"`) or `NULL`. Latest
-#'   timestamp to include (the whole of the `end` day is included). `NULL`
-#'   reads to the end of the record.
+#' @param start Date, POSIXct or character (`"YYYY-MM-DD"` or
+#'   `"YYYY-MM-DD HH:MM:SS"`) or `NULL`. Earliest timestamp to include (a bare
+#'   date means midnight UTC). `NULL` reads from the beginning of the record.
+#' @param end Date, POSIXct or character or `NULL`. Latest timestamp to include;
+#'   a bare date includes the whole of that day. `NULL` reads to the end of the
+#'   record.
 #' @param trace Character or `NULL`. Series discriminator for gauges that hold
 #'   several series of the same data type (e.g. WISKI `"sg"` and `"sg_ds"`
 #'   stage). `NULL` is fine when the gauge has a single series; if several are
@@ -221,6 +222,9 @@ read_bronze <- function(root, gauge_id, data_type,
                         start         = NULL,
                         end           = NULL,
                         trace         = NULL) {
+
+  # Validate the data type before touching the file system
+  param <- .data_type_to_param_b(data_type)
 
   files <- .locate_bronze_files(root, gauge_id, data_type,
                                 supplier_code, category, start, end)
@@ -264,10 +268,14 @@ read_bronze <- function(root, gauge_id, data_type,
   dt[, .series := NULL]
 
   # Exact timestamp bounds (year-dir filter was approximate)
-  if (!is.null(start))
-    dt <- dt[timestamp >= as.POSIXct(as.Date(start), tz = "UTC")]
-  if (!is.null(end))
-    dt <- dt[timestamp <= as.POSIXct(as.Date(end), tz = "UTC") + 86399L]
+  if (!is.null(start)) {
+    lo <- .bound_posixct(start, "start")
+    dt <- dt[dt$timestamp >= lo]
+  }
+  if (!is.null(end)) {
+    hi <- .bound_posixct(end, "end")
+    dt <- dt[dt$timestamp <= hi]
+  }
 
   if (nrow(dt) == 0L)
     stop(sprintf(
@@ -278,7 +286,6 @@ read_bronze <- function(root, gauge_id, data_type,
   data.table::setorder(dt, site_id, timestamp)
 
   readings <- .build_bronze_readings(dt)
-  param    <- .data_type_to_param_b(data_type)
   period   <- .resolve_period_b(dt)
   cls      <- HYDRO_CLASS[[param]][[period]]
 
@@ -393,7 +400,7 @@ read_bronze_catchment <- function(root, catchment_id, data_type,
   if (!"site_id" %in% names(registry))
     stop("Registry must contain a 'site_id' column.")
 
-  gauge_ids <- registry[registry[[catchment_col]] == catchment_id, site_id]
+  gauge_ids <- registry[["site_id"]][registry[[catchment_col]] == catchment_id]
 
   if (length(gauge_ids) == 0L)
     stop(sprintf("No gauges found in registry for catchment '%s'.",

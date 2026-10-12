@@ -507,7 +507,7 @@ S7::method(check_limb_continuity, FlodeRatingCurve) <- function(x, tol_pct = 1) 
   n     <- nrow(limbs)
 
   if (n < 2L) {
-    message("Only one limb — no junctions to check.")
+    message("Only one limb - no junctions to check.")
     return(invisible(data.table::data.table()))
   }
 
@@ -582,7 +582,7 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
   n     <- nrow(limbs)
 
   if (n < 2L) {
-    message("Only one limb — nothing to fix.")
+    message("Only one limb - nothing to fix.")
     return(x)
   }
 
@@ -596,15 +596,15 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
       warning(sprintf(
         "  Limb %d: junction stage (%.4g m) is at or below datum offset a = %.4g. ",
         i + 1L, jq$h, limbs$a[i + 1L]
-      ), "Cannot compute new C — skipping this junction.", call. = FALSE)
+      ), "Cannot compute new C - skipping this junction.", call. = FALSE)
       next
     }
 
     if (jq$Q_lower <= 0) {
       warning(sprintf(
-        "  Limb %d -> %d: Q at junction is zero or negative (%.4g m³/s). ",
+        "  Limb %d -> %d: Q at junction is zero or negative (%.4g m\u00b3/s). ",
         i, i + 1L, jq$Q_lower
-      ), "Skipping — check datum offsets.", call. = FALSE)
+      ), "Skipping - check datum offsets.", call. = FALSE)
       next
     }
 

@@ -69,7 +69,8 @@ NULL
   if (!file.exists(reg_path)) return(1L)
   reg <- data.table::fread(reg_path, colClasses = "character", showProgress = FALSE)
   if (nrow(reg) == 0L || !"site_id" %in% names(reg)) return(1L)
-  rows <- reg[reg$site_id == site_id & reg$tier == tier]
+  idx  <- which(reg$site_id == site_id & reg$tier == tier)
+  rows <- reg[idx]
   if (nrow(rows) == 0L) return(1L)
   max(as.integer(rows$version), na.rm = TRUE) + 1L
 }
@@ -354,7 +355,8 @@ load_rating <- function(site_id, root, tier = "gold", version = NULL) {
   }
 
   dt <- data.table::as.data.table(arrow::read_parquet(paths$pq_file))
-  dt <- dt[dt$site_id == site_id]
+  idx <- which(dt$site_id == site_id)
+  dt  <- dt[idx]
 
   if (nrow(dt) == 0L) {
     stop(sprintf("No ratings found for site '%s'.", site_id))
@@ -413,8 +415,8 @@ list_ratings <- function(root, site_id = NULL, tier = NULL) {
 
   reg <- data.table::fread(reg_path, showProgress = FALSE)
 
-  if (!is.null(site_id)) reg <- reg[reg$site_id %in% site_id]
-  if (!is.null(tier))    reg <- reg[reg$tier    %in% tier]
+  if (!is.null(site_id)) reg <- .filter_rows(reg, "site_id", site_id)
+  if (!is.null(tier))    reg <- .filter_rows(reg, "tier", tier)
 
   if (nrow(reg) == 0L) {
     parts <- c(

@@ -294,8 +294,8 @@ test_that("format_for_fmp: na_fill = 0 replaces NA in output", {
 test_that("format_for_fmp: NA written as blank by default", {
   flow  <- make_flow_15min_fmp(c(10, NA, 12))
   lines <- format_for_fmp(list(s = flow))
-  row6  <- strsplit(lines[6L], ",")[[1L]]
-  expect_equal(row6[2L], "")
+  # strsplit() drops a trailing empty field, so check the raw line: time, then blank
+  expect_match(lines[6L], "^[0-9.]+,$")
 })
 
 test_that("format_for_fmp: multi-site produces correct column count in Row 4", {

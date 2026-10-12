@@ -173,6 +173,8 @@ make_date_chunks <- function(from_date, to_date) {
 #' @param period Character. Temporal resolution stored in the Bronze `period`
 #'   column (disk mode).
 #' @param category Character. Bronze data category (disk mode).
+#' @param register_path Character or `NULL`. Provenance register CSV (disk
+#'   mode).
 #'
 #' @return A named list: `measure`, `data` (`data.table` or `NULL` in disk
 #'   mode), `file` (`NA` in memory mode; Bronze paths joined by `"; "` in disk
@@ -181,7 +183,7 @@ make_date_chunks <- function(from_date, to_date) {
 #' @noRd
 run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
                      site_id = NA_character_, period = NA_character_,
-                     category = "hydrometric") {
+                     category = "hydrometric", register_path = NULL) {
 
   chunk_list <- list()
   total_rows <- 0L
@@ -202,13 +204,13 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
                            observation_type = observation_type)
 
       if (nrow(dt) == 0) {
-        message("    No data for this chunk — skipping.")
+        message("    No data for this chunk - skipping.")
         next
       }
 
       if (nrow(dt) >= API_HARD_LIMIT) {
         warning(sprintf(
-          "Chunk %d/%d for '%s' hit the API row limit (%d). Data may be truncated — consider method = 'batch'.",
+          "Chunk %d/%d for '%s' hit the API row limit (%d). Data may be truncated - consider method = 'batch'.",
           j, nrow(chunks), mid, API_HARD_LIMIT
         ))
       }
@@ -235,7 +237,8 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
   if (output == "disk" && !is.null(combined) && nrow(combined) > 0L) {
     paths <- handle_output(combined, "disk", out_dir, param, mid,
                            site_id = site_id, period = period,
-                           category = category)
+                           category = category, register_path = register_path,
+                           method_of_receipt = "API pull (sync)")
     # One summary row per measure: collapse the per-year paths into one string
     dest <- paste(paths, collapse = "; ")
   }

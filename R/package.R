@@ -99,6 +99,28 @@ PARAMETER_CONFIG <- list(
 #' @noRd
 VALID_SOURCES <- c("HDE", "WISKI", "WISKI_ALL")
 
+
+# -- data.table non-standard evaluation ---------------------------------------
+#
+# Column names used inside data.table expressions (`dt[, x := ...]`,
+# `dt[cond]`, `.SD`/`..cols`). Declared so R CMD check does not report them as
+# undefined globals.
+utils::globalVariables(c(
+  ".", "..present_cols", "..val_cols", ".covered", ".series", ".snap_key",
+  ".snapped", "C", "Time.stamp", "a", "active", "b", "backfill_done",
+  "catchment", "category", "cum_x", "cum_y", "data_type", "dataset_id",
+  "date_added", "dateTime", "datetime_str", "doubtful", "ea_site_ref",
+  "easting", "file_path", "gauge_id", "hydro_year", "hydro_year_day", "label",
+  "lat", "limb_no", "live", "lon", "lower", "measure_notation", "measures",
+  "northing", "notation", "notes", "observed", "parameter", "pe_mm", "period",
+  "qc_flag", "qc_flagged_at", "qc_h_code", "qc_p_code", "qc_value",
+  "qc_y_code", "riverName", "RLOIid", "site_id", "snap_ts", "source_system",
+  "station_name", "station_number", "station.notation", "station.wiskiID",
+  "status", "temporal_resolution", "time_period_end", "time_period_start",
+  "timestamp", "ts_name", "unit", "upper", "value", "value_type", "wiskiID",
+  "x_val", "y_val", "year", "fitted", "date"
+))
+
 # -- Null-coalescing operator -------------------------------------------------
 
 #' Null-coalescing operator
@@ -113,6 +135,60 @@ VALID_SOURCES <- c("HDE", "WISKI", "WISKI_ALL")
 #' @return `x` if `!is.null(x)`, otherwise `y`.
 #' @noRd
 `%||%` <- function(x, y) if (!is.null(x)) x else y
+
+
+#' Convert a `start` / `end` bound to a UTC POSIXct instant
+#'
+#' Accepts `Date`, `POSIXct`, or character (`"YYYY-MM-DD"` or
+#' `"YYYY-MM-DD HH:MM[:SS]"`). A date-only `end` covers the whole of that day;
+#' a date-only `start` begins at midnight. A bound with a time of day is used
+#' exactly as given.
+#'
+#' @param x Date, POSIXct or character scalar.
+#' @param which `"start"` or `"end"`.
+#' @return A POSIXct scalar (UTC).
+#' @noRd
+.bound_posixct <- function(x, which = c("start", "end")) {
+  which <- match.arg(which)
+  if (inherits(x, "POSIXct")) {
+    attr(x, "tzone") <- "UTC"
+    return(x)
+  }
+  end_of_day <- 86400 - 0.001
+  if (inherits(x, "Date")) {
+    t <- as.POSIXct(format(x, "%Y-%m-%d"), tz = "UTC")
+    return(if (which == "end") t + end_of_day else t)
+  }
+  x <- sub("T", " ", as.character(x), fixed = TRUE)
+  if (grepl("\\d{1,2}:\\d{2}", x)) {
+    t <- as.POSIXct(x, tz = "UTC")
+    if (is.na(t)) stop(sprintf("Could not parse date-time bound '%s'.", x), call. = FALSE)
+    return(t)
+  }
+  d <- as.Date(x)
+  if (is.na(d)) stop(sprintf("Could not parse date bound '%s'.", x), call. = FALSE)
+  t <- as.POSIXct(format(d, "%Y-%m-%d"), tz = "UTC")
+  if (which == "end") t + end_of_day else t
+}
+
+
+#' Keep rows where a column is in a set of values
+#'
+#' Safe replacement for `dt[dt$col %in% values]` inside functions whose
+#' argument has the same name as a column. Within `[.data.table` a bare symbol
+#' in `i` resolves to the *column* before the function argument, so
+#' `reg[reg$category %in% category]` compares the column to itself and keeps
+#' every row. Here the comparison is evaluated outside the data.table scope.
+#'
+#' @param dt A `data.table`.
+#' @param col Character. Column name.
+#' @param values Values to keep.
+#' @return `dt` restricted to matching rows.
+#' @noRd
+.filter_rows <- function(dt, col, values) {
+  rows <- which(dt[[col]] %in% values)
+  dt[rows]
+}
 
 
 # -- S3 print method registration ---------------------------------------------

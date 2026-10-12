@@ -163,10 +163,12 @@
 #'   the `dataset_id` embedded in file names).
 #' @param data_type Character. Framework data type code: `"Q"` (flow),
 #'   `"H"` (stage/level), or `"P"` (rainfall).
-#' @param start Date or character (`"YYYY-MM-DD"`) or `NULL`. Earliest
-#'   timestamp to include. `NULL` reads from the beginning of the record.
-#' @param end Date or character (`"YYYY-MM-DD"`) or `NULL`. Latest
-#'   timestamp to include. `NULL` reads to the end of the record.
+#' @param start Date, POSIXct or character (`"YYYY-MM-DD"` or
+#'   `"YYYY-MM-DD HH:MM:SS"`) or `NULL`. Earliest timestamp to include (a bare
+#'   date means midnight UTC). `NULL` reads from the beginning of the record.
+#' @param end Date, POSIXct or character or `NULL`. Latest timestamp to include;
+#'   a bare date includes the whole of that day. `NULL` reads to the end of the
+#'   record.
 #' @param min_quality Integer or `NULL`. Maximum `qc_flag` value to include.
 #'   `1` = Good only; `2` = Good + Estimated; `3` = Good + Estimated +
 #'   Suspect; `NULL` = all flags including Rejected (4). Default `1L`.
@@ -201,6 +203,9 @@ read_silver <- function(root, gauge_id, data_type,
                         min_quality = 1L,
                         cols        = NULL) {
 
+  # Validate the data type before touching the file system
+  param <- .data_type_to_param(data_type)
+
   files <- .locate_silver_files(root, gauge_id, data_type, start, end)
 
   # Read and combine all relevant files
@@ -221,10 +226,14 @@ read_silver <- function(root, gauge_id, data_type,
                  gauge_id, data_type))
 
   # Post-filter by exact timestamp bounds (year-level filtering was approximate)
-  if (!is.null(start))
-    dt <- dt[timestamp >= as.POSIXct(as.Date(start), tz = "UTC")]
-  if (!is.null(end))
-    dt <- dt[timestamp <= as.POSIXct(as.Date(end),   tz = "UTC") + 86399L]
+  if (!is.null(start)) {
+    lo <- .bound_posixct(start, "start")
+    dt <- dt[dt$timestamp >= lo]
+  }
+  if (!is.null(end)) {
+    hi <- .bound_posixct(end, "end")
+    dt <- dt[dt$timestamp <= hi]
+  }
 
   # Quality filter
   if (!is.null(min_quality))
@@ -252,7 +261,6 @@ read_silver <- function(root, gauge_id, data_type,
   }
 
   # Resolve S7 class
-  param  <- .data_type_to_param(data_type)
   period <- .infer_period_silver(dt$timestamp)
   cls    <- HYDRO_CLASS[[param]][[period]]
 
@@ -370,9 +378,7 @@ read_silver_catchment <- function(root, catchment_id, data_type,
   if (!"site_id" %in% names(registry))
     stop("Registry must contain a 'site_id' column.")
 
-  gauge_ids <- registry[
-    registry[[catchment_col]] == catchment_id, site_id
-  ]
+  gauge_ids <- registry[["site_id"]][registry[[catchment_col]] == catchment_id]
 
   if (length(gauge_ids) == 0L)
     stop(sprintf("No gauges found in registry for catchment '%s'.",

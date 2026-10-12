@@ -228,6 +228,9 @@ apply_bronze_schema <- function(dt,
   if (!inherits(ts, "POSIXct")) {
     ts <- as.POSIXct(ts, tz = "UTC")
   }
+  # Integer-backed POSIXct (e.g. from seq(<POSIXct>, by = "15 min") in recent R)
+  # is written to Parquet by arrow as garbage timestamps; store as double.
+  if (typeof(ts) != "double") storage.mode(ts) <- "double"
 
   supplier_flag <- if (!is.null(supplier_flag_col) &&
                        supplier_flag_col %in% names(dt)) {
@@ -299,6 +302,23 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
 #' @noRd
 .write_parquet_atomic <- function(x, path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+
+  # arrow mis-writes integer-backed POSIXct columns (see apply_bronze_schema());
+  # convert any such column to double on a copy so the caller's data is untouched
+  if (is.data.frame(x)) {
+    bad <- names(x)[vapply(x, function(col) {
+      inherits(col, "POSIXct") && typeof(col) != "double"
+    }, logical(1L))]
+    if (length(bad) > 0L) {
+      x <- data.table::copy(data.table::as.data.table(x))
+      for (cn in bad) {
+        v <- x[[cn]]
+        storage.mode(v) <- "double"
+        data.table::set(x, j = cn, value = v)
+      }
+    }
+  }
+
   tmp <- paste0(path, ".tmp")
   arrow::write_parquet(x, tmp)
   if (!isTRUE(suppressWarnings(file.rename(tmp, path)))) {

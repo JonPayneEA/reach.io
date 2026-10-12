@@ -1415,7 +1415,7 @@ promote_to_silver <- function(bronze_data,
     out_path    <- silver_path(output_dir, category, data_type, dataset_id)
 
     dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
-    arrow::write_parquet(dt, out_path)
+    .write_parquet_atomic(dt, out_path)
     message(sprintf("  Silver file written: %s", out_path))
     invisible(dt)
   } else {

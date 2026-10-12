@@ -1,0 +1,211 @@
+# -- Tests for the download paths: parsing, lookup, sync + batch to disk -------
+
+uuid <- "c46d1245-e34a-4ea9-8c4c-410357e80e15"
+
+# -- .parse_reading_datetimes() -----------------------------------------------
+
+test_that(".parse_reading_datetimes handles ISO strings with T, Z and offsets", {
+  dt <- data.table::data.table(
+    date     = c("2022-01-01", "2022-01-01", "2022-01-01"),
+    dateTime = c("2022-01-01T00:15:00", "2022-01-01T00:30:00Z", "2022-01-01T00:45:00+00:00"),
+    value    = 1:3
+  )
+  .parse_reading_datetimes(dt)
+  expect_s3_class(dt$date, "Date")
+  expect_s3_class(dt$dateTime, "POSIXct")
+  expect_equal(attr(dt$dateTime, "tzone"), "UTC")
+  expect_equal(format(dt$dateTime, "%H:%M"), c("00:15", "00:30", "00:45"))
+})
+
+test_that(".parse_reading_datetimes forces UTC on POSIXct without shifting the instant", {
+  ts <- as.POSIXct("2022-06-01 12:00:00", tz = "Europe/London")  # 11:00 UTC
+  dt <- data.table::data.table(dateTime = ts, value = 1)
+  .parse_reading_datetimes(dt)
+  expect_equal(attr(dt$dateTime, "tzone"), "UTC")
+  expect_equal(as.numeric(dt$dateTime), as.numeric(ts))
+})
+
+
+# -- find_stations() ----------------------------------------------------------
+
+mock_stations <- function(items) {
+  testthat::local_mocked_bindings(
+    GET = function(...) structure(list(status_code = 200L), class = "response"),
+    stop_for_status = function(x, ...) invisible(x),
+    content = function(...) list(items = items),
+    .package = "httr",
+    .env = parent.frame()
+  )
+}
+
+test_that("find_stations returns one row per measure with parsed metadata", {
+  items <- data.frame(
+    label = "Test stn", notation = uuid, wiskiID = "SS92F014",
+    lat = 51, long = -1, easting = 1, northing = 2, riverName = "Exe",
+    stringsAsFactors = FALSE
+  )
+  items$measures <- list(data.frame(
+    `@id` = c(sprintf("http://x/%s-flow-i-900-m3s-qualified", uuid),
+              sprintf("http://x/%s-rainfall-t-86400-mm-qualified", uuid),
+              sprintf("http://x/%s-temperature-i-900-c-qualified", uuid)),
+    check.names = FALSE
+  ))
+  mock_stations(items)
+
+  res <- find_stations(wiski_ids = "SS92F014")
+  expect_equal(nrow(res), 2L)                      # temperature is filtered out
+  expect_equal(res$parameter, c("flow", "rainfall"))
+  expect_equal(res$value_type, c("instantaneous", "total"))
+  expect_equal(res$period, c("15min", "daily"))
+  expect_equal(res$measure_notation[1], sprintf("%s-flow-i-900-m3s-qualified", uuid))
+  expect_identical(res$station.notation, res$measure_notation)   # deprecated alias
+})
+
+test_that("find_stations copes with a station that has no measures", {
+  items <- data.frame(
+    label = c("A", "B"), notation = c(uuid, "other-station"),
+    wiskiID = c("A1", "B1"), lat = 1, long = 1, easting = 1, northing = 1,
+    riverName = "R", stringsAsFactors = FALSE
+  )
+  items$measures <- list(
+    data.frame(`@id` = sprintf("http://x/%s-flow-i-900-m3s-qualified", uuid),
+               check.names = FALSE),
+    data.frame()
+  )
+  mock_stations(items)
+  res <- find_stations(wiski_ids = "A1")
+  expect_equal(nrow(res), 1L)
+  expect_equal(res$wiskiID, "A1")
+})
+
+test_that(".parse_measure_notation gives NA (with a warning) for unexpected IDs", {
+  expect_warning(
+    out <- .parse_measure_notation(c(sprintf("%s-flow-m-86400-m3s-qualified", uuid), "weird")),
+    "did not match"
+  )
+  expect_equal(out$parameter, c("flow", NA))
+  expect_equal(out$period, c("daily", NA))
+})
+
+
+# -- download_hydrology(): disk output ---------------------------------------
+
+fake_station_table <- function() {
+  data.table::data.table(
+    label = "Test", notation = "stn-suid", wiskiID = "SS92F014",
+    measure_notation = sprintf("%s-rainfall-t-900-mm-qualified", uuid),
+    station.notation = sprintf("%s-rainfall-t-900-mm-qualified", uuid),
+    parameter = "rainfall", value_type = "total", period = "15min"
+  )
+}
+
+fake_readings <- function(measure_notation, from_date, to_date, ...) {
+  d <- data.table::data.table(
+    dateTime = c("2022-12-31T23:45:00", "2023-01-01T00:00:00"),
+    date = c("2022-12-31", "2023-01-01"),
+    value = c(0.2, 0.4), quality = "Good", completeness = "Complete"
+  )
+  d[, measure_notation := measure_notation]
+  .parse_reading_datetimes(d)
+  d
+}
+
+test_that("download_hydrology (sync, disk) writes Bronze Parquet by observation year", {
+  root <- withr::local_tempdir()
+  testthat::local_mocked_bindings(
+    find_stations = function(...) fake_station_table(),
+    fetch_readings = fake_readings
+  )
+  res <- suppressMessages(download_hydrology(
+    parameters = "rainfall", from_date = "2022-06-01", to_date = "2023-06-01",
+    method = "sync", output = "disk", out_dir = root,
+    period_name = "15min", wiski_ids = "SS92F014"
+  ))
+
+  expect_equal(nrow(res), 1L)                       # one summary row per measure
+  expect_true(res$ok)
+  expect_match(res$file, "/2022/.*; .*/2023/")
+  expect_true(file.exists(file.path(root, "download_summary.csv")))
+
+  obj <- read_bronze(root, "SS92F014", "P")
+  expect_true(S7::S7_inherits(obj, Rainfall_15min))
+  expect_equal(obj@readings$value, c(0.2, 0.4))
+  # No stray CSV tree from the old behaviour
+  expect_false(dir.exists(file.path(root, "rainfall")))
+
+  # One provenance record per year file, in the default register location
+  reg <- data.table::fread(file.path(root, "register", "hydrometric_data_register.csv"))
+  expect_equal(nrow(reg), 2L)
+  expect_equal(unique(reg$site_id), "SS92F014")
+  expect_equal(unique(reg$method_of_receipt), "API pull (sync)")
+  expect_equal(unique(reg$temporal_resolution), "15min")
+})
+
+test_that("download_hydrology rejects an invalid category", {
+  expect_error(
+    download_hydrology(parameters = "rainfall", output = "disk", out_dir = tempdir(),
+                       category = "nonsense", wiski_ids = "x"),
+    "category"
+  )
+})
+
+
+# -- run_batch() --------------------------------------------------------------
+
+batch_csv <- c("dateTime,date,value,quality,completeness",
+               "2022-12-31T23:45:00,2022-12-31,0.2,Good,Complete",
+               "2023-01-01T00:00:00,2023-01-01,0.4,Good,Complete")
+
+mock_batch <- function(csv = batch_csv, status = 200L, env = parent.frame()) {
+  testthat::local_mocked_bindings(
+    submit_batch = function(...) list(status_url = "https://x/results/job.csv", measure = "m"),
+    .package = "reach.io", .env = env
+  )
+  testthat::local_mocked_bindings(
+    GET = function(url, config = NULL, ...) {
+      if (!is.null(config$output$path)) writeLines(csv, config$output$path)
+      structure(list(status_code = status, url = url), class = "response")
+    },
+    stop_for_status = function(x, ...) {
+      if (x$status_code >= 400) stop(sprintf("HTTP %d", x$status_code), call. = FALSE)
+      invisible(x)
+    },
+    .package = "httr", .env = env
+  )
+}
+
+test_that("run_batch (memory) parses dates like the sync path", {
+  mock_batch()
+  res <- suppressMessages(run_batch("m", "2022-01-01", "2023-01-01", "memory",
+                                    NULL, "rainfall"))
+  expect_true(res$ok)
+  expect_equal(res$rows, 2L)
+  expect_s3_class(res$data$dateTime, "POSIXct")
+  expect_s3_class(res$data$date, "Date")
+  expect_equal(res$data$measure_notation, rep("m", 2))
+})
+
+test_that("run_batch (disk) writes Bronze Parquet, not CSV", {
+  root <- withr::local_tempdir()
+  mock_batch()
+  register <- file.path(root, "register.csv")
+  res <- suppressMessages(run_batch("m", "2022-01-01", "2023-01-01", "disk", root,
+                                    "rainfall", site_id = "SS92F014", period = "15min",
+                                    register_path = register))
+  expect_true(res$ok)
+  expect_equal(nrow(data.table::fread(register)), 2L)
+  expect_match(res$file, "/bronze/hydrometric/EA/P/2022/.*; .*/2023/")
+  # The only CSV is the provenance register - no per-measure CSVs any more
+  expect_equal(list.files(root, pattern = "\\.csv$", recursive = TRUE), "register.csv")
+  expect_equal(nrow(read_bronze(root, "SS92F014", "P")@readings), 2L)
+})
+
+test_that("run_batch reports an HTTP error instead of saving it as data", {
+  root <- withr::local_tempdir()
+  mock_batch(csv = "<html>Forbidden</html>", status = 403L)
+  res <- suppressMessages(run_batch("m", "2022-01-01", "2023-01-01", "disk", root,
+                                    "rainfall", site_id = "S"))
+  expect_false(res$ok)
+  expect_true(is.na(res$file))
+  expect_length(list.files(root, recursive = TRUE), 0L)
+})

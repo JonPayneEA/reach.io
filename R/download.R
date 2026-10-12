@@ -134,6 +134,7 @@ download_hydrology <- function(
     output           = c("memory", "disk"),
     out_dir          = NULL,
     category         = "hydrometric",
+    register_path    = NULL,
     period_name      = NULL,
     value_type       = NULL,
     observation_type = NULL,
@@ -152,6 +153,9 @@ download_hydrology <- function(
   }
   if (!category %in% VALID_CATEGORIES) {
     stop("`category` must be one of: ", paste(VALID_CATEGORIES, collapse = ", "))
+  }
+  if (output == "disk" && is.null(register_path)) {
+    register_path <- file.path(out_dir, "register", "hydrometric_data_register.csv")
   }
 
   # ── Resolve station identifiers ───────────────────────────────────────────
@@ -248,7 +252,7 @@ download_hydrology <- function(
                                period_name = p_period,
                                value_type  = p_valtype)
       if (nrow(measures) == 0) {
-        message("  No measures — skipping.")
+        message("  No measures - skipping.")
         all_summaries[[param]] <- data.table::data.table(
           parameter = param, measure = NA_character_,
           file = NA_character_, rows = 0L, ok = FALSE
@@ -281,11 +285,11 @@ download_hydrology <- function(
       result <- if (method == "sync") {
         run_sync(mid, chunks, output, out_dir, param, observation_type,
                  site_id = site_id_val, period = p_period,
-                 category = category)
+                 category = category, register_path = register_path)
       } else {
         run_batch(mid, from_date, to_date, output, out_dir, param, max_wait_s,
                   site_id = site_id_val, period = p_period,
-                  category = category)
+                  category = category, register_path = register_path)
       }
 
       if (output == "memory" &&
@@ -315,7 +319,7 @@ download_hydrology <- function(
 
       if (is.null(constructor)) {
         warning(sprintf(
-          "No S7 class for parameter='%s' period='%s' — returning plain data.table.",
+          "No S7 class for parameter='%s' period='%s' - returning plain data.table.",
           param, period_key
         ))
         param_data[[param]] <- combined_dt

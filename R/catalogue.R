@@ -146,11 +146,11 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
 
   # Apply caller filters
   if (!is.null(category)  && "category"       %in% names(reg))
-    reg <- reg[reg$category       %in% category ]
+    reg <- .filter_rows(reg, "category", category)
   if (!is.null(supplier)  && "supplier_code"   %in% names(reg))
-    reg <- reg[reg$supplier_code  %in% supplier ]
+    reg <- .filter_rows(reg, "supplier_code", supplier)
   if (!is.null(data_type) && "data_type"       %in% names(reg))
-    reg <- reg[reg$data_type      %in% data_type]
+    reg <- .filter_rows(reg, "data_type", data_type)
 
   if (nrow(reg) == 0L) {
     message("No Bronze records match the specified filters.")
@@ -238,9 +238,9 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
     reg[, category := .category_from_path(file_path, root)]
 
   # Filters
-  if (!is.null(site_id)   && "site_id"   %in% names(reg)) reg <- reg[reg$site_id   %in% site_id  ]
-  if (!is.null(category)  && "category"  %in% names(reg)) reg <- reg[reg$category  %in% category ]
-  if (!is.null(data_type) && "data_type" %in% names(reg)) reg <- reg[reg$data_type %in% data_type]
+  if (!is.null(site_id)   && "site_id"   %in% names(reg)) reg <- .filter_rows(reg, "site_id", site_id)
+  if (!is.null(category)  && "category"  %in% names(reg)) reg <- .filter_rows(reg, "category", category)
+  if (!is.null(data_type) && "data_type" %in% names(reg)) reg <- .filter_rows(reg, "data_type", data_type)
 
   if (nrow(reg) == 0L) {
     message("No records match the specified filters.")
@@ -359,7 +359,8 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
     if (file.exists(reg_path)) {
       reg <- data.table::fread(reg_path, showProgress = FALSE)
       if ("tier" %in% names(reg)) reg <- reg[reg$tier == "Bronze"]
-      rows <- reg[reg$site_id == site_id & reg$data_type == data_type]
+      idx  <- which(reg$site_id == site_id & reg$data_type == data_type)
+      rows <- reg[idx]
       if (nrow(rows) > 0L && "temporal_resolution" %in% names(rows)) {
         s <- .interval_seconds(rows$temporal_resolution[1L])
       }
@@ -525,7 +526,7 @@ list_silver_gauges <- function(root, data_type = NULL) {
   }
 
   if (!is.null(data_type))
-    parsed <- parsed[parsed$data_type %in% data_type]
+    parsed <- .filter_rows(parsed, "data_type", data_type)
 
   if (nrow(parsed) == 0L) {
     message("No Silver files match the specified data_type filter.")

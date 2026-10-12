@@ -131,6 +131,19 @@ FlodeHydroData <- S7::new_class(
 )
 
 
+# Coerce constructor input to a data.table, failing early (and clearly) for
+# anything that is not tabular. Doing this before any metadata is computed
+# means a bad `readings` produces this message rather than an unrelated
+# "n_rows must be <integer>" error from the S7 property checks.
+#' @noRd
+.as_readings_dt <- function(readings) {
+  if (!is.data.frame(readings)) {
+    stop("`readings` must be a data.table (or data.frame).", call. = FALSE)
+  }
+  data.table::as.data.table(readings)
+}
+
+
 # -- Internal constructor helper ----------------------------------------------
 #
 # All six classes share identical constructor logic. This helper avoids
@@ -145,9 +158,10 @@ FlodeHydroData <- S7::new_class(
     constructor = function(readings,
                            from_date = NA_character_,
                            to_date   = NA_character_) {
+      readings <- .as_readings_dt(readings)
       S7::new_object(
         S7::S7_object(),
-        readings      = data.table::as.data.table(readings),
+        readings      = readings,
         parameter     = parameter,
         period_name   = period_name_fixed,
         from_date     = from_date,
@@ -472,7 +486,7 @@ FlodePotEvapData <- S7::new_class(
                            source_name = NA_character_,
                            from_date   = NA_character_,
                            to_date     = NA_character_) {
-      dt <- data.table::as.data.table(readings)
+      dt <- .as_readings_dt(readings)
       S7::new_object(
         S7::S7_object(),
         readings    = dt,
@@ -559,7 +573,7 @@ FlodePotEvap_15min <- S7::new_class(
                          from_date     = NA_character_,
                          to_date       = NA_character_,
                          disagg_method = NA_character_) {
-    dt <- data.table::as.data.table(readings)
+    dt <- .as_readings_dt(readings)
     S7::new_object(
       S7::S7_object(),
       readings      = dt,

@@ -110,7 +110,7 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
                   any(!is.na(dt[["dateTime"]]))
   ts_col <- if (has_datetime) "dateTime" else {
     warning(sprintf(
-      "[HDE] No valid dateTime in response for %s — falling back to date-only timestamps.",
+      "[HDE] No valid dateTime in response for %s - falling back to date-only timestamps.",
       gauge_id
     ))
     "date"

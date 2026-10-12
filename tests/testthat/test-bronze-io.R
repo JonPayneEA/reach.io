@@ -177,3 +177,64 @@ test_that("handle_output honours supplier_code and category", {
                          supplier_code = "WISKI", category = "radarH19")
   expect_match(paths, "/bronze/radarH19/WISKI/Q/2023/", fixed = FALSE)
 })
+
+
+# -- integer-backed POSIXct ---------------------------------------------------
+#
+# In recent R, seq(<POSIXct>, by = "15 min") returns integer-backed values and
+# arrow writes those to Parquet as garbage. The writers must normalise them.
+
+int_posixct <- function() {
+  ts <- seq(as.POSIXct("2024-01-01", tz = "UTC"), by = "15 min", length.out = 4)
+  storage.mode(ts) <- "integer"
+  ts
+}
+
+test_that("apply_bronze_schema stores timestamps as double", {
+  out <- apply_bronze_schema(
+    data.table::data.table(dateTime = int_posixct(), value = 1:4),
+    dataset_id = "EA_S1_P_20260101", site_id = "S1", data_type = "P"
+  )
+  expect_identical(typeof(out$timestamp), "double")
+})
+
+test_that(".write_parquet_atomic round-trips integer-backed POSIXct correctly", {
+  p  <- file.path(withr::local_tempdir(), "x.parquet")
+  ts <- int_posixct()
+  dt <- data.table::data.table(timestamp = ts, v = 1:4)
+  .write_parquet_atomic(dt, p)
+  back <- arrow::read_parquet(p)
+  expect_equal(as.numeric(back$timestamp), as.numeric(ts))
+  expect_identical(typeof(dt$timestamp), "integer")   # caller's data untouched
+})
+
+test_that("read_bronze validates data_type before looking at the file system", {
+  expect_error(read_bronze(tempfile(), "S1", "Z"), "No parameter mapping")
+})
+
+
+# -- start / end bounds -------------------------------------------------------
+
+test_that(".bound_posixct handles dates, datetimes and POSIXct", {
+  expect_equal(.bound_posixct("2023-01-02", "start"), as.POSIXct("2023-01-02", tz = "UTC"))
+  expect_equal(as.numeric(.bound_posixct("2023-01-02", "end")),
+               as.numeric(as.POSIXct("2023-01-03", tz = "UTC")) - 0.001)
+  expect_equal(.bound_posixct("2023-01-02 12:30:00", "start"),
+               as.POSIXct("2023-01-02 12:30:00", tz = "UTC"))
+  expect_equal(.bound_posixct("2023-01-02T12:30:00", "end"),
+               as.POSIXct("2023-01-02 12:30:00", tz = "UTC"))
+  expect_equal(.bound_posixct(as.Date("2023-01-02"), "start"),
+               as.POSIXct("2023-01-02", tz = "UTC"))
+  expect_error(.bound_posixct("not a date", "start"))
+})
+
+test_that("read_bronze honours a time of day in start and end", {
+  root <- withr::local_tempdir()
+  write_fixture(root, bronze_fixture(c("2023-01-01 06:00:00", "2023-01-01 12:00:00",
+                                       "2023-01-01 18:00:00")))
+  obj <- read_bronze(root, "S1", "P", start = "2023-01-01 12:00:00",
+                     end = "2023-01-01 12:00:00")
+  expect_equal(format(obj@readings$dateTime, "%H:%M"), "12:00")
+  obj <- read_bronze(root, "S1", "P", start = "2023-01-01 07:00", end = "2023-01-01")
+  expect_equal(format(obj@readings$dateTime, "%H:%M"), c("12:00", "18:00"))
+})

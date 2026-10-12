@@ -28,6 +28,9 @@ It provides three groups of tools:
 install.packages(c("httr", "data.table", "arrow",
                    "future", "future.apply", "S7"))
 
+# Optional: only needed for plotting helpers such as double_mass_plot()
+install.packages("ggplot2")
+
 # Install reach.io from source
 devtools::install("path/to/reach.io")
 
@@ -50,16 +53,15 @@ reach.io/
 │   ├── download.R     # download_hydrology()
 │   ├── sync.R         # fetch_readings(), make_date_chunks(), run_sync()
 │   ├── batch.R        # submit_batch(), poll_batch(), run_batch()
-│   ├── output.R       # handle_output()
+│   ├── output.R       # handle_output() - Bronze Parquet writer for downloads
+│   ├── read_bronze.R  # read_bronze(), read_bronze_multi(), read_bronze_catchment()
 │   ├── registry.R     # build_gauge_registry()
 │   ├── router.R       # fetch_from_hde/wiski/wiski_all(), route_gauge()
 │   ├── ingest_all.R   # ingest_all_file(), fetch_from_wiski_all()
+│   ├── orchestration.R# shared helpers for backfill / incremental
 │   ├── backfill.R     # run_backfill()
 │   └── incremental.R  # run_incremental()
-└── tests/
-    ├── test-core.R        # API download tool tests
-    ├── test-pipeline.R    # pipeline tool tests
-    └── test-incremental.R # incremental sync tests
+└── tests/testthat/    # test-*.R plus helper-bronze.R (shared fixtures)
 ```
 
 ---
@@ -94,8 +96,10 @@ stns <- find_stations(lat = 51.5, long = -1.8, dist = 10)
 
 `find_stations()` returns a `data.table` with columns `label`, `notation`,
 `wiskiID`, `RLOIid`, `lat`, `long`, `easting`, `northing`, `riverName`,
-`station.notation`, `parameter`, `value_type`, and `period`. One row per
+`measure_notation`, `parameter`, `value_type`, and `period`. One row per
 measure - a station with flow and level measures appears twice.
+(`station.notation` is kept as a deprecated alias of `measure_notation`: it
+always held the *measure* ID, not the station's.)
 
 ```r
 # Unnest to see all measures across returned stations
@@ -133,7 +137,7 @@ identifier and a date range.
 | Output | Returns |
 |--------|---------|
 | `"memory"` (default) | Named list of typed S7 objects (`FlodeFlow_15min` etc.) plus a summary. |
-| `"disk"` | One CSV per measure under `out_dir/<parameter>/`. |
+| `"disk"` | Bronze-tier Parquet under `out_dir/bronze/<category>/EA/<type>/<YYYY>/` (one file per measure per year) plus a provenance record per file in `out_dir/register/`. Read back with `read_bronze()`. Same layout for both methods. |
 
 ```r
 # In-memory - returns typed S7 objects
@@ -156,7 +160,7 @@ download_hydrology(
   from_date  = "2022-01-01",
   to_date    = "2022-12-31",
   output     = "disk",
-  out_dir    = "data/downloads",
+  out_dir    = "data/hydrometric",     # the store root (contains bronze/)
   rloi_ids   = c("5022", "7001")
 )
 
@@ -167,7 +171,7 @@ download_hydrology(
   to_date    = "2023-12-31",
   method     = "batch",
   output     = "disk",
-  out_dir    = "data/downloads",
+  out_dir    = "data/hydrometric",
   wiski_ids  = stns$wiskiID
 )
 ```
@@ -541,27 +545,44 @@ log_dt <- run_backfill(
 )
 ```
 
-Log columns: `gauge_id`, `status`, `rows`, `elapsed_s`, `error`. Status values
-are `SUCCESS`, `EMPTY`, or `FAILED`. A steward warning is raised if more than
-5% of gauges fail.
+Log columns: `gauge_id`, `data_type`, `status`, `rows`, `elapsed_s`, `error`.
+Status values are `SUCCESS`, `EMPTY` (the source genuinely returned nothing), or
+`FAILED` (the fetch raised an error). A steward warning is raised if more than
+5% of gauges fail. Gauges are processed in batches and the log, register and
+registry (`backfill_done`) are updated after each batch, so an interrupted run
+keeps its progress; `failed_only = TRUE` re-runs failures and merges the
+results into the existing log.
+
+> **EA fair use.** The Hydrology API asks for one request at a time. The default
+> `n_workers` is therefore capped at 4; raise it only for sources that are not
+> rate limited (for example local WISKI `.all` files).
 
 **Reading Bronze output:**
 
-```r
-# Read a dataset
-dt <- data.table::as.data.table(
-  arrow::collect(
-    arrow::open_dataset(
-      "data/hydrometric/bronze/hydrometric/EA/Q/2024"
-    )
-  )
-)
+Bronze is partitioned by *observation year* - one Parquet file per series per
+calendar year: `bronze/<category>/<supplier>/<data_type>/<YYYY>/<dataset_id>.parquet`.
+It is append-only, so re-ingesting a series adds files rather than rewriting
+them. `read_bronze()` finds the files, resolves any overlap (the most recently
+received row wins for each timestamp) and returns the same typed S7 object that
+`download_hydrology()` produces:
 
-# Deduplicate on timestamp (covers any overlap between backfill and
-# incremental files)
-data.table::setkeyv(dt, c("dataset_id", "timestamp"))
-dt <- unique(dt, by = c("dataset_id", "timestamp"))
+```r
+obj <- read_bronze("data/hydrometric", "SS92F014", "P",
+                   start = "2023-01-01", end = "2023-12-31")
+obj@readings
+
+# Several gauges, or every gauge in a catchment
+objs <- read_bronze_multi("data/hydrometric", c("SS92F014", "SS92F015"), "P")
+objs <- read_bronze_catchment("data/hydrometric", "Thames_Upper", "P",
+                              registry = registry_dt)
+
+# WISKI series: pick the supplier, and a trace where a station has several
+obj <- read_bronze("data/hydrometric", "3401TH", "H",
+                   supplier_code = "WISKI", trace = "sg_ds")
 ```
+
+Stores written by older versions (one file per ingest, filed under the ingest
+year) should be re-ingested so date-range reads can find every file.
 
 ### 7. Run incremental syncs
 
@@ -626,6 +647,7 @@ automated.
 | `future.apply` | `future_lapply()` for backfill and incremental sync |
 | `parallel` | `detectCores()` default for `n_workers` |
 | `S7` | Typed classes for downloaded hydrometric data |
+| `ggplot2` *(suggested)* | Optional plots (`double_mass_plot()`, `compare_pe_sine(plot = TRUE)`) |
 
 Dependency versions are pinned in `renv.lock`. Run `renv::restore()` to
 install the exact versions used during development.

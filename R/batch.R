@@ -116,6 +116,8 @@ poll_batch <- function(status_url, max_wait_s = 600, poll_interval_s = 15) {
 #' @param period Character. Temporal resolution stored in the Bronze `period`
 #'   column (disk mode).
 #' @param category Character. Bronze data category (disk mode).
+#' @param register_path Character or `NULL`. Provenance register CSV (disk
+#'   mode).
 #'
 #' @return A named list: `measure`, `data` (`data.table` in memory mode,
 #'   `NULL` in disk mode), `file` (`NA` in memory mode; Bronze paths joined by
@@ -124,7 +126,8 @@ poll_batch <- function(status_url, max_wait_s = 600, poll_interval_s = 15) {
 #' @noRd
 run_batch <- function(mid, from_date, to_date, output, out_dir, param,
                       max_wait_s = 600, site_id = NA_character_,
-                      period = NA_character_, category = "hydrometric") {
+                      period = NA_character_, category = "hydrometric",
+                      register_path = NULL) {
 
   tryCatch({
 
@@ -135,7 +138,7 @@ run_batch <- function(mid, from_date, to_date, output, out_dir, param,
     # S3 CSV URL — no polling needed in that case
     if (grepl("\\.csv", status_url, ignore.case = TRUE)) {
       dl_url <- status_url
-      message("  Cached — skipping poll")
+      message("  Cached - skipping poll")
     } else {
       dl_url <- poll_batch(status_url, max_wait_s = max_wait_s)
     }
@@ -153,13 +156,14 @@ run_batch <- function(mid, from_date, to_date, output, out_dir, param,
 
     if (output == "disk") {
       if (nrow(dt) == 0L) {
-        message("  No data returned — nothing written.")
+        message("  No data returned - nothing written.")
         return(list(measure = mid, data = NULL, file = NA_character_,
                     rows = 0L, ok = TRUE))
       }
       paths <- handle_output(dt, "disk", out_dir, param, mid,
                              site_id = site_id, period = period,
-                             category = category)
+                             category = category, register_path = register_path,
+                             method_of_receipt = "API pull (batch)")
       message("  Saved -> ", paste(paths, collapse = "; "))
       list(measure = mid, data = NULL, file = paste(paths, collapse = "; "),
            rows = nrow(dt), ok = TRUE)

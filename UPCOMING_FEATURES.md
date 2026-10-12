@@ -369,6 +369,11 @@ regionalise_pe_sine(
 ### Silver & Gold Data Retrieval
 > `read_silver.R` / `read_gold.R`
 
+> **Status:** `read_bronze()` / `read_bronze_multi()` / `read_bronze_catchment()`
+> and `read_silver()` / `read_silver_multi()` / `read_silver_catchment()` are
+> implemented. `read_gold()` remains to do. QC logic is moving to `reach.validate`;
+> reading Silver output stays here (input/output).
+
 Currently there is no way to read data back out of the Silver or Gold stores. The Bronze tier has `download_hydrology()` for fetching from external APIs but nothing equivalent for reading QC'd or derived data from the local store. Retrieval functions should follow the same S7 class conventions as the rest of the package and support efficient lazy reads via Arrow for large date ranges.
 
 #### Silver Retrieval
