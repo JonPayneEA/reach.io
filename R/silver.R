@@ -466,6 +466,10 @@ qc_h_flatline <- function(value, flatline_min_run = 4L) {
 #'   Default 4.
 #' @return Logical vector; \code{TRUE} where sustained inconsistency is
 #'   detected.
+#' @note Quality control is outside the scope of `reach.io` (input/output
+#'   only). This function will move to the `reach.validate` package in a
+#'   future release and be deprecated here once that package is available.
+#'
 #' @export
 qc_h_stage_flow_consistency <- function(stage, flow,
                                          consistency_window = 4L) {
@@ -694,6 +698,10 @@ qc_p_daily_cap <- function(value,
 #' @param dry_run_min_steps Integer. Minimum consecutive zero-rainfall steps
 #'   during a wet period to trigger the flag. Default 12 (three hours).
 #' @return Logical vector; \code{TRUE} throughout each flagged dry run.
+#' @note Quality control is outside the scope of `reach.io` (input/output
+#'   only). This function will move to the `reach.validate` package in a
+#'   future release and be deprecated here once that package is available.
+#'
 #' @export
 qc_p_dry_run <- function(value, wet_period_mask, dry_run_min_steps = 12L) {
   n <- length(value)
@@ -775,6 +783,10 @@ qc_p_reset <- function(value,
 #' @param isolation_fraction Numeric (0–1). Fraction of neighbours that must
 #'   report zero for the isolation check to fire. Default 0.8.
 #' @return Logical vector; \code{TRUE} where isolated rainfall is detected.
+#' @note Quality control is outside the scope of `reach.io` (input/output
+#'   only). This function will move to the `reach.validate` package in a
+#'   future release and be deprecated here once that package is available.
+#'
 #' @export
 qc_p_temporal_consistency <- function(value, neighbours,
                                        isolation_threshold = 0.2,
@@ -984,9 +996,16 @@ y_to_qc_flag <- function(y) {
 #' [promote_to_silver()], but can also be used standalone when cleaning data
 #' before ad-hoc analysis.
 #'
+#' Only 15-minute data is touched. If \code{dt} has a \code{period} column
+#' (as Bronze data does), rows whose \code{period} is non-missing and not
+#' \code{"15min"} are left exactly as they are, so hourly, daily, or
+#' irregular (e.g. tipping-bucket) series are never snapped or dropped. Without
+#' a \code{period} column every row is treated as 15-minute data.
+#'
 #' @param dt A \code{data.table} with at least columns \code{site_id}
-#'   (character) and \code{timestamp} (POSIXct, UTC).
-#' @return The modified \code{data.table} with a \code{.snapped} logical column
+#'   (character) and \code{timestamp} (POSIXct, UTC), and optionally
+#'   \code{period}. The input is not modified.
+#' @return A new \code{data.table} with a \code{.snapped} logical column
 #'   appended (\code{TRUE} for rows whose timestamp was adjusted).
 #'
 #' @export
@@ -999,9 +1018,15 @@ y_to_qc_flag <- function(y) {
 #' )
 #' snap_offgrid_timestamps(dt)
 snap_offgrid_timestamps <- function(dt) {
+  dt            <- data.table::copy(dt)
   step_secs     <- 15L * 60L
-  mins          <- as.integer(format(dt[["timestamp"]], "%M"))
+  mins          <- as.integer(format(dt[["timestamp"]], "%M", tz = "UTC"))
   off_grid_mask <- !(mins %in% c(0L, 15L, 30L, 45L))
+
+  # Only 15-min data is resolved; other (or unknown-irregular) periods are exempt
+  if ("period" %in% names(dt)) {
+    off_grid_mask <- off_grid_mask & (is.na(dt[["period"]]) | dt[["period"]] == "15min")
+  }
 
   if (!any(off_grid_mask)) {
     dt[, .snapped := FALSE]
@@ -1164,6 +1189,10 @@ silver_path <- function(output_dir, category, data_type, dataset_id) {
 #'   `write_output = TRUE`. When `annotate_gaps = TRUE`, the result carries an
 #'   attribute `"gap_counts"`: a named integer vector of missing-timestep
 #'   counts keyed by `site_id`.
+#'
+#' @note Quality control is outside the scope of `reach.io` (input/output
+#'   only). This function will move to the `reach.validate` package in a
+#'   future release and be deprecated here once that package is available.
 #'
 #' @export
 #'

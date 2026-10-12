@@ -11,7 +11,11 @@
 #
 # Design notes:
 #   - Files are filtered at the year-directory level before reading,
-#     reducing I/O on large stores.
+#     reducing I/O on large stores. Year directories are *observation*
+#     years (see .write_bronze_by_year() in schema.R).
+#   - Bronze is append-only. Re-ingesting a series adds a new file; the
+#     overlap is resolved here, keeping the most recently received row for
+#     each (series, timestamp).
 #   - Period is read from the `period` column stored in Bronze schema;
 #     falls back to inference from median timestamp gap.
 #   - All helpers are self-contained — no dependency on read_silver.R.
@@ -69,21 +73,38 @@
   )
 }
 
+#' Escape regex metacharacters in a literal string
 #' @noRd
-.locate_bronze_files <- function(root, gauge_id, data_type,
-                                  supplier_code, category,
-                                  start = NULL, end = NULL) {
+.re_escape <- function(x) gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", x)
 
-  bronze_root <- file.path(root, "bronze")
-  if (!dir.exists(bronze_root))
-    stop(sprintf("No Bronze store found at: %s", bronze_root))
+#' Received date (from the 8-digit suffix) of Bronze file names
+#' @noRd
+.bronze_received_date <- function(files) {
+  as.Date(sub(".*_([0-9]{8})\\.parquet$", "\\1", basename(files)), "%Y%m%d")
+}
 
-  dt_root <- file.path(bronze_root, category, supplier_code, data_type)
-  if (!dir.exists(dt_root))
-    stop(sprintf(
-      "No Bronze data found for category='%s', supplier='%s', data_type='%s'.\nExpected: %s",
-      category, supplier_code, data_type, dt_root
-    ))
+#' Trace code ("" when absent) embedded in Bronze file names
+#'
+#' File names are `<supplier>_<gauge>_<type>[_<trace>]_<YYYYMMDD>.parquet`.
+#' @noRd
+.bronze_file_trace <- function(files, gauge_id, data_type, supplier_code) {
+  base   <- sub("_[0-9]{8}$", "", sub("\\.parquet$", "", basename(files)))
+  prefix <- paste(supplier_code, gauge_id, data_type, sep = "_")
+  substring(base, nchar(prefix) + 2L)
+}
+
+#' List Bronze files for a gauge (never errors; empty vector if none)
+#'
+#' Files are returned oldest-received first, so later rows win when duplicates
+#' are resolved.
+#' @noRd
+.list_bronze_files <- function(root, gauge_id, data_type,
+                               supplier_code = "EA",
+                               category      = "hydrometric",
+                               start = NULL, end = NULL) {
+
+  dt_root <- file.path(root, "bronze", category, supplier_code, data_type)
+  if (!dir.exists(dt_root)) return(character(0))
 
   year_dirs <- list.dirs(dt_root, recursive = FALSE, full.names = TRUE)
 
@@ -94,22 +115,38 @@
     hi    <- if (!is.null(end))   as.integer(format(as.Date(end),   "%Y")) else  Inf
     year_dirs <- year_dirs[!is.na(years) & years >= lo & years <= hi]
   }
+  if (length(year_dirs) == 0L) return(character(0))
 
-  if (length(year_dirs) == 0L)
+  pat <- sprintf("^%s_%s_%s(_.+)?_[0-9]{8}\\.parquet$",
+                 .re_escape(supplier_code), .re_escape(gauge_id),
+                 .re_escape(data_type))
+  files <- list.files(year_dirs, pattern = pat, full.names = TRUE)
+  files[order(.bronze_received_date(files), files)]
+}
+
+#' @noRd
+.locate_bronze_files <- function(root, gauge_id, data_type,
+                                  supplier_code, category,
+                                  start = NULL, end = NULL) {
+
+  if (!dir.exists(file.path(root, "bronze")))
+    stop(sprintf("No Bronze store found at: %s", file.path(root, "bronze")))
+
+  dt_root <- file.path(root, "bronze", category, supplier_code, data_type)
+  if (!dir.exists(dt_root))
     stop(sprintf(
-      "No Bronze files for gauge '%s' / '%s' in the requested date range.",
-      gauge_id, data_type
+      "No Bronze data found for category='%s', supplier='%s', data_type='%s'.\nExpected: %s",
+      category, supplier_code, data_type, dt_root
     ))
 
-  # Filter to files whose name contains _<gauge_id>_
-  site_pat <- paste0("_", gauge_id, "_")
-  files    <- list.files(year_dirs, pattern = "\\.parquet$",
-                         full.names = TRUE, recursive = FALSE)
-  files    <- files[grepl(site_pat, basename(files), fixed = TRUE)]
+  files <- .list_bronze_files(root, gauge_id, data_type, supplier_code,
+                              category, start, end)
 
   if (length(files) == 0L)
     stop(sprintf(
-      "No Bronze data found for gauge '%s', data_type '%s', supplier '%s'.\nHas download_hydrology(..., output = \"disk\") been run for this gauge?",
+      paste0("No Bronze data found for gauge '%s', data_type '%s', supplier '%s'",
+             " in the requested date range.\nHas download_hydrology(..., ",
+             "output = \"disk\") been run for this gauge?"),
       gauge_id, data_type, supplier_code
     ))
 
@@ -144,7 +181,21 @@
 #' @param start Date or character (`"YYYY-MM-DD"`) or `NULL`. Earliest
 #'   timestamp to include. `NULL` reads from the beginning of the record.
 #' @param end Date or character (`"YYYY-MM-DD"`) or `NULL`. Latest
-#'   timestamp to include. `NULL` reads to the end of the record.
+#'   timestamp to include (the whole of the `end` day is included). `NULL`
+#'   reads to the end of the record.
+#' @param trace Character or `NULL`. Series discriminator for gauges that hold
+#'   several series of the same data type (e.g. WISKI `"sg"` and `"sg_ds"`
+#'   stage). `NULL` is fine when the gauge has a single series; if several are
+#'   present an error lists them.
+#'
+#' @details
+#' Bronze is append-only, so re-downloading a gauge adds new files rather than
+#' rewriting old ones. `read_bronze()` resolves any overlap: for each series and
+#' timestamp the row from the most recently received file is kept.
+#'
+#' Files are located by observation year, so stores written before Bronze was
+#' partitioned by observation year (one file per ingest, filed under the ingest
+#' year) should be re-ingested for date-range reads to be reliable.
 #'
 #' @return An S7 object of the appropriate `HydroData` subclass
 #'   ([Flow_15min], [Level_15min], [Rainfall_15min], [Flow_Daily], etc.),
@@ -168,10 +219,27 @@ read_bronze <- function(root, gauge_id, data_type,
                         supplier_code = "EA",
                         category      = "hydrometric",
                         start         = NULL,
-                        end           = NULL) {
+                        end           = NULL,
+                        trace         = NULL) {
 
   files <- .locate_bronze_files(root, gauge_id, data_type,
                                 supplier_code, category, start, end)
+
+  # A gauge can hold several series of one data type (WISKI traces)
+  traces <- .bronze_file_trace(files, gauge_id, data_type, supplier_code)
+  if (!is.null(trace)) {
+    files <- files[traces == trace]
+    if (length(files) == 0L)
+      stop(sprintf("No Bronze series with trace '%s' for gauge '%s' / '%s'.",
+                   trace, gauge_id, data_type))
+  } else if (length(unique(traces)) > 1L) {
+    stop(sprintf(
+      "Gauge '%s' / '%s' holds several series (%s). Choose one with `trace`.",
+      gauge_id, data_type,
+      paste(sprintf("'%s'", ifelse(nzchar(unique(traces)), unique(traces), "<none>")),
+            collapse = ", ")
+    ))
+  }
 
   dt_list <- lapply(files, function(f) {
     tryCatch(
@@ -188,6 +256,12 @@ read_bronze <- function(root, gauge_id, data_type,
   if (nrow(dt) == 0L)
     stop(sprintf("No data could be read for gauge '%s' / '%s'.",
                  gauge_id, data_type))
+
+  # Resolve overlap between files: files are ordered oldest-received first, so
+  # keeping the last occurrence keeps the most recently received row
+  dt[, .series := sub("_[0-9]{8}$", "", dataset_id)]
+  dt <- unique(dt, by = c(".series", "timestamp"), fromLast = TRUE)
+  dt[, .series := NULL]
 
   # Exact timestamp bounds (year-dir filter was approximate)
   if (!is.null(start))

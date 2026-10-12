@@ -404,6 +404,9 @@ compare_pe_sine <- function(pe, dates, B, A, phi, plot = FALSE) {
   out <- list(rmse = rmse, bias = bias, r_squared = r_sq, fitted = fitted_dt)
 
   if (plot) {
+    if (!requireNamespace("ggplot2", quietly = TRUE))
+      stop("`plot = TRUE` requires the 'ggplot2' package. ",
+           "Install it with install.packages(\"ggplot2\").", call. = FALSE)
     # Thin observed points to at most 1000 for readability on long series
     n    <- nrow(fitted_dt)
     idx  <- if (n > 1000L) seq(1L, n, length.out = 1000L) else seq_len(n)

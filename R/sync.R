@@ -10,11 +10,47 @@
 # Modified:    2026-02-01 - JP: initial version
 # Tier:        1
 # Inputs:      Measure notation, date range, chunk list
-# Outputs:     data.table of readings or CSV file
+# Outputs:     data.table of readings or Bronze Parquet files
 # Dependencies: httr, data.table
 # ============================================================
 
 # ── Synchronous download helpers ─────────────────────────────────────────────
+
+#' Parse the date columns of an EA readings table in place
+#'
+#' Shared by the sync and batch paths so both produce identical types. `date`
+#' becomes `Date`; `dateTime` becomes `POSIXct` in UTC. The EA API returns ISO
+#' 8601 strings such as `"2022-01-01T00:15:00"` or `"2022-01-01T00:15:00Z"`;
+#' `as.POSIXct()` without a format does not parse the `T` separator or `Z`
+#' suffix reliably on all platforms (notably Windows), so the offset is
+#' stripped and an explicit format used. EA timestamps are always UTC.
+#'
+#' @param dt A `data.table` of readings. Modified by reference.
+#' @return `dt`, invisibly.
+#' @noRd
+.parse_reading_datetimes <- function(dt) {
+  if ("date" %in% names(dt) && !inherits(dt[["date"]], "Date"))
+    dt[, date := as.Date(date)]
+
+  if ("dateTime" %in% names(dt)) {
+    ts_raw <- dt[["dateTime"]]
+    if (is.character(ts_raw)) {
+      ts_clean <- sub("(Z|[+-]\\d{2}:\\d{2})$", "", ts_raw)
+      ts_clean <- sub(" ", "T", ts_clean, fixed = TRUE)
+      data.table::set(dt, j = "dateTime",
+                      value = as.POSIXct(ts_clean,
+                                         format = "%Y-%m-%dT%H:%M:%S",
+                                         tz     = "UTC"))
+    } else if (inherits(ts_raw, "POSIXct")) {
+      # jsonlite / fread may auto-parse using the local timezone. Force the
+      # tzone attribute to UTC without shifting the underlying numeric value.
+      attr(ts_raw, "tzone") <- "UTC"
+      data.table::set(dt, j = "dateTime", value = ts_raw)
+    }
+  }
+  invisible(dt)
+}
+
 
 #' Fetch readings for a single measure (synchronous API)
 #'
@@ -76,29 +112,7 @@ fetch_readings <- function(measure_notation,
 
   # Parse date columns to proper R types for correct downstream filtering
   # e.g. dt[date >= as.Date("2022-06-01")]
-  if ("date" %in% names(dt)) dt[, date := as.Date(date)]
-
-  if ("dateTime" %in% names(dt)) {
-    ts_raw <- dt[["dateTime"]]
-    if (is.character(ts_raw)) {
-      # The EA API returns ISO 8601 datetimes, e.g. "2022-01-01T00:15:00" or
-      # "2022-01-01T00:15:00Z". R's as.POSIXct() without a format argument
-      # does not reliably parse the T-separator or Z suffix on all platforms
-      # (particularly Windows). Strip the trailing Z / +HH:MM offset and use
-      # an explicit format so all 15-min sub-daily times are preserved.
-      ts_clean <- sub("(Z|[+-]\\d{2}:\\d{2})$", "", ts_raw)
-      dt[, dateTime := as.POSIXct(ts_clean,
-                                   format = "%Y-%m-%dT%H:%M:%S",
-                                   tz     = "UTC")]
-    } else if (inherits(ts_raw, "POSIXct")) {
-      # httr / jsonlite may auto-parse dateTime to POSIXct using the local
-      # system timezone. Force the tzone attribute to UTC without shifting
-      # the underlying numeric value — EA API timestamps are always UTC.
-      attr(ts_raw, "tzone") <- "UTC"
-      data.table::set(dt, j = "dateTime", value = ts_raw)
-    }
-  }
-
+  .parse_reading_datetimes(dt)
   dt
 }
 
@@ -143,10 +157,10 @@ make_date_chunks <- function(from_date, to_date) {
 #' Download one measure via the synchronous path, chunked annually
 #'
 #' Internal worker called by [download_hydrology()] for each measure when
-#' `method = "sync"`. Iterates over annual date chunks, collecting readings
-#' into a single `data.table` (memory mode) or appending to a CSV (disk
-#' mode). Chunks are accumulated as a list and combined once at the end with
-#' `rbindlist()` to avoid repeated full-table copies inside the loop.
+#' `method = "sync"`. Iterates over annual date chunks, accumulating readings
+#' as a list that is combined once at the end with `rbindlist()` (avoiding
+#' repeated full-table copies). In memory mode the combined table is returned;
+#' in disk mode it is written to the Bronze tier via [handle_output()].
 #'
 #' @param mid Character. Measure notation.
 #' @param chunks `data.table`. Output of [make_date_chunks()].
@@ -154,13 +168,20 @@ make_date_chunks <- function(from_date, to_date) {
 #' @param out_dir Character or `NULL`. Root output directory (disk only).
 #' @param param Character. Parameter type.
 #' @param observation_type Character or `NULL`. Passed to [fetch_readings()].
+#' @param site_id Character. Supplier site identifier used in the Bronze
+#'   dataset ID (disk mode).
+#' @param period Character. Temporal resolution stored in the Bronze `period`
+#'   column (disk mode).
+#' @param category Character. Bronze data category (disk mode).
 #'
 #' @return A named list: `measure`, `data` (`data.table` or `NULL` in disk
-#'   mode), `file` (`NA` in memory mode), `rows`, `ok`.
+#'   mode), `file` (`NA` in memory mode; Bronze paths joined by `"; "` in disk
+#'   mode), `rows`, `ok`.
 #'
 #' @noRd
 run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
-                     site_id = NA_character_, period = NA_character_) {
+                     site_id = NA_character_, period = NA_character_,
+                     category = "hydrometric") {
 
   chunk_list <- list()
   total_rows <- 0L
@@ -212,8 +233,11 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
   }
 
   if (output == "disk" && !is.null(combined) && nrow(combined) > 0L) {
-    dest <- handle_output(combined, "disk", out_dir, param, mid,
-                          site_id = site_id, period = period)
+    paths <- handle_output(combined, "disk", out_dir, param, mid,
+                           site_id = site_id, period = period,
+                           category = category)
+    # One summary row per measure: collapse the per-year paths into one string
+    dest <- paste(paths, collapse = "; ")
   }
 
   list(measure = mid,

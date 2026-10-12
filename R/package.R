@@ -53,6 +53,7 @@
 
 # S7 generics (print, as_data_table, as_long) are defined in classes.R
 #' @import S7
+#' @importFrom stats mad median quantile
 #'
 ## usethis namespace: start
 #' @importFrom data.table :=

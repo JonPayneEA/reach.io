@@ -284,6 +284,132 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
 }
 
 
+# -- Bronze writers -----------------------------------------------------------
+
+#' Write a Parquet file atomically
+#'
+#' Writes to `<path>.tmp` then renames over `path`. On Windows `file.rename()`
+#' can fail when the target is open (Arrow memory-maps files it reads), so a
+#' copy is attempted before giving up. Errors if the target cannot be replaced.
+#'
+#' @param x A `data.frame` / `data.table`.
+#' @param path Character. Destination file.
+#'
+#' @return `path`, invisibly.
+#' @noRd
+.write_parquet_atomic <- function(x, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp <- paste0(path, ".tmp")
+  arrow::write_parquet(x, tmp)
+  if (!isTRUE(suppressWarnings(file.rename(tmp, path)))) {
+    ok <- isTRUE(suppressWarnings(file.copy(tmp, path, overwrite = TRUE)))
+    unlink(tmp)
+    if (!ok) stop(sprintf("Could not write '%s' (target may be locked).", path),
+                  call. = FALSE)
+  }
+  invisible(path)
+}
+
+
+#' Write a Bronze data.table as one Parquet file per calendar year
+#'
+#' The single place that decides how Bronze data lands on disk. Rows are split
+#' by the UTC calendar year of `timestamp` and each year is written to
+#' `bronze/<category>/<supplier>/<data_type>/<YYYY>/<dataset_id>.parquet`, so
+#' the year directory always reflects the *observation* year (not the ingest
+#' year). Bronze is append-only: re-ingesting the same series on a later day
+#' adds a new file (new `dataset_id` date); duplicates are resolved on read by
+#' [read_bronze()]. Re-ingesting on the same day overwrites that day's file.
+#'
+#' @param bronze_dt A `data.table` conforming to the Bronze schema.
+#' @param output_dir,category,supplier_code,data_type,dataset_id See
+#'   [bronze_path()].
+#'
+#' @return A `data.table` with one row per file written: `year`, `path`,
+#'   `rows`, `period_start`, `period_end` (`"YYYY-MM-DD"`).
+#' @noRd
+.write_bronze_by_year <- function(bronze_dt, output_dir, category,
+                                  supplier_code, data_type, dataset_id) {
+
+  empty <- data.table::data.table(
+    year = character(), path = character(), rows = integer(),
+    period_start = character(), period_end = character()
+  )
+
+  n_na <- sum(is.na(bronze_dt$timestamp))
+  if (n_na > 0L) {
+    warning(sprintf("%d row(s) with missing timestamp not written to Bronze (%s).",
+                    n_na, dataset_id), call. = FALSE)
+    bronze_dt <- bronze_dt[!is.na(bronze_dt$timestamp)]
+  }
+  if (nrow(bronze_dt) == 0L) return(empty)
+
+  yrs   <- format(bronze_dt$timestamp, "%Y", tz = "UTC")
+  files <- lapply(sort(unique(yrs)), function(yr) {
+    part <- bronze_dt[which(yrs == yr)]
+    path <- bronze_path(output_dir, category, supplier_code, data_type,
+                        dataset_id, year = yr)
+    .write_parquet_atomic(part, path)
+    data.table::data.table(
+      year         = yr,
+      path         = path,
+      rows         = nrow(part),
+      period_start = format(min(part$timestamp), "%Y-%m-%d", tz = "UTC"),
+      period_end   = format(max(part$timestamp), "%Y-%m-%d", tz = "UTC")
+    )
+  })
+  data.table::rbindlist(files)
+}
+
+
+#' Build provenance rows (one per Bronze year file)
+#'
+#' Rows are built separately from writing them so that parallel workers can
+#' return them and the main process can append to the register sequentially
+#' (concurrent appends to one CSV are not safe). All rows share the
+#' `dataset_id`; each has its own `file_path` and the period that file covers.
+#'
+#' @param files `data.table` returned by `.write_bronze_by_year()`.
+#' @inheritParams write_provenance_record
+#'
+#' @return A `data.table` whose columns are arguments of
+#'   [write_provenance_record()].
+#' @noRd
+.bronze_prov_rows <- function(files, dataset_id, supplier, supplier_code,
+                              site_id, data_type, temporal_resolution,
+                              method_of_receipt) {
+  if (length(temporal_resolution) != 1L || is.na(temporal_resolution))
+    temporal_resolution <- "unknown"
+  data.table::data.table(
+    dataset_id          = dataset_id,
+    supplier            = supplier,
+    supplier_code       = supplier_code,
+    site_id             = site_id,
+    data_type           = data_type,
+    time_period_start   = files$period_start,
+    time_period_end     = files$period_end,
+    temporal_resolution = temporal_resolution,
+    method_of_receipt   = method_of_receipt,
+    file_path           = files$path
+  )
+}
+
+#' Append provenance rows to the Hydrometric Data Register
+#'
+#' @param prov `data.table` from `.bronze_prov_rows()` (or `NULL`).
+#' @param register_path Character. Register CSV path.
+#' @return `prov`, invisibly.
+#' @noRd
+.write_provenance_rows <- function(prov, register_path) {
+  if (is.null(prov) || nrow(prov) == 0L) return(invisible(prov))
+  for (i in seq_len(nrow(prov))) {
+    do.call(write_provenance_record,
+            c(list(register_path = register_path), as.list(prov[i])))
+  }
+  invisible(prov)
+}
+
+
 # -- Provenance record --------------------------------------------------------
 
 #' Write a Bronze provenance record to the Hydrometric Data Register

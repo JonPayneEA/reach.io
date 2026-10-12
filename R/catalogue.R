@@ -292,6 +292,21 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
 # check_gaps()
 # =============================================================================
 
+# Find all Silver Parquet files for one site_id + data_type combination.
+#' @noRd
+.find_silver_parquets <- function(root, site_id, data_type) {
+  silver_root <- file.path(root, "silver")
+  if (!dir.exists(silver_root)) return(character(0))
+
+  candidates <- list.files(silver_root, pattern = "\\.parquet$",
+                           recursive = TRUE, full.names = TRUE)
+  dt_pat   <- paste0("/", data_type, "/")
+  site_pat <- paste0("_", site_id, "_")
+  candidates[grepl(dt_pat,   candidates, fixed = TRUE) &
+               grepl(site_pat, candidates, fixed = TRUE)]
+}
+
+
 #' Identify missing timesteps for a Bronze gauge series
 #'
 #' Reads all Bronze Parquet files for the specified `site_id` and `data_type`,
@@ -329,21 +344,6 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
 #' check_gaps("data/hydro", site_id = "2723TH", data_type = "H",
 #'            expected_interval = "daily")
 #' }
-# Find all Silver Parquet files for one site_id + data_type combination.
-#' @noRd
-.find_silver_parquets <- function(root, site_id, data_type) {
-  silver_root <- file.path(root, "silver")
-  if (!dir.exists(silver_root)) return(character(0))
-
-  candidates <- list.files(silver_root, pattern = "\\.parquet$",
-                           recursive = TRUE, full.names = TRUE)
-  dt_pat   <- paste0("/", data_type, "/")
-  site_pat <- paste0("_", site_id, "_")
-  candidates[grepl(dt_pat,   candidates, fixed = TRUE) &
-               grepl(site_pat, candidates, fixed = TRUE)]
-}
-
-
 check_gaps <- function(root, site_id, data_type, category = "hydrometric",
                        expected_interval = NULL) {
   # --- Resolve interval ---

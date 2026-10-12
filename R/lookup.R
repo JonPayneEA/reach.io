@@ -15,20 +15,73 @@
 
 # -- Station and measure lookup -----------------------------------------------
 
+#' Parse EA measure notations into parameter / value type / period
+#'
+#' A measure notation has the form
+#' `<station-uuid>-<parameter>-<valuetype>-<period>-<unit>-<quality>`, e.g.
+#' `c46d1245-e34a-4ea9-8c4c-410357e80e15-flow-i-900-m3s-qualified`. The
+#' station UUID is matched explicitly so the parse does not depend on the
+#' position of hyphens; notations that do not match give `NA` (with a warning)
+#' rather than silently wrong values.
+#'
+#' @param x Character vector of measure notations.
+#' @return A `list` of three character vectors: `parameter`, `value_type`,
+#'   `period`.
+#' @noRd
+.parse_measure_notation <- function(x) {
+  uuid  <- "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}-"
+  ok    <- grepl(uuid, x)
+  if (any(!ok)) {
+    warning(sprintf(
+      "%d measure notation(s) did not match the expected '<uuid>-<parameter>-<type>-<period>-...' form; parameter/value_type/period set to NA.",
+      sum(!ok)), call. = FALSE)
+  }
+  rest  <- sub(uuid, "", x)
+  parts <- strsplit(rest, "-", fixed = TRUE)
+  pick  <- function(i) {
+    out <- vapply(parts, function(p) if (length(p) >= i) p[i] else NA_character_,
+                  character(1L))
+    out[!ok] <- NA_character_
+    out
+  }
+  parameter <- pick(1L)
+  vt_raw    <- pick(2L)
+  pd_raw    <- pick(3L)
+
+  # fcase() default must be length-1; fall back to the raw segment afterwards
+  vt_mapped <- data.table::fcase(
+    vt_raw == "m",   "mean",
+    vt_raw == "min", "min",
+    vt_raw == "max", "max",
+    vt_raw == "i",   "instantaneous",
+    vt_raw == "t",   "total",
+    default = NA_character_
+  )
+  pd_mapped <- data.table::fcase(
+    pd_raw == "900",   "15min",
+    pd_raw == "86400", "daily",
+    default = NA_character_
+  )
+
+  list(
+    parameter  = parameter,
+    value_type = data.table::fifelse(is.na(vt_mapped), vt_raw, vt_mapped),
+    period     = data.table::fifelse(is.na(pd_mapped), pd_raw, pd_mapped)
+  )
+}
+
+
 #' Find stations matching a set of identifiers
 #'
 #' Looks up stations from the EA Hydrology API by one or more identifier
-#' types and returns a `data.table` of matches. Multiple identifier types
-#' can be supplied simultaneously — results are pooled and de-duplicated.
+#' types and returns a `data.table` with **one row per measure** (time series)
+#' available at each matched station. Multiple identifier types can be supplied
+#' simultaneously — results are pooled and de-duplicated by station.
 #'
-#' Each row in the returned table includes a `measures` list column
-#' containing the notation strings for every measure time series available
-#' at that station (e.g. daily mean flow, 15-minute level, daily rainfall).
-#' This means a second call to `get_measures()` is not needed for the common
-#' case where you already know which stations you want.
-#'
-#' A `station_uri` column is also included containing the full station URI
-#' used by the measures endpoint as its station filter value.
+#' The measure notation is parsed into `parameter`, `value_type` and `period`
+#' columns, so a second call to [get_measures()] is not needed for the common
+#' case where you already know which stations you want. Only rainfall, flow
+#' and level measures are returned.
 #'
 #' @param names Character vector or `NULL`. Fuzzy station name search using
 #'   the API's `search` parameter.
@@ -43,18 +96,22 @@
 #' @param long Numeric or `NULL`. Longitude for proximity search.
 #' @param dist Numeric or `NULL`. Search radius in km.
 #'
-#' @return A `data.table` with columns:
+#' @return A `data.table`, one row per measure, with columns:
 #'   \describe{
 #'     \item{`label`}{Station name.}
 #'     \item{`notation`}{Station SUID.}
 #'     \item{`wiskiID`}{WISKI identifier (where available).}
 #'     \item{`RLOIid`}{River Levels on the Internet identifier (where
 #'       available).}
-#'     \item{`lat`, `long`}{Coordinates.}
+#'     \item{`lat`, `long`, `easting`, `northing`}{Coordinates.}
 #'     \item{`riverName`}{Associated river name (where available).}
-#'     \item{`station_uri`}{Full station URI used by the measures endpoint.}
-#'     \item{`measures`}{List column. Each element is a character vector of
-#'       measure notation strings available at that station.}
+#'     \item{`measure_notation`}{Measure notation — the ID passed to the
+#'       readings endpoint, e.g. `"<uuid>-flow-i-900-m3s-qualified"`.}
+#'     \item{`station.notation`}{Deprecated alias of `measure_notation`
+#'       (misleading name kept for backwards compatibility).}
+#'     \item{`parameter`}{`"rainfall"`, `"flow"` or `"level"`.}
+#'     \item{`value_type`}{e.g. `"mean"`, `"instantaneous"`, `"total"`.}
+#'     \item{`period`}{`"15min"` or `"daily"`.}
 #'   }
 #'   Returns an empty `data.table` if no stations are found.
 #'
@@ -64,11 +121,8 @@
 #' \dontrun{
 #' stns <- find_stations(wiski_ids = "SS92F014")
 #'
-#' # Inspect available measures for the first station
-#' stns$measures[[1]]
-#'
-#' # Unnest to a flat table of all measure notations
-#' stns[, .(measure = unlist(measures)), by = .(label, wiskiID)]
+#' # One row per measure available at the station
+#' stns[, .(label, wiskiID, parameter, period, value_type, measure_notation)]
 #'
 #' # Other lookup methods
 #' find_stations(names = "Thames")
@@ -181,37 +235,29 @@ find_stations <- function(names     = NULL,
   dt[, (list_cols) := lapply(.SD, function(x) sapply(x, toString)),
      .SDcols = list_cols]
 
-  # Unnest measures to one row per measure, keeping all station scalar columns
-  dt <- dt[, data.table::rbindlist(measures)[, 1L],
+  # Unnest measures to one row per measure, keeping all station scalar columns.
+  # Stations with no measures drop out (zero-row result for that group).
+  first_id <- function(m) {
+    m <- data.table::rbindlist(m, fill = TRUE)
+    if (nrow(m) == 0L || !"@id" %in% names(m)) {
+      return(data.table::data.table(`@id` = character()))
+    }
+    m[, "@id", with = FALSE]
+  }
+  dt <- dt[, first_id(measures),
              by = .(label, notation, wiskiID, RLOIid,
                     lat, long, easting, northing, riverName)]
-  data.table::setnames(dt, "@id", "station.notation")
+  if (nrow(dt) == 0L) return(data.table::data.table())
+  data.table::setnames(dt, "@id", "measure_notation")
+  dt[, measure_notation := basename(measure_notation)]
+
+  # Deprecated alias: this column was called `station.notation` although it
+  # holds the *measure* notation. Kept so existing scripts keep working.
+  dt[, station.notation := measure_notation]
 
   # Parse the measure notation into useful metadata columns
-  dt[, station.notation := basename(station.notation)]
-  parts <- strsplit(dt$station.notation, "-")
-  dt[, parameter  := sapply(parts, `[`, 6L)]
-  vt_raw <- sapply(parts, `[`, 7L)
-  pd_raw <- sapply(parts, `[`, 8L)
-
-  # fcase() default must be length-1; use fifelse to fall back to the raw
-  # segment value for any unrecognised code (keeps behaviour version-safe).
-  vt_mapped <- data.table::fcase(
-    vt_raw == "m",   "mean",
-    vt_raw == "min", "min",
-    vt_raw == "max", "max",
-    vt_raw == "i",   "instantaneous",
-    vt_raw == "t",   "total",
-    default = NA_character_
-  )
-  dt[, value_type := data.table::fifelse(is.na(vt_mapped), vt_raw, vt_mapped)]
-
-  pd_mapped <- data.table::fcase(
-    pd_raw == "900",   "15min",
-    pd_raw == "86400", "daily",
-    default = NA_character_
-  )
-  dt[, period := data.table::fifelse(is.na(pd_mapped), pd_raw, pd_mapped)]
+  dt[, c("parameter", "value_type", "period") :=
+       .parse_measure_notation(measure_notation)]
 
   return(dt[parameter %in% c("rainfall", "flow", "level")])
 }

@@ -27,8 +27,8 @@
 #' @param gauge_id Character. WISKI ID for HDE-sourced gauges.
 #' @param data_type Character. Parameter: `"flow"`, `"level"`, or
 #'   `"rainfall"`.
-#' @param start_date Character. Start date in `"YYYY-MM-DD"` format.
-#' @param end_date Character. End date in `"YYYY-MM-DD"` format.
+#' @param start_date Character. Start date (inclusive) in `"YYYY-MM-DD"` format.
+#' @param end_date Character. End date (**exclusive**) in `"YYYY-MM-DD"` format.
 #'
 #' @return A `data.table` conforming to the Bronze schema (`timestamp`,
 #'   `value`, `supplier_flag`, `dataset_id`, `site_id`, `data_type`),
@@ -76,7 +76,7 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
     return(data.table::data.table())
   }
 
-  measure_notation <- measures_dt$station.notation[1L]
+  measure_notation <- measures_dt$measure_notation[1L]
 
   chunks     <- make_date_chunks(start_date, end_date)
   chunk_list <- vector("list", nrow(chunks))
@@ -237,9 +237,12 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
 #'
 #' Reads the `source_system` field of a one-row registry `data.table` and
 #' dispatches to [fetch_from_hde()], [fetch_from_wiski()],
-#' or [fetch_from_wiski_all()]. Fetch errors are
-#' caught and returned as `NULL` with a warning so the caller can log and
-#' continue.
+#' or [fetch_from_wiski_all()].
+#'
+#' With the default `on_error = "warn"`, fetch errors are caught and `NULL` is
+#' returned with a warning, which suits interactive use. Orchestrators such as
+#' [run_backfill()] use `on_error = "stop"` so that a failed fetch is recorded
+#' as `FAILED` rather than being mistaken for an empty response.
 #'
 #' To add a new source system: write a `fetch_from_<n>()` function returning
 #' the Bronze schema, add a case to the `switch()` below, update
@@ -248,10 +251,12 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
 #' @param gauge_row A one-row `data.table` from the gauge registry. Must
 #'   contain columns `gauge_id`, `source_system`, and `data_type`.
 #' @param start_date Character. Start date in `"YYYY-MM-DD"` format.
-#' @param end_date Character. End date in `"YYYY-MM-DD"` format.
+#' @param end_date Character. End date (**exclusive**) in `"YYYY-MM-DD"` format.
+#' @param on_error Character. `"warn"` (default) returns `NULL` with a warning
+#'   when the fetch fails; `"stop"` re-raises the error.
 #'
-#' @return A `data.table` conforming to the Bronze schema, or `NULL` if the
-#'   fetch failed.
+#' @return A `data.table` conforming to the Bronze schema (empty if no data
+#'   was found), or `NULL` if the fetch failed and `on_error = "warn"`.
 #'
 #' @export
 #'
@@ -266,7 +271,10 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
 #'                   start_date = "2020-01-01",
 #'                   end_date   = "2020-12-31")
 #' }
-route_gauge <- function(gauge_row, start_date, end_date) {
+route_gauge <- function(gauge_row, start_date, end_date,
+                        on_error = c("warn", "stop")) {
+
+  on_error <- match.arg(on_error)
 
   tryCatch({
     switch(
@@ -283,6 +291,10 @@ route_gauge <- function(gauge_row, start_date, end_date) {
       stop("No client for source_system: ", gauge_row$source_system)
     )
   }, error = function(e) {
+    if (on_error == "stop") {
+      stop(sprintf("Route failed for %s: %s", gauge_row$gauge_id, e$message),
+           call. = FALSE)
+    }
     warning(sprintf("Route failed for %s: %s",
                     gauge_row$gauge_id, e$message))
     NULL

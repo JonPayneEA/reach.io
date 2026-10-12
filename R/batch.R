@@ -9,7 +9,7 @@
 # Modified:    2026-02-01 - JP: initial version
 # Tier:        1
 # Inputs:      Measure notation, date range
-# Outputs:     data.table of readings or CSV file
+# Outputs:     data.table of readings or Bronze Parquet files
 # Dependencies: httr, data.table
 # ============================================================
 
@@ -75,9 +75,16 @@ poll_batch <- function(status_url, max_wait_s = 600, poll_interval_s = 15) {
     info   <- httr::content(resp, as = "parsed", simplifyVector = TRUE)
     status <- info$status
 
+    if (length(status) != 1L || is.na(status))
+      stop("Batch status response had no usable 'status' field: ", status_url)
+
     message(sprintf("  [%s] %s", format(Sys.time(), "%H:%M:%S"), status))
 
-    if (status == "Completed") return(info$url)
+    if (status == "Completed") {
+      if (length(info$url) != 1L || is.na(info$url))
+        stop("Batch completed but returned no download URL: ", status_url)
+      return(info$url)
+    }
     if (status == "Failed")    stop("Batch failed: ",  status_url)
     if (Sys.time() > deadline) stop("Timed out: ",     status_url)
 
@@ -89,26 +96,35 @@ poll_batch <- function(status_url, max_wait_s = 600, poll_interval_s = 15) {
 #' Download one measure via the batch path
 #'
 #' Internal worker called by [download_hydrology()] for each measure when
-#' `method = "batch"`. Submits the job, polls for completion, then either
-#' streams the CSV to disk or reads it into a `data.table` in memory via
-#' a temporary file. `data.table::fread()` is used for reading because it
-#' is substantially faster than `read.csv()` for large files and returns a
-#' `data.table` directly with correct column type inference.
+#' `method = "batch"`. Submits the job, polls for completion, downloads the
+#' CSV to a temporary file (HTTP errors are raised, never written out as data)
+#' and reads it with `data.table::fread()`. Date columns are parsed by the same
+#' helper as the sync path so both methods return identical types. In disk
+#' mode the readings are then written to the Bronze tier via
+#' [handle_output()]; note that the whole CSV is held in memory while it is
+#' converted, so very large batch results need correspondingly large RAM.
 #'
 #' @param mid Character. Measure notation.
 #' @param from_date Character. Start date in `"YYYY-MM-DD"` format.
-#' @param to_date Character. End date in `"YYYY-MM-DD"` format.
+#' @param to_date Character. End date (exclusive) in `"YYYY-MM-DD"` format.
 #' @param output Character. `"memory"` or `"disk"`.
-#' @param out_dir Character or `NULL`. Root output directory (disk only).
+#' @param out_dir Character or `NULL`. Root store directory (disk only).
 #' @param param Character. Parameter type.
 #' @param max_wait_s Numeric. Max seconds to wait for the job. Default 600.
+#' @param site_id Character. Supplier site identifier used in the Bronze
+#'   dataset ID (disk mode).
+#' @param period Character. Temporal resolution stored in the Bronze `period`
+#'   column (disk mode).
+#' @param category Character. Bronze data category (disk mode).
 #'
-#' @return A named list: `measure`, `data` (`data.table` or `NULL` in disk
-#'   mode), `file` (`NA` in memory mode), `rows`, `ok`.
+#' @return A named list: `measure`, `data` (`data.table` in memory mode,
+#'   `NULL` in disk mode), `file` (`NA` in memory mode; Bronze paths joined by
+#'   `"; "` in disk mode), `rows`, `ok`.
 #'
 #' @noRd
 run_batch <- function(mid, from_date, to_date, output, out_dir, param,
-                      max_wait_s = 600) {
+                      max_wait_s = 600, site_id = NA_character_,
+                      period = NA_character_, category = "hydrometric") {
 
   tryCatch({
 
@@ -124,36 +140,30 @@ run_batch <- function(mid, from_date, to_date, output, out_dir, param,
       dl_url <- poll_batch(status_url, max_wait_s = max_wait_s)
     }
 
+    tmp <- tempfile(fileext = ".csv")
+    on.exit(unlink(tmp), add = TRUE)
+    resp <- httr::GET(dl_url, httr::write_disk(tmp, overwrite = TRUE))
+    httr::stop_for_status(resp)
+
+    dt <- data.table::fread(tmp)
+    dt[, measure_notation := mid]
+    .parse_reading_datetimes(dt)
+
+    Sys.sleep(1)  # EA fair-use: one request at a time
+
     if (output == "disk") {
-
-      # Stream directly to file — avoids loading the whole CSV into memory
-      param_dir <- file.path(out_dir, param)
-      dir.create(param_dir, showWarnings = FALSE, recursive = TRUE)
-      safe_name <- gsub("[^A-Za-z0-9_-]", "_", mid)
-      dest      <- file.path(param_dir, paste0(safe_name, ".csv"))
-      httr::GET(dl_url, httr::write_disk(dest, overwrite = TRUE))
-      message("  Saved -> ", dest)
-
-      Sys.sleep(1)
-      list(measure = mid, data = NULL, file = dest,
-           rows = NA_integer_, ok = TRUE)
-
+      if (nrow(dt) == 0L) {
+        message("  No data returned — nothing written.")
+        return(list(measure = mid, data = NULL, file = NA_character_,
+                    rows = 0L, ok = TRUE))
+      }
+      paths <- handle_output(dt, "disk", out_dir, param, mid,
+                             site_id = site_id, period = period,
+                             category = category)
+      message("  Saved -> ", paste(paths, collapse = "; "))
+      list(measure = mid, data = NULL, file = paste(paths, collapse = "; "),
+           rows = nrow(dt), ok = TRUE)
     } else {
-
-      # Memory mode: download to a temp file and read back with fread().
-      # fread() is much faster than read.csv() and returns a data.table
-      # directly with correct column type inference
-      tmp <- tempfile(fileext = ".csv")
-      httr::GET(dl_url, httr::write_disk(tmp, overwrite = TRUE))
-      dt  <- data.table::fread(tmp)
-
-      # Parse date columns — fread reads them as character
-      if ("date"     %in% names(dt)) dt[, date     := as.Date(date)]
-      if ("dateTime" %in% names(dt)) dt[, dateTime := as.POSIXct(dateTime,
-                                                        tz = "UTC")]
-      dt[, measure_notation := mid]
-
-      Sys.sleep(1)
       list(measure = mid, data = dt, file = NA_character_,
            rows = nrow(dt), ok = TRUE)
     }

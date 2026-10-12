@@ -1,15 +1,16 @@
 # ============================================================
 # Tool:        Output Helper
 # Description: Internal helper that either returns a
-#              data.table in memory or writes it to a CSV,
-#              used by the sync and batch download paths.
+#              data.table in memory or writes it to the Bronze
+#              tier as Parquet, used by the sync and batch
+#              download paths.
 # Flode Module: flode.io
 # Author:      [Hydrometric Data Lead]
 # Created:     2026-02-01
 # Modified:    2026-02-01 - JP: initial version
 # Tier:        1
 # Inputs:      data.table of readings, output mode
-# Outputs:     data.table (memory) or CSV file path (disk)
+# Outputs:     data.table (memory) or Bronze Parquet paths (disk)
 # Dependencies: data.table
 # ============================================================
 
@@ -18,11 +19,12 @@
 #' Handle output of a completed data.table of readings
 #'
 #' Internal helper that either returns a `data.table` of readings unchanged
-#' (memory mode) or writes it as a Bronze-tier Parquet file following the
-#' framework path convention:
-#' `bronze/hydrometric/EA/<data_type>/<YYYY>/<dataset_id>.parquet`
+#' (memory mode) or writes it to the Bronze tier as Parquet, one file per
+#' calendar year of observations, following the framework path convention:
+#' `bronze/<category>/<supplier>/<data_type>/<YYYY>/<dataset_id>.parquet`
 #'
-#' Applies [apply_bronze_schema()] to standardise columns before writing.
+#' Applies [apply_bronze_schema()] to standardise columns before writing and
+#' delegates the write to `.write_bronze_by_year()`.
 #'
 #' @param dt A `data.table` of readings with at least `dateTime`, `value`,
 #'   and optionally `quality` columns (as returned by [fetch_readings()]).
@@ -38,51 +40,46 @@
 #'   Defaults to `measure_id` when `NA` or empty.
 #' @param period Character. Temporal resolution stored in the Bronze schema
 #'   `period` column, e.g. `"15min"`, `"daily"`.
+#' @param supplier_code Character. Supplier code for the path and dataset ID.
+#'   Default `"EA"` (the Hydrology API).
+#' @param category Character. Data category for the path. Default
+#'   `"hydrometric"`.
 #'
 #' @return In `"memory"` mode, the `data.table` unchanged. In `"disk"` mode,
-#'   the Bronze Parquet file path as a character string (invisibly).
+#'   a character vector of the Bronze Parquet paths written (invisibly), one
+#'   per observation year.
 #'
 #' @noRd
 handle_output <- function(dt, output, out_dir, parameter, measure_id,
                            append = FALSE, site_id = NA_character_,
-                           period = NA_character_) {
+                           period = NA_character_,
+                           supplier_code = "EA",
+                           category = "hydrometric") {
 
   if (output == "memory") return(dt)
 
-  data_type     <- param_to_data_type(parameter)
-  supplier_code <- "EA"
-  category      <- "hydrometric"
+  data_type <- param_to_data_type(parameter)
+  if (is.na(data_type))
+    stop(sprintf("No framework data type for parameter '%s'.", parameter))
 
   sid        <- if (!is.na(site_id) && nzchar(site_id)) site_id else measure_id
   dataset_id <- make_dataset_id(supplier_code, sid, data_type)
 
-  # Partition by data year — one Parquet file per calendar year of observations
-  data_years <- sort(unique(data.table::year(dt[["dateTime"]])))
-  paths      <- character(length(data_years))
+  bronze_dt <- apply_bronze_schema(
+    dt,
+    dataset_id        = dataset_id,
+    site_id           = sid,
+    data_type         = data_type,
+    timestamp_col     = "dateTime",
+    value_col         = "value",
+    supplier_flag_col = "quality",
+    period            = period
+  )
 
-  for (i in seq_along(data_years)) {
-    yr      <- data_years[i]
-    yr_dt   <- dt[data.table::year(dateTime) == yr]
+  files <- .write_bronze_by_year(bronze_dt, out_dir, category, supplier_code,
+                                 data_type, dataset_id)
 
-    bronze_dt <- apply_bronze_schema(
-      yr_dt,
-      dataset_id        = dataset_id,
-      site_id           = sid,
-      data_type         = data_type,
-      timestamp_col     = "dateTime",
-      value_col         = "value",
-      supplier_flag_col = "quality",
-      period            = period
-    )
-
-    path <- bronze_path(out_dir, category, supplier_code, data_type, dataset_id,
-                        year = yr)
-    dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
-    arrow::write_parquet(bronze_dt, path)
-    paths[i] <- path
-  }
-
-  invisible(paths)
+  invisible(files$path)
 }
 
 

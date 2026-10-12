@@ -21,26 +21,29 @@
 #' and writes the result as a Parquet file that every other pipeline tool reads
 #' from. Must be run before any backfill starts.
 #'
-#' By default (`overwrite = TRUE`) the existing registry is replaced. Set
-#' `overwrite = FALSE` to merge new gauges into an existing registry: gauges
-#' already present (matched on `gauge_id`) are left untouched, and only new
-#' rows are appended. This lets you update the gauge list CSV without losing
-#' `backfill_done` status or other metadata already written for existing gauges.
+#' A registry row is one *series*: the key is `gauge_id` + `data_type`, so a
+#' gauge that records both flow and level has two rows. The input is validated
+#' before anything is written: `gauge_id` must be non-empty, `data_type` must be
+#' present for every source except `"WISKI_ALL"` (whose files hold several
+#' parameters), and each key may appear only once.
 #'
-#' In a live Databricks environment the `write_parquet()` call can be replaced
-#' with a Delta write via `sparklyr` or the Databricks REST API without
-#' changing any other logic.
+#' By default (`overwrite = TRUE`) the existing registry is replaced. Set
+#' `overwrite = FALSE` to merge new series into an existing registry: series
+#' already present (matched on `gauge_id` + `data_type`) are left untouched,
+#' and only new rows are appended. This lets you update the gauge list CSV
+#' without losing `backfill_done` status or other metadata already written for
+#' existing series.
 #'
 #' @section Windows file-locking:
 #' Arrow memory-maps Parquet files on Windows when reading, keeping a file
 #' handle open. Writing back to the same path while that map is live causes
 #' **Windows error 1224** ("The requested operation cannot be performed on a
-#' file with a user-mapped section open"). This function avoids the issue by
-#' writing to a temporary `.tmp` file and then using `file.rename()` to
-#' atomically replace the target — the rename only happens after the read map
-#' is released. If you observe the error despite this, check that no other
-#' process (e.g. an open R session or file explorer preview) is holding the
-#' registry file open.
+#' file with a user-mapped section open"). This function writes to a temporary
+#' `.tmp` file and then replaces the target (renaming, or copying if the rename
+#' is refused). If the target still cannot be replaced the function **stops
+#' with an error** rather than silently keeping the old registry — check that
+#' no other process (e.g. an open R session or file explorer preview) is
+#' holding the registry file open.
 #'
 #' @param input_csv Character. Path to the raw gauge list CSV. Must contain
 #'   columns: `gauge_id`, `source_system`, `data_type`, `category`,
@@ -50,8 +53,8 @@
 #'   into. Created if it does not exist. The file is written as
 #'   `gauge_registry.parquet` inside this directory.
 #' @param overwrite Logical. If `TRUE` (default), replace any existing
-#'   registry. If `FALSE`, merge new gauges into the existing registry,
-#'   preserving metadata for gauges already registered.
+#'   registry. If `FALSE`, merge new series into the existing registry,
+#'   preserving metadata for series already registered.
 #'
 #' @return The registry `data.table` invisibly (full merged registry when
 #'   `overwrite = FALSE`). The primary side-effect is writing
@@ -85,6 +88,33 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
   missing <- setdiff(required_cols, names(raw_dt))
   if (length(missing) > 0) {
     stop("Missing required columns: ", paste(missing, collapse = ", "))
+  }
+
+  # gauge_id is an identifier, never a number: fread() reads "39001" as integer
+  raw_dt[, gauge_id := trimws(as.character(gauge_id))]
+  raw_dt[, data_type := trimws(as.character(data_type))]
+  raw_dt[!nzchar(data_type), data_type := NA_character_]
+
+  bad_id <- is.na(raw_dt$gauge_id) | !nzchar(raw_dt$gauge_id)
+  if (any(bad_id)) {
+    stop(sprintf("`gauge_id` is missing or empty in %d row(s) (rows: %s).",
+                 sum(bad_id), paste(utils::head(which(bad_id), 10L), collapse = ", ")))
+  }
+
+  # -- Validate data_type: required except for WISKI_ALL ----------------------
+  bad_type <- is.na(raw_dt$data_type) & raw_dt$source_system != "WISKI_ALL"
+  if (any(bad_type)) {
+    stop(sprintf("`data_type` is missing for %d non-WISKI_ALL row(s): %s",
+                 sum(bad_type),
+                 paste(utils::head(raw_dt$gauge_id[bad_type], 10L), collapse = ", ")))
+  }
+
+  # -- Validate uniqueness of (gauge_id, data_type) ----------------------------
+  dup <- duplicated(.registry_key(raw_dt$gauge_id, raw_dt$data_type))
+  if (any(dup)) {
+    stop(sprintf("Duplicate gauge_id + data_type combination(s): %s",
+                 paste(unique(.registry_key(raw_dt$gauge_id, raw_dt$data_type)[dup]),
+                       collapse = ", ")))
   }
 
   # -- Validate source_system values ------------------------------------------
@@ -133,31 +163,27 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
       existing_dt[, live := TRUE]
     }
 
-    # Add only gauges not already in the registry
-    new_ids   <- new_dt$gauge_id[!new_dt$gauge_id %in% existing_dt$gauge_id]
-    added_dt  <- new_dt[gauge_id %in% new_ids]
+    # Add only series (gauge_id + data_type) not already in the registry
+    is_new    <- !.registry_key(new_dt$gauge_id, new_dt$data_type) %in%
+                 .registry_key(existing_dt$gauge_id, existing_dt$data_type)
+    added_dt  <- new_dt[is_new]
     registry_dt <- data.table::rbindlist(
       list(existing_dt, added_dt),
       use.names = TRUE, fill = TRUE
     )
     message(sprintf(
-      "Merge mode: %d new gauge(s) added, %d existing preserved -> %s",
+      "Merge mode: %d new series added, %d existing preserved -> %s",
       nrow(added_dt), nrow(existing_dt), output_path
     ))
   } else {
     registry_dt <- new_dt
-    message(sprintf("Registry written: %d gauges -> %s",
+    message(sprintf("Registry written: %d series -> %s",
                     nrow(registry_dt), output_path))
   }
 
-  # -- Write as Parquet (Delta-compatible) ------------------------------------
-  # Write to a temp file then rename so that on Windows the read_parquet()
-  # memory-map above is fully released before we touch the target path.
-  # file.rename() is atomic on both Windows and POSIX.
-  dir.create(output_path, recursive = TRUE, showWarnings = FALSE)
-  tmp_path <- paste0(registry_path, ".tmp")
-  arrow::write_parquet(registry_dt, tmp_path)
-  file.rename(tmp_path, registry_path)
+  # -- Write as Parquet -------------------------------------------------------
+  # Atomic write (temp file then replace); errors if the target is locked
+  .write_parquet_atomic(registry_dt, registry_path)
 
   invisible(registry_dt)
 }

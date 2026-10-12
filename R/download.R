@@ -9,7 +9,7 @@
 # Modified:    2026-02-01 - JP: initial version
 # Tier:        1
 # Inputs:      Station identifiers, date range, parameters
-# Outputs:     Named list of S7 objects or CSV files
+# Outputs:     Named list of S7 objects or Bronze Parquet files
 # Dependencies: httr, data.table, S7
 # ============================================================
 
@@ -48,7 +48,8 @@
 #' @param parameters Character vector. Any combination of `"rainfall"`,
 #'   `"flow"`, and `"level"`. Default is all three.
 #' @param from_date Character. Start date (inclusive) in `"YYYY-MM-DD"` format.
-#' @param to_date Character. End date (exclusive) in `"YYYY-MM-DD"` format.
+#' @param to_date Character. End date (**exclusive**) in `"YYYY-MM-DD"` format;
+#'   to include 31 December pass 1 January of the following year.
 #' @param method Character. `"sync"` (default) or `"batch"`.
 #' @param output Character. `"memory"` (default) or `"disk"`.
 #' @param out_dir Character or `NULL`. Root store directory. Required when
@@ -76,7 +77,8 @@
 #' @return In `"memory"` mode: a named list with one `data.table` per
 #'   requested parameter plus a `summary` `data.table` with columns
 #'   `parameter`, `measure`, `file`, `rows`, and `ok`. In `"disk"` mode:
-#'   the summary `data.table` invisibly, with CSVs written to `out_dir`.
+#'   the summary `data.table` invisibly, with Bronze Parquet written under
+#'   `out_dir` (`file` holds the paths written, joined by `"; "`).
 #'
 #' @export
 #'
@@ -131,6 +133,7 @@ download_hydrology <- function(
     method           = c("sync", "batch"),
     output           = c("memory", "disk"),
     out_dir          = NULL,
+    category         = "hydrometric",
     period_name      = NULL,
     value_type       = NULL,
     observation_type = NULL,
@@ -147,9 +150,12 @@ download_hydrology <- function(
   if (output == "disk" && is.null(out_dir)) {
     stop("`out_dir` must be supplied when output = 'disk'.")
   }
+  if (!category %in% VALID_CATEGORIES) {
+    stop("`category` must be one of: ", paste(VALID_CATEGORIES, collapse = ", "))
+  }
 
   # ── Resolve station identifiers ───────────────────────────────────────────
-  # find_stations() now returns one row per measure with station.notation,
+  # find_stations() returns one row per measure with measure_notation,
   # parameter, value_type, and period columns already parsed. When station
   # filters are supplied, use this output directly rather than calling
   # get_measures() separately — it avoids a second API round trip and gives
@@ -233,7 +239,7 @@ download_hydrology <- function(
       # with the measure notation. wiskiID preferred; fall back to station SUID.
       measures[, site_id  := data.table::fifelse(
         !is.na(wiskiID) & nzchar(wiskiID), wiskiID, notation)]
-      measures[, notation := station.notation]
+      measures[, notation := measure_notation]
 
     } else {
       # No station filter: fall back to get_measures() to fetch all measures
@@ -274,9 +280,12 @@ download_hydrology <- function(
       # Dispatch to the appropriate worker based on method
       result <- if (method == "sync") {
         run_sync(mid, chunks, output, out_dir, param, observation_type,
-                 site_id = site_id_val, period = p_period)
+                 site_id = site_id_val, period = p_period,
+                 category = category)
       } else {
-        run_batch(mid, from_date, to_date, output, out_dir, param, max_wait_s)
+        run_batch(mid, from_date, to_date, output, out_dir, param, max_wait_s,
+                  site_id = site_id_val, period = p_period,
+                  category = category)
       }
 
       if (output == "memory" &&
@@ -340,6 +349,7 @@ download_hydrology <- function(
   }
 
   if (output == "disk") {
+    dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
     data.table::fwrite(summary_dt,
                        file.path(out_dir, "download_summary.csv"))
     message(sprintf("Summary written to %s",
