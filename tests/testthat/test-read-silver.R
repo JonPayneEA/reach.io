@@ -139,7 +139,8 @@ test_that("read_silver min_quality = 1 excludes Suspect and Rejected rows", {
   # Inject a Suspect row directly into the parquet
   pq_path <- list.files(file.path(root, "silver"), pattern = "\\.parquet$",
                          recursive = TRUE, full.names = TRUE)[[1L]]
-  dt <- data.table::as.data.table(arrow::read_parquet(pq_path))
+  # mmap = FALSE: on Windows a memory-mapped file cannot be rewritten (error 1224)
+  dt <- data.table::as.data.table(arrow::read_parquet(pq_path, mmap = FALSE))
   dt$qc_flag[1L]  <- 3L   # Suspect
   dt$qc_value[1L] <- NA_real_
   arrow::write_parquet(dt, pq_path)
@@ -152,7 +153,7 @@ test_that("read_silver min_quality = NULL returns all rows", {
   root <- make_silver_store()
   pq_path <- list.files(file.path(root, "silver"), pattern = "\\.parquet$",
                          recursive = TRUE, full.names = TRUE)[[1L]]
-  dt <- data.table::as.data.table(arrow::read_parquet(pq_path))
+  dt <- data.table::as.data.table(arrow::read_parquet(pq_path, mmap = FALSE))
   dt$qc_flag[1L] <- 4L   # Rejected
   arrow::write_parquet(dt, pq_path)
 
@@ -164,7 +165,7 @@ test_that("read_silver errors informatively when quality filter removes all rows
   root <- make_silver_store()
   pq_path <- list.files(file.path(root, "silver"), pattern = "\\.parquet$",
                          recursive = TRUE, full.names = TRUE)[[1L]]
-  dt <- data.table::as.data.table(arrow::read_parquet(pq_path))
+  dt <- data.table::as.data.table(arrow::read_parquet(pq_path, mmap = FALSE))
   dt$qc_flag[] <- 4L  # all Rejected
   arrow::write_parquet(dt, pq_path)
 

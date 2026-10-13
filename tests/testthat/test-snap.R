@@ -66,7 +66,8 @@ test_that("only the nearest of several off-grid rows is snapped onto an empty sl
 test_that("on an equal distance the earlier off-grid row is kept", {
   # 00:07:30 and 00:22:30 are not competing; use symmetric rows around 00:15
   dt <- compete(c("2022-01-01 00:14", "2022-01-01 00:16"))
-  expect_warning(out <- snap_offgrid_timestamps(dt))
+  # one row is snapped and the other dropped, so two warnings are issued
+  expect_warning(expect_warning(out <- snap_offgrid_timestamps(dt)))
   expect_equal(nrow(out), 1L)
   expect_equal(out$value, 1L)
 })
