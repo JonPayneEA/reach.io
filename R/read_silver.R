@@ -271,7 +271,7 @@ read_silver <- function(root, gauge_id, data_type,
   # A damaged file warns and is skipped; only if nothing is readable is it an error
   dt_list <- lapply(files, function(f) {
     tryCatch(
-      data.table::as.data.table(arrow::read_parquet(f)),
+      data.table::as.data.table(.read_parquet(f)),
       error = function(e) {
         warning(sprintf("Could not read Silver file: %s\n  %s", f,
                         conditionMessage(e)), call. = FALSE)

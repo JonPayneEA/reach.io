@@ -203,7 +203,7 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
   registry_path <- file.path(output_path, "gauge_registry.parquet")
 
   if (!overwrite && file.exists(registry_path)) {
-    existing_dt <- data.table::as.data.table(arrow::read_parquet(registry_path))
+    existing_dt <- data.table::as.data.table(.read_parquet(registry_path))
 
     # Ensure existing registry has a `live` column (backward compatibility)
     if (!"live" %in% names(existing_dt)) {

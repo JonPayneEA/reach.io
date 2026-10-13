@@ -1,7 +1,10 @@
 # -- Tests for setup_hydro_store() ---------------------------------------------
 
+# Directories under `root`, relative to it, with "/" separators on every platform.
+# (An earlier version built a regex from `root`, which breaks on Windows paths:
+# backslashes and metacharacters in the temp directory name.)
 store_dirs <- function(root) {
-  sort(sub(paste0("^", root, "/?"), "", list.dirs(root, recursive = TRUE)[-1L]))
+  sort(.relative_path(list.dirs(root, recursive = TRUE)[-1L], root))
 }
 
 test_that("setup_hydro_store builds the tier / category / supplier / data_type tree", {

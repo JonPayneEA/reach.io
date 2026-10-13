@@ -1362,7 +1362,7 @@ promote_to_silver <- function(bronze_data,
     if (!file.exists(bronze_data)) {
       stop(sprintf("Bronze file not found: %s", bronze_data))
     }
-    dt <- data.table::as.data.table(arrow::read_parquet(bronze_data))
+    dt <- data.table::as.data.table(.read_parquet(bronze_data))
   } else if (data.table::is.data.table(bronze_data)) {
     dt <- data.table::copy(bronze_data)
   } else {

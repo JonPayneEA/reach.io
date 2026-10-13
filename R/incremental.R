@@ -62,7 +62,7 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
   # and the caller falls back to default_start.
   ts <- lapply(files, function(f) {
     tryCatch(
-      arrow::read_parquet(f, col_select = "timestamp")[["timestamp"]],
+      .read_parquet(f, col_select = "timestamp")[["timestamp"]],
       error = function(e) {
         warning(sprintf("Could not read watermark from %s: %s",
                         f, conditionMessage(e)), call. = FALSE)
@@ -328,7 +328,7 @@ run_incremental <- function(registry_path,
   # live = FALSE marks historical dumps (WISKI .all) that have no feed to
   # poll. An NA, or a registry with no `live` column at all, counts as live.
   registry_all <- data.table::as.data.table(
-    arrow::read_parquet(registry_path)
+    .read_parquet(registry_path)
   )
   registry_dt <- registry_all[active == TRUE]
   if ("live" %in% names(registry_dt)) {
