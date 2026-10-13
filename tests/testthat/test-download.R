@@ -128,7 +128,7 @@ test_that("download_hydrology (sync, disk) writes Bronze Parquet by observation 
   expect_true(file.exists(file.path(root, "download_summary.csv")))
 
   obj <- read_bronze(root, "SS92F014", "P")
-  expect_true(S7::S7_inherits(obj, Rainfall_15min))
+  expect_true(S7::S7_inherits(obj, FlodeRainfall_15min))
   expect_equal(obj@readings$value, c(0.2, 0.4))
   # No stray CSV tree from the old behaviour
   expect_false(dir.exists(file.path(root, "rainfall")))

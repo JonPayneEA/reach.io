@@ -130,7 +130,7 @@ test_that("rating versions and lookups are scoped to the requested site and tier
   save_for <- function(site, tier = "bronze") {
     n_saved <<- n_saved + 1L           # distinct validity start per version
     suppressMessages(save_rating(
-      RatingCurve(limbs = rating_limbs(), station_id = site,
+      FlodeRatingCurve(limbs = rating_limbs(), station_id = site,
                   valid_from = as.Date("2015-01-01") + 365L * n_saved,
                   valid_to   = as.Date("2015-01-01") + 365L * n_saved + 364L),
       root = root, tier = tier, saved_by = "tester",

@@ -78,7 +78,7 @@ test_that("read_bronze returns the S7 class matching data type and period", {
   root <- withr::local_tempdir()
   write_fixture(root, bronze_fixture(c("2023-01-01 00:00:00", "2023-01-01 00:15:00")))
   obj <- read_bronze(root, "S1", "P")
-  expect_true(S7::S7_inherits(obj, Rainfall_15min))
+  expect_true(S7::S7_inherits(obj, FlodeRainfall_15min))
   expect_equal(nrow(obj@readings), 2L)
   expect_true(all(c("dateTime", "date", "value", "measure_notation",
                     "supplier_flag", "site_id", "data_type") %in% names(obj@readings)))

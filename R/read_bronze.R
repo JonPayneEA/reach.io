@@ -1,7 +1,7 @@
 # ============================================================
 # Tool:        Bronze Tier Data Retrieval
 # Description: Functions to read raw Bronze Parquet data back
-#              into an R session as typed S7 HydroData objects,
+#              into an R session as typed S7 FlodeHydroData objects,
 #              consistent with the output of download_hydrology().
 #
 # Functions:
@@ -161,7 +161,7 @@
 #' Read raw data for a single gauge from the Bronze store
 #'
 #' Locates all Bronze Parquet files for the specified gauge and data type,
-#' applies optional date filters, and returns an S7 `HydroData` object
+#' applies optional date filters, and returns an S7 `FlodeHydroData` object
 #' consistent with the output of [download_hydrology()].
 #'
 #' The returned object contains the raw observed `value` as stored in
@@ -198,8 +198,8 @@
 #' partitioned by observation year (one file per ingest, filed under the ingest
 #' year) should be re-ingested for date-range reads to be reliable.
 #'
-#' @return An S7 object of the appropriate `HydroData` subclass
-#'   ([Flow_15min], [Level_15min], [Rainfall_15min], [Flow_Daily], etc.),
+#' @return An S7 object of the appropriate `FlodeHydroData` subclass
+#'   ([FlodeFlow_15min], [FlodeLevel_15min], [FlodeRainfall_15min], [FlodeFlow_Daily], etc.),
 #'   depending on the data type and stored period. The `@readings` slot is
 #'   a `data.table` with columns `dateTime`, `date`, `value`,
 #'   `measure_notation`, `supplier_flag`, `site_id`, and `data_type`.
@@ -322,7 +322,7 @@ read_bronze <- function(root, gauge_id, data_type,
 #' @param ... Additional arguments passed to [read_bronze()] (e.g.
 #'   `supplier_code`, `start`, `end`).
 #'
-#' @return A named list of S7 `HydroData` objects, one per successfully read
+#' @return A named list of S7 `FlodeHydroData` objects, one per successfully read
 #'   gauge. Names match `gauge_ids`. Gauges with no data are omitted.
 #'
 #' @export
@@ -375,7 +375,7 @@ read_bronze_multi <- function(root, gauge_ids, data_type, ...) {
 #'   catchment identifiers. Default `"catchment_id"`.
 #' @param ... Additional arguments passed to [read_bronze_multi()].
 #'
-#' @return A named list of S7 `HydroData` objects, one per gauge in the
+#' @return A named list of S7 `FlodeHydroData` objects, one per gauge in the
 #'   catchment that has Bronze data.
 #'
 #' @export

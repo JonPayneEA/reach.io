@@ -54,7 +54,7 @@ test_that("ingest_all_file writes year-partitioned Bronze readable by read_bronz
                fixed = FALSE)
 
   obj <- read_bronze(root, "2723TH", "Q", supplier_code = "WISKI")
-  expect_true(S7::S7_inherits(obj, Flow_15min))
+  expect_true(S7::S7_inherits(obj, FlodeFlow_15min))
   expect_equal(obj@readings$value, c(1.5, 1.6, 1.7))
   expect_equal(obj@readings$supplier_flag, rep("100", 3))
 
