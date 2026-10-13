@@ -33,6 +33,10 @@ NULL
 # get a valid data.table.
 #' @noRd
 .normalise_limb_names <- function(dt) {
+  # Renames by reference, one alias per target (first match in column order).
+  # Only the spellings listed are recognised; any other name is left alone and
+  # the validator then reports the column as missing. The constructor passes
+  # its own copy of the caller's table.
   nm  <- names(dt)
   map <- list(
     lower    = c("lower", "lower_level", "lower.level", "Lower", "Lower_level", "Lower.level"),
@@ -59,6 +63,10 @@ NULL
 #   - NaN from 0^0 edge case             → 0
 #' @noRd
 .rate_stage <- function(h, limbs) {
+  # findInterval() looks at the LOWER bounds only: limb i covers
+  # [lower[i], lower[i+1]), so a stage exactly on a junction is rated by the
+  # upper limb, and the last limb's `upper` is never consulted (higher stages
+  # are extrapolated with that limb and take its doubtful flag).
   idx    <- findInterval(h, limbs$lower)   # 0 = below all limbs
   n      <- length(h)
   q      <- rep(NA_real_, n)
@@ -68,6 +76,8 @@ NULL
   if (any(valid)) {
     li         <- idx[valid]
     hv         <- h[valid]
+    # (h - a) is floored at 0 so a stage at or below the datum gives Q = 0
+    # rather than a negative base raised to a fractional power (NaN).
     q[valid]   <- pmax(0,
                        limbs$C[li] * pmax(hv - limbs$a[li], 0)^limbs$b[li])
     q[valid][is.nan(q[valid])] <- 0
@@ -85,6 +95,11 @@ NULL
   n_obs  <- length(dates)
   idx    <- rep(NA_integer_, n_obs)
 
+  # Later curves overwrite earlier ones where windows overlap (the set
+  # validator normally rules that out). Matching is on calendar date, both ends
+  # inclusive, with an NA valid_to meaning open-ended. A curve whose valid_from
+  # is NA matches nothing: the comparison is NA, and assigning through an NA
+  # index is skipped.
   for (i in seq_along(curves)) {
     cv   <- curves[[i]]
     from <- cv@valid_from
@@ -100,6 +115,9 @@ NULL
 }
 
 # Compute Q at the junction between limb i and limb i+1 from each side.
+# Each limb is evaluated with its own C, a and b at the shared stage upper[i]
+# (equal to lower[i+1] within the 1e-9 the validator allows), with (h - a)
+# floored at 0 as in .rate_stage().
 #' @noRd
 .junction_Q <- function(limbs, i) {
   h <- limbs$upper[i]  # == limbs$lower[i + 1]
@@ -124,6 +142,33 @@ NULL
 #'
 #' where \eqn{h} is gauge stage (m), \eqn{Q} is discharge (m³/s), and
 #' \eqn{C}, \eqn{a}, \eqn{b} are per-limb parameters.
+#'
+#' @details
+#' The constructor accepts any `data.frame`. Common column spellings (for
+#' example `Lower.level`, `multiplier`, `datum`, `exponent`, `flag`) are renamed
+#' to `lower`, `upper`, `C`, `a`, `b` and `doubtful`, those columns are coerced
+#' to numeric (`doubtful` to logical), and the result is validated. The table
+#' you pass in is not modified.
+#'
+#' Validation rejects a curve unless:
+#'
+#' - all six columns are present and there is at least one limb;
+#' - `C`, `a` and `b` are finite, with `C > 0` and `b > 0`;
+#' - each limb has `lower < upper`, limbs are sorted by `lower`, and
+#'   `upper[i]` equals `lower[i + 1]` to within 1e-9 m;
+#' - `valid_from` and `valid_to` are each `NA` or a `Date`.
+#'
+#' Contiguity is checked on **stage** only. Whether adjacent limbs give the same
+#' *discharge* at their shared stage is a separate question: see
+#' [check_limb_continuity()] and [fix_limb_continuity()]. The order of
+#' `valid_from` and `valid_to`, and the content of `station_id`, are not
+#' checked.
+#'
+#' How a curve is applied by [apply_rating()]: limb `i` covers
+#' `[lower[i], upper[i])`, so a stage exactly on a junction is rated by the
+#' upper limb; a stage below the first `lower` has no rating (`NA`); a stage
+#' above the last `upper` is extrapolated with the last limb; and a stage at or
+#' below `a` gives zero discharge.
 #'
 #' @slot limbs A `data.table` with one row per rating limb and columns:
 #'   \describe{
@@ -163,10 +208,14 @@ FlodeRatingCurve <- S7::new_class(
                          valid_to   = NA,
                          station_id = NA_character_,
                          source     = NA_character_) {
+    # as.data.table() copies a data.table input, so the in-place renaming and
+    # coercion below never touch the caller's table.
     dt <- data.table::as.data.table(limbs)
     dt <- .normalise_limb_names(dt)
 
     # Coerce types where safely possible
+    # as.numeric() on non-numeric text gives NA with a warning; the validator
+    # then rejects NA in C, a and b.
     for (col in c("lower", "upper", "C", "a", "b")) {
       if (col %in% names(dt)) {
         data.table::set(dt, j = col, value = as.numeric(dt[[col]]))
@@ -186,6 +235,7 @@ FlodeRatingCurve <- S7::new_class(
   validator = function(self) {
     dt <- self@limbs
 
+    # -- Structure and types -------------------------------------------------
     if (!inherits(dt, "data.table")) {
       return("`limbs` must be a data.table.")
     }
@@ -210,6 +260,10 @@ FlodeRatingCurve <- S7::new_class(
       return("`limbs$doubtful` must be logical.")
     }
 
+    # -- Parameter values ----------------------------------------------------
+    # NA/NaN/Inf would propagate silently into rated flows. C > 0 and b > 0 keep
+    # Q non-negative and increasing in h, and keep the inverse (Q/C)^(1/b)
+    # defined.
     if (any(!is.finite(dt$C) | !is.finite(dt$a) | !is.finite(dt$b))) {
       return("`limbs` columns C, a, and b must all be finite (no NA, NaN, or Inf).")
     }
@@ -220,14 +274,22 @@ FlodeRatingCurve <- S7::new_class(
       return("`limbs$b` must be positive (> 0).")
     }
 
+    # -- Limb geometry -------------------------------------------------------
+    # na.rm = TRUE: an NA bound is caught by neither this check nor the
+    # contiguity check below.
     if (any(dt$lower >= dt$upper, na.rm = TRUE)) {
       return("Each limb's `lower` must be strictly less than its `upper`.")
     }
 
     if (nrow(dt) > 1L) {
+      # .rate_stage() runs findInterval() on `lower`, which needs ascending
+      # breakpoints.
       if (!all(dt$lower == sort(dt$lower))) {
         return("`limbs` must be sorted by `lower` in ascending order.")
       }
+      # Contiguity is on stage, with 1e-9 m absolute tolerance for floating-point
+      # noise. Whether Q agrees at the junction is checked elsewhere
+      # (check_limb_continuity()).
       gaps <- abs(dt$upper[-nrow(dt)] - dt$lower[-1L])
       if (any(gaps > 1e-9, na.rm = TRUE)) {
         bad <- which(gaps > 1e-9)[1L]
@@ -238,6 +300,8 @@ FlodeRatingCurve <- S7::new_class(
       }
     }
 
+    # -- Validity dates ------------------------------------------------------
+    # NA means open on that side. The two dates are not compared with each other.
     if (!is.na(self@valid_from) && !inherits(self@valid_from, "Date")) {
       return("`valid_from` must be a Date or NA.")
     }
@@ -260,6 +324,19 @@ FlodeRatingCurve <- S7::new_class(
 #' calendar period — for instance to account for channel changes, re-surveys,
 #' or shift corrections. [apply_rating()] uses `valid_from` / `valid_to` on
 #' each curve to select the correct rating for every observation.
+#'
+#' @details
+#' The constructor accepts a single [FlodeRatingCurve] and wraps it in a list.
+#' Validation checks that the list is non-empty, every element is a
+#' [FlodeRatingCurve], and no two validity windows overlap. Windows are closed
+#' on both ends (a curve ending on 2020-03-31 and one starting on the same day
+#' overlap) and `valid_to = NA` is open-ended. Only pairs of curves that both
+#' have a `valid_from` are compared, so a curve without one escapes the check;
+#' such a curve is also never selected by [apply_rating()], which matches rows
+#' on the window.
+#'
+#' The order of curves in the list does not matter, and the set's `station_id`
+#' is not compared with the `station_id` of its curves.
 #'
 #' @slot curves A `list` of [FlodeRatingCurve] objects with non-overlapping
 #'   validity periods.
@@ -289,7 +366,10 @@ FlodeRatingSet <- S7::new_class(
       }
     }
 
-    # Check validity periods are non-overlapping (where both bounds are known)
+    # -- Validity windows ----------------------------------------------------
+    # Pairwise check that windows [valid_from, valid_to] do not overlap. Both
+    # ends are inclusive and an NA valid_to is open-ended (Inf). Pairs in which
+    # either curve lacks a valid_from are skipped; non-Date values count as NA.
     froms <- vapply(self@curves, function(cv) {
       if (inherits(cv@valid_from, "Date")) as.numeric(cv@valid_from) else NA_real_
     }, numeric(1L))
@@ -333,6 +413,35 @@ FlodeRatingSet <- S7::new_class(
 #'
 #' The output `readings` data.table carries an extra `doubtful` column
 #' (`TRUE` where the applicable rating limb has its doubtful flag set).
+#'
+#' @details
+#' Each stage is rated as follows:
+#'
+#' - An `NA` stage stays `NA`.
+#' - A stage below the lowest limb's `lower` has no rating and gives `NA`, so a
+#'   negative stage on a curve whose first limb starts at 0 is `NA`, not zero
+#'   flow.
+#' - Otherwise the limb with the greatest `lower` not above the stage is used.
+#'   A stage exactly on a junction therefore uses the upper limb, and stages
+#'   above the last limb's `upper` are extrapolated with the last limb.
+#' - A stage at or below the limb's datum offset `a` gives `Q = 0`, not `NA`.
+#'
+#' With a single [FlodeRatingCurve], `valid_from` / `valid_to` are **not**
+#' consulted: the curve is applied to every row. Validity windows take effect
+#' only through a [FlodeRatingSet], where each row is matched on its `date`
+#' column (calendar date, both ends inclusive, `valid_to = NA` open-ended; the
+#' time of day plays no part). A curve whose `valid_from` is `NA` never matches
+#' inside a set.
+#'
+#' Counts of rows set to `NA` are reported as warnings, not errors: one for
+#' stages below the lowest limb and, for a set, one for rows outside every
+#' validity window. The input object is not modified. The output keeps the
+#' input columns (such as `quality`), replaces `value` with discharge, sets
+#' `measure_notation` to the single label given (so the result has one measure
+#' whatever the input had), and adds `doubtful`, which is `NA` where no limb
+#' applied. `from_date` and `to_date` are copied from `level`. See also
+#' [apply_inverse_rating()] for the reverse conversion and
+#' [check_limb_continuity()] to inspect a curve before using it.
 #'
 #' @param level A [FlodeLevel_Daily] or [FlodeLevel_15min] object.
 #' @param rating A [FlodeRatingCurve] or [FlodeRatingSet].
@@ -378,11 +487,16 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
     stop("`level` must be a FlodeLevel_Daily or FlodeLevel_15min object.")
   }
 
+  # -- Rate stage ------------------------------------------------------------
+  # Work on a copy: := below must not alter the Level object's own table
+  # (as_data_table() hands out the stored table by reference).
   dt    <- data.table::copy(level@readings)
   stage <- dt$value
 
   rated <- .rate_stage(stage, rating@limbs)
 
+  # A non-NA stage with NA discharge can only be one below the lowest limb's
+  # lower bound, the single case .rate_stage() leaves unrated.
   n_below <- sum(is.na(rated$value) & !is.na(stage))
   if (n_below > 0L) {
     warning(sprintf(
@@ -391,6 +505,9 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
     ))
   }
 
+  # -- Build output ----------------------------------------------------------
+  # The result is a Flow object of the same period; its constructor recomputes
+  # n_rows and n_measures (now a single measure_notation).
   dt[, value            := rated$value]
   dt[, doubtful         := rated$doubtful]
   dt[, measure_notation := measure_notation]
@@ -413,6 +530,8 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
     stop("`level` must be a FlodeLevel_Daily or FlodeLevel_15min object.")
   }
 
+  # -- Match rows to curves --------------------------------------------------
+  # Copy for the same reason as in .apply_rating_curve().
   dt    <- data.table::copy(level@readings)
   stage <- dt$value
   n     <- nrow(dt)
@@ -420,8 +539,12 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
   q_out  <- rep(NA_real_, n)
   dbt_out <- rep(NA, n)
 
+  # Per row, the index of the curve whose window contains the row's `date`
+  # (NA if none).
   curve_idx <- .find_valid_curve(dt$date, rating)
 
+  # Rows with no matching curve stay NA. They are counted here, separately from
+  # rows below a curve's limb range (counted further down).
   n_unmatched <- sum(is.na(curve_idx))
   if (n_unmatched > 0L) {
     warning(sprintf(
@@ -430,6 +553,8 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
     ))
   }
 
+  # -- Rate per curve --------------------------------------------------------
+  # One vectorised .rate_stage() call per curve, on only that curve's rows.
   for (i in seq_along(rating@curves)) {
     rows <- which(curve_idx == i)
     if (length(rows) == 0L) next
@@ -439,6 +564,8 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
     dbt_out[rows]  <- rated$doubtful
   }
 
+  # Excludes unmatched rows (curve_idx NA) so the two warnings do not double
+  # count.
   n_below <- sum(is.na(q_out) & !is.na(stage) & !is.na(curve_idx))
   if (n_below > 0L) {
     warning(sprintf(
@@ -447,6 +574,7 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
     ))
   }
 
+  # -- Build output ----------------------------------------------------------
   dt[, value            := q_out]
   dt[, doubtful         := dbt_out]
   dt[, measure_notation := measure_notation]
@@ -476,6 +604,21 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
 #'
 #' Use [fix_limb_continuity()] to correct any discontinuities by adjusting
 #' the `C` parameters.
+#'
+#' @details
+#' Each junction is evaluated with the two limbs' own `C`, `a` and `b` at the
+#' shared stage `upper[i]`, with `(h - a)` floored at zero. `gap_m3s` keeps its
+#' sign (upper minus lower limb), but `gap_pct` is unsigned and is taken
+#' relative to the lower limb's discharge. When that discharge is zero (the
+#' junction is at or below the lower limb's `a`) the percentage is undefined, so
+#' `gap_pct` is `NA` and the junction counts as **not** connected, even if both
+#' limbs give zero.
+#'
+#' A curve with one limb has no junctions: a message is printed and an empty
+#' table returned. Otherwise a message says how many junctions exceed
+#' `tol_pct`; when any do, the failing rows are also printed to the console.
+#' The full table is returned invisibly in either case. The curve is not
+#' modified; see [fix_limb_continuity()] to correct it.
 #'
 #' @param x A [FlodeRatingCurve].
 #' @param tol_pct Numeric scalar. Percentage tolerance for declaring a junction
@@ -511,9 +654,12 @@ S7::method(check_limb_continuity, FlodeRatingCurve) <- function(x, tol_pct = 1) 
     return(invisible(data.table::data.table()))
   }
 
+  # One row per junction (limb i / i + 1); .junction_Q() evaluates both sides.
   rows <- lapply(seq_len(n - 1L), function(i) {
     jq      <- .junction_Q(limbs, i)
     gap     <- jq$Q_upper - jq$Q_lower
+    # Unsigned and relative to the LOWER limb's Q. Undefined when that Q is 0;
+    # the NA then fails the `connected` test below, so it counts as not connected.
     gap_pct <- if (jq$Q_lower > 0) abs(gap) / jq$Q_lower * 100 else NA_real_
 
     data.table::data.table(
@@ -529,6 +675,8 @@ S7::method(check_limb_continuity, FlodeRatingCurve) <- function(x, tol_pct = 1) 
 
   out <- data.table::rbindlist(rows)
 
+  # Report: always a message; failing junctions are also printed. The full
+  # table is returned invisibly.
   n_bad <- sum(!out$connected)
   if (n_bad == 0L) {
     message(sprintf("All %d junction(s) connect within %.4g%%.", nrow(out), tol_pct))
@@ -562,6 +710,27 @@ S7::method(check_limb_continuity, FlodeRatingCurve) <- function(x, tol_pct = 1) 
 #' \eqn{C_2} feeds into the computation of \eqn{C_3}, and so on. The anchor
 #' limb's \eqn{C} is never modified.
 #'
+#' @details
+#' Junctions are processed from the lowest upward and each is forced to match
+#' exactly; there is no tolerance, so a junction that already agreed within
+#' [check_limb_continuity()]'s tolerance still has its `C` nudged (usually by a
+#' tiny percentage). Each new `C` is computed from the limb below as already
+#' corrected, so a change at one junction carries through to all later limbs.
+#' Only `C` of limbs 2 and up is rescaled, so every rated flow within such a
+#' limb moves by the same factor as its `C`; flows in limb 1 are unchanged.
+#' `lower`, `upper`, `a`, `b` and `doubtful` are untouched.
+#'
+#' A junction is skipped with a warning (the limb keeps its `C`, and later
+#' junctions continue from that unchanged value) when the junction stage is at
+#' or below the upper limb's `a` (that limb gives zero flow whatever `C` is, so
+#' `C` cannot be solved) or when the lower limb gives zero or negative flow
+#' there (the new `C` would be zero, which a [FlodeRatingCurve] forbids).
+#'
+#' The original object is not changed; the result keeps the validity dates,
+#' `station_id` and `source`, and is re-validated by the constructor. A
+#' single-limb curve is returned as is, with a message. Nothing is written to
+#' the store: use [save_rating()] to keep the corrected curve.
+#'
 #' @param x A [FlodeRatingCurve].
 #'
 #' @return A new [FlodeRatingCurve] with updated `C` values. A message is printed
@@ -588,10 +757,19 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
 
   message("Adjusting C parameters (anchor = limb 1, propagating upward):")
 
+  # Walk the junctions from the bottom. `limbs` is updated inside the loop, so
+  # .junction_Q() at junction i sees limb i's C as already corrected at the
+  # previous step - this is how a change propagates upward from the anchor.
   for (i in seq_len(n - 1L)) {
     jq    <- .junction_Q(limbs, i)   # uses current (possibly already adjusted) C[i]
+    # Limb i + 1 must give Q_lower at the junction stage h:
+    #   C_new * (h - a)^b = Q_lower   =>   C_new = Q_lower / (h - a)^b
+    # denom is that power term.
     denom <- max(jq$h - limbs$a[i + 1L], 0)^limbs$b[i + 1L]
 
+    # denom is 0 when h is at or below the upper limb's datum offset a: the limb
+    # then gives Q = 0 whatever C is, so C cannot be solved. A skipped limb
+    # keeps its C and the loop carries on from that unchanged value.
     if (denom <= 0 || !is.finite(denom)) {
       warning(sprintf(
         "  Limb %d: junction stage (%.4g m) is at or below datum offset a = %.4g. ",
@@ -600,6 +778,8 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
       next
     }
 
+    # A zero (or negative) lower-limb Q would force C_new to 0, which
+    # FlodeRatingCurve rejects (C must be > 0).
     if (jq$Q_lower <= 0) {
       warning(sprintf(
         "  Limb %d -> %d: Q at junction is zero or negative (%.4g m\u00b3/s). ",
@@ -619,6 +799,8 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
     ))
   }
 
+  # Rebuilt through the constructor so the result is re-validated; the validity
+  # window, station and source are carried over unchanged.
   FlodeRatingCurve(
     limbs      = limbs,
     valid_from = x@valid_from,
@@ -633,6 +815,9 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
 # Print methods
 # =============================================================================
 
+# Registered as the S3 print method for "reach.io::FlodeRatingCurve" in
+# .onLoad() (package.R): S7's print.S7_object calls str() directly and ignores
+# S7::method(print, ...) assignments.
 .print_RatingCurve <- function(x, ...) {
   vf <- if (inherits(x@valid_from, "Date")) format(x@valid_from) else "-"
   vt <- if (inherits(x@valid_to,   "Date")) format(x@valid_to)   else "open"
@@ -646,6 +831,8 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
   ))
 
   # Pretty-print limbs table
+  # Format a COPY: the := calls below turn columns into text and must not
+  # touch x@limbs.
   lt <- data.table::copy(x@limbs)
   lt[, upper := ifelse(is.infinite(upper), "Inf", sprintf("%.4g", upper))]
   lt[, lower := sprintf("%.4g", lower)]
@@ -686,6 +873,8 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
 
   # Q at the lower and upper boundary of each limb, evaluated from that limb's
   # own equation.  Upper boundary of the last limb is Inf.
+  # (With a discontinuous curve q_upper[i - 1] differs from q_lower[i]; the
+  # difference is the "gap" handled below.)
   q_lower <- pmax(limbs$C * pmax(limbs$lower - limbs$a, 0)^limbs$b, 0)
   q_upper <- ifelse(
     is.finite(limbs$upper),
@@ -695,19 +884,26 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
   q_lower[is.nan(q_lower)] <- 0
   q_upper[is.nan(q_upper)] <- 0
 
+  # NA and negative flows give NA; zero flow is allowed.
   valid <- !is.na(q) & q >= 0
 
   for (idx in which(valid)) {
     qi <- q[idx]
 
     # First limb whose upper-boundary Q >= qi
+    # (If the curve steps down at a junction, limbs overlap in Q and the lower
+    # limb wins here.)
     i <- which(q_upper >= qi)[1L]
     if (is.na(i)) i <- nl  # above all limbs: extrapolate using last limb
 
+    # No gap test for limb 1: a flow below the discharge limb 1 gives at its
+    # own `lower` is inverted by extending limb 1 below that stage, whereas the
+    # forward rating returns NA for stages there.
     if (i > 1L && qi < q_lower[i]) {
       # Falls in a discontinuity gap between limbs i-1 and i
       h[idx] <- limbs$upper[i - 1L]
     } else if (qi <= 0) {
+      # Zero flow maps to the lowest limb bound, not to the datum a.
       h[idx] <- limbs$lower[1L]
     } else {
       h[idx] <- (qi / limbs$C[i])^(1 / limbs$b[i]) + limbs$a[i]
@@ -725,12 +921,14 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
     stop("`flow` must be a FlodeFlow_Daily or FlodeFlow_15min object.")
   }
 
+  # Copy: := below must not alter the Flow object's own table.
   dt <- data.table::copy(flow@readings)
 
   h <- .invert_stage(dt$value, rating@limbs)
 
   dt[, value            := h]
   dt[, measure_notation := measure_notation]
+  # Stage has no doubtful flag, so the column from apply_rating() is dropped.
   if ("doubtful" %in% names(dt)) dt[, doubtful := NULL]
 
   if (S7::S7_inherits(flow, FlodeFlow_Daily)) {
@@ -752,6 +950,8 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
     stop("`flow` must be a FlodeFlow_Daily or FlodeFlow_15min object.")
   }
 
+  # -- Match rows to curves --------------------------------------------------
+  # Copy: := below must not alter the Flow object's own table.
   dt  <- data.table::copy(flow@readings)
   q   <- dt$value
   n   <- nrow(dt)
@@ -767,12 +967,15 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
     ))
   }
 
+  # -- Invert per curve ------------------------------------------------------
   for (i in seq_along(rating@curves)) {
     rows <- which(curve_idx == i)
     if (length(rows) == 0L) next
     h[rows] <- .invert_stage(q[rows], rating@curves[[i]]@limbs)
   }
 
+  # -- Build output ----------------------------------------------------------
+  # The doubtful column from apply_rating() is dropped: stage has no such flag.
   dt[, value            := h]
   dt[, measure_notation := measure_notation]
   if ("doubtful" %in% names(dt)) dt[, doubtful := NULL]
@@ -807,6 +1010,30 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
 #' value that falls inside the gap is mapped to the junction stage
 #' (the upper boundary of the lower limb). Use [fix_limb_continuity()] to
 #' remove gaps before inverting if this behaviour is undesirable.
+#'
+#' @details
+#' Each flow is inverted as follows:
+#'
+#' - An `NA` or negative flow gives `NA`. A zero flow gives the first limb's
+#'   `lower`, not the datum `a`.
+#' - A positive flow is assigned to the first limb whose discharge at its upper
+#'   boundary (from that limb's own equation) reaches the flow, then inverted
+#'   with the equation above. If limbs overlap in discharge because the curve
+#'   steps down at a junction, the lower limb wins. Flows above the last limb
+#'   are extrapolated with the last limb.
+#' - A flow inside a gap between limbs gives the junction stage (see above).
+#' - A flow below the discharge the first limb gives at its own `lower` is
+#'   inverted by extending the first limb below that stage, whereas
+#'   [apply_rating()] returns `NA` for such stages, so a round trip is not exact
+#'   there.
+#'
+#' As in [apply_rating()], a single [FlodeRatingCurve] is applied to every row
+#' regardless of its validity dates, while a [FlodeRatingSet] matches each row
+#' on its `date` column and sets rows outside every window to `NA` with a
+#' warning. No other warnings are issued. The `doubtful` column of the flow
+#' object, if present, is dropped because stage has no such flag, and
+#' `measure_notation` is replaced by the single label given. The input is not
+#' modified.
 #'
 #' @param flow A [FlodeFlow_Daily] or [FlodeFlow_15min] object.
 #' @param rating A [FlodeRatingCurve] or [FlodeRatingSet].
@@ -852,6 +1079,8 @@ apply_inverse_rating <- function(flow, rating,
 # Print methods
 # =============================================================================
 
+# Registered as the S3 print method for "reach.io::FlodeRatingSet" in .onLoad()
+# (package.R), for the same reason as .print_RatingCurve().
 .print_RatingSet <- function(x, ...) {
   fmt_date <- function(d) if (inherits(d, "Date")) format(d) else "-"
 

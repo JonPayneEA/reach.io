@@ -96,6 +96,9 @@ FlodeHydroData <- S7::new_class(
   validator = function(self) {
     dt <- self@readings
 
+    # -- Structure -----------------------------------------------------------
+    # Normally .as_readings_dt() has already rejected a non-table; this also
+    # guards a value assigned later with `@<-`.
     if (!inherits(dt, "data.table")) {
       return("`readings` must be a data.table.")
     }
@@ -107,6 +110,7 @@ FlodeHydroData <- S7::new_class(
                      paste(missing, collapse = ", ")))
     }
 
+    # -- Column types --------------------------------------------------------
     if (!inherits(dt$dateTime, "POSIXct")) {
       return("`readings$dateTime` must be POSIXct.")
     }
@@ -119,6 +123,10 @@ FlodeHydroData <- S7::new_class(
     if (!is.character(dt$measure_notation)) {
       return("`readings$measure_notation` must be character.")
     }
+    # -- Scalar metadata -----------------------------------------------------
+    # Only the lengths are checked, not the values (the concrete class fixes
+    # them). n_rows and n_measures are computed once at construction and are not
+    # recomputed or checked if `readings` is replaced later.
     if (length(self@parameter) != 1L) {
       return("`parameter` must be length 1.")
     }
@@ -159,6 +167,10 @@ FlodeHydroData <- S7::new_class(
                            from_date = NA_character_,
                            to_date   = NA_character_) {
       readings <- .as_readings_dt(readings)
+      # parameter and period_name are fixed by the class, not arguments.
+      # n_rows, n_measures and downloaded_at are derived here from the coerced
+      # table; downloaded_at is the construction time, not the original
+      # download time. S7 validates the object when new_object() returns.
       S7::new_object(
         S7::S7_object(),
         readings      = readings,
@@ -182,6 +194,22 @@ FlodeHydroData <- S7::new_class(
 #' Wraps daily cumulative rainfall readings from [download_hydrology()].
 #' Typical units: mm. One row per day per measure.
 #'
+#' @details
+#' The constructor first checks that `readings` is a table (anything else is an
+#' immediate error), then fills in the properties: `parameter` and
+#' `period_name` are fixed by the class (they are not arguments), and `n_rows`,
+#' `n_measures` and `downloaded_at` are computed at construction.
+#' `downloaded_at` is the time the object was built, not the original download
+#' time, so an object read back with [read_bronze()] carries the read time.
+#'
+#' Validation requires columns `dateTime` (`POSIXct`), `date` (`Date`), `value`
+#' (numeric) and `measure_notation` (character); extra columns such as
+#' `quality` are kept untouched. It does not check that `date` agrees with
+#' `dateTime`, that rows are sorted or unique, that the spacing matches the
+#' period, or the units. `n_rows` and `n_measures` are not recomputed if
+#' `@readings` is replaced later. All six hydrometric classes share these
+#' rules.
+#'
 #' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, mm), `measure_notation` (character),
 #'   and optionally `quality` and `completeness`.
@@ -200,6 +228,11 @@ FlodeRainfall_Daily <- .new_hydro_class("FlodeRainfall_Daily", "rainfall", "dail
 #'
 #' Wraps 15-minute cumulative rainfall readings from [download_hydrology()].
 #' Typical units: mm. One row per 15-minute interval per measure.
+#'
+#' @details
+#' Construction and validation are as for [FlodeRainfall_Daily]. Nothing checks
+#' that the rows really are 15 minutes apart: the class only labels
+#' `period_name`.
 #'
 #' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, mm), `measure_notation` (character),
@@ -220,6 +253,12 @@ FlodeRainfall_15min <- .new_hydro_class("FlodeRainfall_15min", "rainfall", "15mi
 #' Wraps daily mean flow readings from [download_hydrology()].
 #' Typical units: m3/s. One row per day per measure.
 #'
+#' @details
+#' Construction and validation are as for [FlodeRainfall_Daily]. Rated flow from
+#' [apply_rating()] also carries a `doubtful` column, which is kept (extra
+#' columns are not validated); [apply_inverse_rating()] converts flow back to
+#' level.
+#'
 #' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, m3/s), `measure_notation` (character),
 #'   and optionally `quality` and `completeness`.
@@ -238,6 +277,11 @@ FlodeFlow_Daily <- .new_hydro_class("FlodeFlow_Daily", "flow", "daily")
 #'
 #' Wraps 15-minute flow readings from [download_hydrology()].
 #' Typical units: m3/s. One row per 15-minute interval per measure.
+#'
+#' @details
+#' Construction and validation are as for [FlodeRainfall_Daily]. Nothing checks
+#' that the rows really are 15 minutes apart. Rated flow from [apply_rating()]
+#' also carries a `doubtful` column, which is kept.
 #'
 #' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, m3/s), `measure_notation` (character),
@@ -260,6 +304,11 @@ FlodeFlow_15min <- .new_hydro_class("FlodeFlow_15min", "flow", "15min")
 #' instantaneous) may be present depending on the `value_type` argument
 #' used when downloading.
 #'
+#' @details
+#' Construction and validation are as for [FlodeRainfall_Daily]. Stage is
+#' stored as supplied: the vertical datum is neither recorded nor checked. Use
+#' [apply_rating()] to convert to flow.
+#'
 #' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, m), `measure_notation` (character),
 #'   and optionally `quality` and `completeness`.
@@ -278,6 +327,11 @@ FlodeLevel_Daily <- .new_hydro_class("FlodeLevel_Daily", "level", "daily")
 #'
 #' Wraps 15-minute water level readings from [download_hydrology()].
 #' Typical units: mAOD or mASD. One row per 15-minute interval per measure.
+#'
+#' @details
+#' Construction and validation are as for [FlodeRainfall_Daily]. Nothing checks
+#' that the rows really are 15 minutes apart, and the vertical datum is neither
+#' recorded nor checked. Use [apply_rating()] to convert to flow.
 #'
 #' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, m), `measure_notation` (character),
@@ -298,6 +352,9 @@ FlodeLevel_15min <- .new_hydro_class("FlodeLevel_15min", "level", "15min")
 
 # Internal: map parameter + period_name to the correct constructor.
 # Used by download_hydrology() to wrap output without a switch() block.
+# Keys are the parameter ("rainfall", "flow", "level") and the period_name
+# ("daily", "15min") of the class. Also used by read_bronze() and read_silver()
+# to wrap stored data.
 #' @noRd
 HYDRO_CLASS <- list(
   rainfall = list(daily  = FlodeRainfall_Daily,
@@ -316,6 +373,13 @@ HYDRO_CLASS <- list(
 #' `as_data_table()` is an S7 generic. Returns the inner `data.table` from
 #' any `FlodeHydroData`- or `FlodePotEvapData`-derived object for direct use with
 #' `data.table` or `arrow` without touching `@readings`.
+#'
+#' @details
+#' The table returned is the one stored in the object, not a copy, so changing
+#' it by reference (`:=`, `set()`, `setorder()`) also changes the object. Take
+#' `data.table::copy()` first if the object must stay intact; [as_long()]
+#' returns a copy. Methods exist for the hydrometric and potential evaporation
+#' classes only.
 #'
 #' @param x A [FlodeRainfall_Daily], [FlodeRainfall_15min], [FlodeFlow_Daily], [FlodeFlow_15min],
 #'   [FlodeLevel_Daily], [FlodeLevel_15min], [FlodePotEvap_Daily], [FlodePotEvap_Hourly], or
@@ -341,6 +405,15 @@ S7::method(as_data_table, FlodeHydroData) <- function(x) x@readings
 #' `as_long()` is an S7 generic. Adds a `parameter` column and reorders so
 #' results from multiple parameter objects can be combined with `rbind()`.
 #'
+#' @details
+#' Works on a copy, so the object is unchanged. The `parameter` column holds
+#' `"rainfall"`, `"flow"` or `"level"`. The first five columns are `parameter`,
+#' `measure_notation`, `date`, `dateTime` and `value`; any other columns follow
+#' in their original order. Binding results for different parameters with
+#' `rbind()` needs identical columns, so use `data.table::rbindlist()` with
+#' `fill = TRUE` if some carry extras (for example `doubtful` from
+#' [apply_rating()]). No method exists for potential evaporation objects.
+#'
 #' @param x A [FlodeRainfall_Daily], [FlodeRainfall_15min], [FlodeFlow_Daily], [FlodeFlow_15min],
 #'   [FlodeLevel_Daily], or [FlodeLevel_15min] object.
 #'
@@ -359,8 +432,10 @@ S7::method(as_data_table, FlodeHydroData) <- function(x) x@readings
 as_long <- S7::new_generic("as_long", "x")
 
 S7::method(as_long, FlodeHydroData) <- function(x) {
+  # Copy: := must not add a `parameter` column to the object's own table.
   dt <- data.table::copy(x@readings)
   dt[, parameter := x@parameter]
+  # Leading columns are fixed; setcolorder() leaves the rest in place after them.
   data.table::setcolorder(dt, c("parameter", "measure_notation",
                                 "date", "dateTime", "value"))
   dt
@@ -398,6 +473,10 @@ S7::method(as_long, FlodeHydroData) <- function(x) {
   invisible(x)
 }
 
+# NB: S7's print.S7_object calls str() and does not consult this method table,
+# so this assignment alone does not change auto-printing. .onLoad() (package.R)
+# also registers .print_HydroData as an S3 method for "reach.io::FlodeHydroData",
+# which is the registration that takes effect.
 S7::method(print, FlodeHydroData) <- .print_HydroData
 
 
@@ -451,6 +530,7 @@ FlodePotEvapData <- S7::new_class(
                      paste(missing, collapse = ", ")))
     }
 
+    # -- Column types --------------------------------------------------------
     if (!inherits(dt$dateTime, "POSIXct")) {
       return("`readings$dateTime` must be POSIXct.")
     }
@@ -460,6 +540,9 @@ FlodePotEvapData <- S7::new_class(
     if (!is.numeric(dt$value)) {
       return("`readings$value` must be numeric.")
     }
+    # -- Scalar metadata -----------------------------------------------------
+    # The concrete constructors fix period_name, so this guards later
+    # assignment. source_name is free text; NA is accepted but it must be length 1.
     if (length(self@period_name) != 1L ||
         !self@period_name %in% c("daily", "hourly", "15min")) {
       return('`period_name` must be one of "daily", "hourly", "15min".')
@@ -487,6 +570,8 @@ FlodePotEvapData <- S7::new_class(
                            from_date   = NA_character_,
                            to_date     = NA_character_) {
       dt <- .as_readings_dt(readings)
+      # period_name is fixed by the class; n_rows and created_at are derived at
+      # construction (created_at is the build time). S7 validates on return.
       S7::new_object(
         S7::S7_object(),
         readings    = dt,
@@ -509,6 +594,16 @@ FlodePotEvapData <- S7::new_class(
 #' Wraps daily PE values sourced directly from an external PE dataset
 #' (e.g. CEH CHESS-PE, MORECS). Units are typically mm/day.
 #'
+#' @details
+#' The constructor checks that `readings` is a table, fixes `period_name`, and
+#' computes `n_rows` and `created_at` (the construction time). Validation
+#' requires `dateTime` (`POSIXct`), `date` (`Date`) and `value` (numeric), and a
+#' length-one `source_name` (`NA` is accepted). Extra columns are kept; units,
+#' sorting, spacing and agreement between `date` and `dateTime` are not
+#' checked, and `from_date` / `to_date` are labels only. [generate_pe_sine()]
+#' returns this class, and [disagg_to_15min()] converts it to
+#' [FlodePotEvap_15min].
+#'
 #' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, mm/day), and optionally any
 #'   additional columns present in the source (e.g. `quality`).
@@ -526,6 +621,11 @@ FlodePotEvap_Daily <- .new_pe_class("FlodePotEvap_Daily", "daily")
 #'
 #' Wraps hourly PE values sourced directly from an external PE dataset.
 #' Units are typically mm/hr. One row per hour.
+#'
+#' @details
+#' Construction and validation are as for [FlodePotEvap_Daily]. Nothing checks
+#' that the rows are one hour apart. [disagg_to_15min()] converts this class to
+#' [FlodePotEvap_15min], treating each value as an hourly total.
 #'
 #' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, mm/hr), and optionally any
@@ -545,6 +645,14 @@ FlodePotEvap_Hourly <- .new_pe_class("FlodePotEvap_Hourly", "hourly")
 #' Wraps 15-minute PE values that have been **disaggregated** from a
 #' coarser timestep via [disagg_to_15min()]. This class is not intended
 #' to be constructed directly; use `disagg_to_15min()` instead.
+#'
+#' @details
+#' Validation runs the parent checks (as for [FlodePotEvap_Daily]) and then
+#' requires `disagg_method` to be `"uniform_hourly"` or `"uniform_daily"`. The
+#' constructor's default of `NA` fails that check, so building one directly
+#' means naming a method; [disagg_to_15min()] does this for you. `is_calculated`
+#' is set to `TRUE` by the constructor and is not an argument, so the check on
+#' it only matters if the slot is overwritten later with `@<-`.
 #'
 #' @param readings A `data.table` with columns `dateTime` (POSIXct),
 #'   `date` (Date), `value` (numeric, mm/15min).
@@ -573,6 +681,9 @@ FlodePotEvap_15min <- S7::new_class(
                          from_date     = NA_character_,
                          to_date       = NA_character_,
                          disagg_method = NA_character_) {
+    # is_calculated is always TRUE and not an argument. disagg_method defaults to
+    # NA, which the validator rejects on purpose: objects are meant to come from
+    # disagg_to_15min(), or to name their method explicitly.
     dt <- .as_readings_dt(readings)
     S7::new_object(
       S7::S7_object(),
@@ -588,6 +699,9 @@ FlodePotEvap_15min <- S7::new_class(
     )
   },
   validator = function(self) {
+    # Runs after FlodePotEvapData's validator. The constructor always sets
+    # is_calculated = TRUE, so this check only fires if the slot is overwritten
+    # with `@<-`; the check below rejects the NA default.
     if (!self@is_calculated) {
       return("`is_calculated` must be TRUE for FlodePotEvap_15min.")
     }
@@ -618,6 +732,19 @@ FlodePotEvap_15min <- S7::new_class(
 #' proportionally. If your values are rates (mm/hr), convert to totals
 #' first.
 #'
+#' @details
+#' The hourly method treats each `dateTime` as the start of its hour and adds
+#' offsets of 0, 15, 30 and 45 minutes. The daily method builds 96 steps of 15
+#' minutes from the start of each `date` (not from `dateTime`), in the time zone
+#' of the `dateTime` column (UTC if none is recorded); the fixed 96 steps assume
+#' 24-hour days, so a time zone with daylight saving would not line up on
+#' changeover days. In both cases `date` is recomputed from the new `dateTime`,
+#' other columns are repeated on every sub-interval, `NA` values stay `NA`, and
+#' the sub-interval values sum to the original value. `source_name`,
+#' `from_date` and `to_date` are carried over, `created_at` is the time of
+#' conversion, and the input object is not modified. Each input row expands in
+#' place, so sorted input stays sorted.
+#'
 #' @param x A [FlodePotEvap_Daily] or [FlodePotEvap_Hourly] object.
 #'
 #' @returns A [FlodePotEvap_15min] object whose readings contain columns
@@ -635,10 +762,14 @@ disagg_to_15min <- S7::new_generic("disagg_to_15min", "x")
 S7::method(disagg_to_15min, FlodePotEvap_Hourly) <- function(x) {
   dt <- data.table::copy(x@readings)
 
+  # Each hourly row becomes four rows at +0, +15, +30 and +45 minutes from its
+  # dateTime, which is therefore taken as the START of the hour. value / 4 splits
+  # a TOTAL (e.g. mm) evenly so sums are preserved; a rate would be wrong here.
   offsets_sec <- c(0L, 900L, 1800L, 2700L)
   idx  <- rep(seq_len(nrow(dt)), each = 4L)
   rows <- dt[idx]
   rows[, dateTime := dateTime + offsets_sec]
+  # date follows the new dateTime.
   rows[, date     := as.Date(dateTime)]
   rows[, value    := value / 4]
 
@@ -653,13 +784,18 @@ S7::method(disagg_to_15min, FlodePotEvap_Hourly) <- function(x) {
 
 S7::method(disagg_to_15min, FlodePotEvap_Daily) <- function(x) {
   dt  <- data.table::copy(x@readings)
+  # Time zone of the input dateTime; UTC when none is recorded.
   tz  <- attr(dt$dateTime, "tzone")
   tz  <- if (is.null(tz) || !nzchar(tz)) "UTC" else tz
 
+  # 96 fixed 15-minute offsets from the start of each day (24-hour days; no
+  # daylight-saving handling).
   offsets_sec <- as.integer(seq(0L, by = 900L, length.out = 96L))
   idx  <- rep(seq_len(nrow(dt)), each = 96L)
   rows <- dt[idx]
 
+  # Built from the `date` column (the start of that day in tz), not from the
+  # input dateTime. value / 96 splits a daily TOTAL evenly, preserving sums.
   rows[, dateTime := as.POSIXct(date, tz = tz) + offsets_sec]
   rows[, date     := as.Date(dateTime)]
   rows[, value    := value / 96]
@@ -712,4 +848,6 @@ S7::method(as_data_table, FlodePotEvapData) <- function(x) x@readings
   invisible(x)
 }
 
+# NB: as for FlodeHydroData above, .onLoad() (package.R) registers
+# .print_PotEvapData as the S3 print method that actually takes effect.
 S7::method(print, FlodePotEvapData) <- .print_PotEvapData
