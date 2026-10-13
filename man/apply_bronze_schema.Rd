@@ -63,6 +63,25 @@ sub-daily series separately.}
 \item{\code{period}}{character. Temporal resolution of the series, e.g.
 \code{"15min"}, \code{"hourly"}, \code{"daily"}. \code{NA} when unknown.}
 }
+
+This is a pure reshaping step: it builds a new table, leaves \code{dt}
+untouched and writes nothing. The API download path (\code{handle_output()}),
+the fetchers behind \code{\link[=route_gauge]{route_gauge()}} and \code{\link[=ingest_all_file]{ingest_all_file()}} all call it, so
+every Bronze file shares one column set and order whichever route produced
+it.
+
+\code{dataset_id}, \code{site_id}, \code{data_type} and \code{period} are single values
+recycled over all rows, so one call describes one series. A \code{timestamp_col}
+that is not already \code{POSIXct} is converted as UTC; an existing \code{POSIXct} is
+kept as is, and the writers partition by its UTC calendar year. The value
+column is coerced with \code{as.double()}, so non-numeric text becomes \code{NA} with
+a warning.
+
+Rows are not filtered here. Missing values pass through unchanged, and rows
+with a missing timestamp are only dropped (with a warning) when the table
+is written by \code{.write_bronze_by_year()}. A \code{supplier_flag_col} that is
+\code{NULL} or absent from \code{dt} quietly gives an all-\code{NA} flag column, so a
+misspelt column name is not reported.
 }
 \examples{
 \dontrun{

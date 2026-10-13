@@ -12,17 +12,21 @@ ingest_all_file(
   chunk_size = 50000L,
   encoding = "latin1",
   keep_tmp = FALSE,
-  registry_path = NULL
+  registry_path = NULL,
+  tz = "UTC"
 )
 }
 \arguments{
 \item{path}{Character. Path to the \code{.all} file.}
 
-\item{output_dir}{Character. Root Bronze output directory. Per-station
-subdirectories (\verb{gauge_id=<id>/}) are created inside this path.}
+\item{output_dir}{Character. Root of the data store. Bronze files are
+written under \verb{output_dir/bronze/}.}
 
 \item{category}{Character. Data category from the gauge registry, e.g.
 \code{"hydrometric"}, \code{"radarH19"}, \code{"MOSES"}. Default \code{"hydrometric"}.}
+
+\item{register_path}{Character. Provenance register CSV. Defaults to
+\verb{<output_dir>/register/hydrometric_data_register.csv}.}
 
 \item{chunk_size}{Integer. Lines to read per chunk in pass 1. Default
 50000. Reduce if memory is constrained; increase for faster I/O on
@@ -33,78 +37,144 @@ large disks.}
 exports from EA Windows systems. Change to \code{"UTF-8"} if your \code{.all}
 files are known to be UTF-8 encoded.}
 
-\item{keep_tmp}{Logical. Keep intermediate Parquet files after pass 2?
-Default \code{FALSE}. Set \code{TRUE} for debugging or to re-run pass 2 without
-re-parsing.}
+\item{keep_tmp}{Logical. Keep the intermediate per-block Parquet files
+(\verb{<output_dir>/.tmp_<name>/<station>__<param>__<nnn>.parquet}) after the
+run? Default \code{FALSE}. Set \code{TRUE} to inspect what was parsed from each
+block when debugging. The files are not reused: the next call clears the
+directory and parses the file again.}
 
 \item{registry_path}{Character or \code{NULL}. Path to an existing
 \code{gauge_registry.parquet} file. When supplied, every station discovered
-in the \code{.all} file is added to the registry if not already present, with
-\code{source_system = "WISKI_ALL"}, \code{live = FALSE}, and \code{backfill_done = TRUE}.
-The registry is created if the path does not yet exist. Writes use a
-write-to-temp-then-rename pattern to avoid Windows error 1224 (Arrow
+in the \code{.all} file is added to the registry if not already present (see
+above). The registry is created if the path does not yet exist. Writes use
+a write-to-temp-then-rename pattern to avoid Windows error 1224 (Arrow
 memory-maps the file on read, blocking a direct overwrite on Windows).}
+
+\item{tz}{Character. Time zone in which the \verb{Time stamp} column of the
+export is expressed. Timestamps are parsed in this zone and stored as UTC
+instants. Default \code{"UTC"}. If the export was produced in UK local time,
+use \code{"Europe/London"} (times that do not exist or are ambiguous at DST
+changes become \code{NA} and are dropped with a warning).}
 }
 \value{
-A \code{data.table} log with columns \code{gauge_id}, \code{dataset_id}, \code{rows},
-and \code{out_file}, one row per station written. Returned invisibly.
+A \code{data.table} log with columns \code{gauge_id}, \code{data_type},
+\code{dataset_id}, \code{rows}, and \code{out_file} (the year files written, joined by
+\code{"; "}), one row per series written. Returned invisibly. Skipped series
+are in \code{attr(log, "skipped")}.
 }
 \description{
-Parses a WISKI/Kisters \code{.all} export file and writes per-station data to
-Hive-partitioned Bronze Parquet (\verb{gauge_id=<id>/all_YYYYMMDD.parquet}),
-ready for consumption by \code{\link[=run_backfill]{run_backfill()}} and \code{\link[=run_incremental]{run_incremental()}}.
+Parses a WISKI/Kisters \code{.all} export file and writes each station's series
+to the Bronze tier as Parquet, one file per calendar year of observations:
+\verb{bronze/<category>/WISKI/<data_type>/<YYYY>/<dataset_id>.parquet}. Read the
+result back with \code{\link[=read_bronze]{read_bronze()}} (\code{supplier_code = "WISKI"}).
 }
 \details{
-Uses a two-pass approach to handle files that may be 10GB+ and span
-multiple years without loading the entire file into memory:
+Uses a two-pass approach so files that may be 10GB+ and span multiple years
+need not be loaded whole:
 
 Pass 1 reads the file in chunks of \code{chunk_size} lines, parsing each
-station block and writing an intermediate Parquet per station to a temp
-directory.
+station block and writing an intermediate Parquet per block to a temp
+directory. Memory use is bounded by the largest single station block, which
+is held in memory while it is read — not by the size of the file.
 
-Pass 2 groups the intermediate files by station number (which is used
-directly as \code{gauge_id}), deduplicates on datetime, normalises to the
-pipeline schema, and writes the final Bronze output.
+Pass 2 groups the intermediate files by station and parameter (the station
+number is used directly as \code{gauge_id}), deduplicates on timestamp (where
+blocks overlap the later block wins), normalises to the Bronze schema, and
+writes the final output with a provenance record per file.
+
+Series whose parameter is not recognised as flow/discharge, level/stage or
+rainfall (for example groundwater or temperature) are \strong{skipped with a
+warning} rather than filed under another type; they are listed in
+\code{attr(log, "skipped")}. Rows with an unparseable timestamp are dropped with
+a warning giving the count.
 
 The temp directory is removed on completion unless \code{keep_tmp = TRUE}.
 
 Because \code{.all} files contain an arbitrary set of stations not known in
 advance, passing \code{registry_path} will auto-register every discovered
-station into the gauge registry after ingestion, with
+station and data type into the gauge registry after ingestion, with
 \code{source_system = "WISKI_ALL"}, \code{live = FALSE}, and \code{backfill_done = TRUE}.
-Only stations not already in the registry are added; existing entries are
-left untouched.
+Only (station, data type) combinations not already in the registry are
+added; existing entries are left untouched.
+\subsection{Input format}{
 
-Output schema: \code{gauge_id} (character), \code{datetime} (POSIXct, UTC),
-\code{value} (numeric), \code{unit} (character), \code{flag} (integer).
+A \code{.all} file is a stack of station blocks. Each starts with a
+\verb{Station Site:} line, then \verb{Key:<TAB>Value} metadata lines such as
+\verb{Station Number}, \verb{Parameter Name} and \verb{Time series Name}, then a
+\verb{Time stamp,...} header and CSV rows. A block without a header, data rows or station number
+is skipped without a message. The \code{Remarks} column may contain commas; any
+extra fields are re-joined and quoted before parsing so they stay in
+\code{Remarks}.
+}
+
+\subsection{Series identity and rules}{
+
+A series is one station plus the parameter code taken from the third
+element of the \verb{Time series Name} path (for example \code{SG_DS}); that code
+becomes the \code{trace} in the \code{dataset_id}, so several series of one type at a
+station are kept apart and can be selected with \code{read_bronze(trace = )}.
+For each series:
+\itemize{
+\item The \code{Value} column is chosen by name, never the quality-code column
+(which is kept as \code{supplier_flag}). If there is no \code{Value} column the
+first numeric column is used, with a warning that names it.
+\item Rows are de-duplicated on \code{timestamp} before missing values are dropped,
+so a later block's row wins even where its value is missing.
+\item Rows with no value are dropped, with a message giving the count. A
+series left with no values is skipped.
+\item The period (\verb{15min}, \code{hourly}, \code{daily}) is read from the time series
+name, else estimated from the median timestep, else \code{"unknown"}.
+\item Off-grid timestamps in a 15-minute series (not on :00/:15/:30/:45) give a
+warning but are written unchanged; see \code{\link[=snap_offgrid_timestamps]{snap_offgrid_timestamps()}}.
+}
+
+Timestamps are read in \code{tz} and stored as UTC instants. The year folder is
+the UTC year of each observation.
+}
+
+\subsection{Side effects and re-runs}{
+
+Besides the Bronze files, the function writes provenance rows to
+\code{register_path} after all series are merged (so a failure part-way leaves
+Bronze files without register rows) and, if requested, updates
+\code{registry_path}. The temp directory is \verb{<output_dir>/.tmp_<name>}, where
+\verb{<name>} is the file name without its extension. It is emptied at the start
+of every call, so leftovers from an earlier \code{keep_tmp = TRUE} or interrupted
+run are never merged into the new ingest.
+
+The \code{dataset_id} ends in the day of ingest. Re-ingesting a series on a
+later day adds new files; \code{\link[=read_bronze]{read_bronze()}} keeps the most recently received
+row per timestamp. On the \emph{same} day the \code{dataset_id} is identical, so for
+any observation year present in both ingests the later file replaces the
+earlier one rather than adding to it. Ingesting two exports of the same
+station that overlap in a calendar year on one day therefore keeps only
+the second export's data for that year.
+
+Pass 2 holds all blocks of one series in memory at a time, so peak memory
+is set by the largest series, not by \code{chunk_size}.
+}
 }
 \examples{
 \dontrun{
 # Ingest a single .all file
 log_dt <- ingest_all_file(
   path       = "data/wiski/2008_2010.all",
-  output_dir = "data/fw_bronze/flow"
+  output_dir = "data/hydrometric"
 )
 
 # Ingest and auto-register discovered stations into the gauge registry
 log_dt <- ingest_all_file(
   path          = "data/wiski/2008_2010.all",
-  output_dir    = "data/fw_bronze/flow",
-  registry_path = "data/fw_bronze/gauge_registry/gauge_registry.parquet"
+  output_dir    = "data/hydrometric",
+  registry_path = "data/hydrometric/register/gauge_registry.parquet"
 )
 
 # Ingest multiple files covering different periods
 for (f in list.files("data/wiski", pattern = "\\\\.all$", full.names = TRUE)) {
-  ingest_all_file(f, output_dir = "data/fw_bronze/flow")
+  ingest_all_file(f, output_dir = "data/hydrometric")
 }
 
-# Read the Bronze output for one station
-dt <- data.table::as.data.table(
-  arrow::collect(
-    arrow::open_dataset("data/fw_bronze/flow/gauge_id=2723TH")
-  )
-)
-data.table::setkeyv(dt, c("gauge_id", "datetime"))
-dt <- unique(dt, by = c("gauge_id", "datetime"))
+# Read the Bronze output for one station back as an S7 object
+obj <- read_bronze("data/hydrometric", "2723TH", "H", supplier_code = "WISKI")
 }
 }

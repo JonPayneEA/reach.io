@@ -12,9 +12,9 @@ fetch_from_wiski(gauge_id, data_type, start_date, end_date)
 \item{data_type}{Character. Parameter: \code{"flow"}, \code{"level"}, or
 \code{"rainfall"}.}
 
-\item{start_date}{Character. Start date in \code{"YYYY-MM-DD"} format.}
+\item{start_date}{Character. Start date (inclusive) in \code{"YYYY-MM-DD"} format.}
 
-\item{end_date}{Character. End date in \code{"YYYY-MM-DD"} format.}
+\item{end_date}{Character. End date (\strong{exclusive}) in \code{"YYYY-MM-DD"} format.}
 }
 \value{
 A \code{data.table} conforming to the Bronze schema, or an empty
@@ -30,6 +30,21 @@ endpoint is accessible. Calling it now raises an error.
 \details{
 When live, connection details will be read from environment variables
 \code{WISKI_BASE_URL} and optionally \code{WISKI_API_KEY}.
+
+Because the function stops before doing anything else, it makes no network
+request and reads no environment variables today. A registry row with
+\code{source_system = "WISKI"} therefore fails: \code{\link[=route_gauge]{route_gauge()}} returns \code{NULL}
+with a warning under \code{on_error = "warn"}, and \code{\link[=run_backfill]{run_backfill()}} and
+\code{\link[=run_incremental]{run_incremental()}} record the gauge as \code{FAILED}. For WISKI data use
+\code{\link[=fetch_from_wiski_all]{fetch_from_wiski_all()}} (\code{source_system = "WISKI_ALL"}) or
+\code{\link[=ingest_all_file]{ingest_all_file()}}.
+
+The source below the \code{stop()} is the intended KiWIS implementation and is
+kept unreachable (and excluded from coverage) until the endpoint is
+available. One point to revisit when it is activated: \code{gauge_id} is passed
+straight through as the KiWIS \code{ts_id}, so it would have to be a time-series
+id rather than a station number. (It already treats \code{end_date} as exclusive,
+like the rest of the package, and records the series \code{period} in Bronze.)
 }
 \examples{
 \dontrun{

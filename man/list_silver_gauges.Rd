@@ -23,6 +23,22 @@ Scans the Silver store directory tree and returns a catalogue of every
 gauge (unique \code{site_id} + \code{data_type} combination) for which Silver data
 has been promoted from Bronze.
 }
+\details{
+Only file names and directories are inspected: no Parquet file is opened and
+the register is not used. Silver files are expected at
+\verb{<root>/silver/<category>/<data_type>/<YYYY>/<dataset_id>.parquet}, and the
+year folder is the year the Bronze data was \emph{received} (the end of the
+\code{dataset_id}), not an observation year, so \code{year_min} and \code{year_max} are
+ingest years. \code{site_id} is taken as the second underscore-separated field of
+the file name (\code{EA_39001_Q_20240101} gives \code{39001}), so site ids that
+themselves contain an underscore are mis-parsed. Paths of the wrong depth or
+with too few name fields are skipped without comment.
+
+\code{file_count} is the number of Parquet files, not rows. Messages (not errors)
+are issued, with an empty table returned, when there is no Silver store, no
+files, or nothing matches. Related: \code{\link[=promote_to_silver]{promote_to_silver()}},
+\code{\link[=summarise_silver_coverage]{summarise_silver_coverage()}}, \code{\link[=check_silver_gaps]{check_silver_gaps()}}, \code{\link[=read_silver]{read_silver()}}.
+}
 \examples{
 \dontrun{
 list_silver_gauges("data/hydro")

@@ -21,6 +21,17 @@ synchronous API calls well within the 2,000,000-row hard limit. Especially
 important for 15-minute data where a single year can be ~35,000 rows per
 station.
 }
+\details{
+Chunks are anchored to \code{from_date}, not to calendar years: each chunk
+starts on the anniversary of \code{from_date}, so \code{"2019-06-01"} gives
+June-to-June chunks. Each \code{chunk_to} equals the next \code{chunk_from}; because
+the API treats the start as inclusive and the end as exclusive (see
+\code{\link[=fetch_readings]{fetch_readings()}}) the chunks tile the range with no overlap and no gap.
+Bounds are returned as \code{"YYYY-MM-DD"} character strings ready to pass
+straight to \code{\link[=fetch_readings]{fetch_readings()}}. Pure date arithmetic: no network requests
+and no side effects. \code{\link[=fetch_from_hde]{fetch_from_hde()}} and \code{\link[=download_hydrology]{download_hydrology()}} both use
+it.
+}
 \examples{
 make_date_chunks("2019-06-01", "2022-03-01")
 #    chunk_from   chunk_to

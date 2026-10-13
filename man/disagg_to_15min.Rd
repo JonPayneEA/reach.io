@@ -7,15 +7,15 @@
 disagg_to_15min(x, ...)
 }
 \arguments{
-\item{x}{A \link{PotEvap_Daily} or \link{PotEvap_Hourly} object.}
+\item{x}{A \link{FlodePotEvap_Daily} or \link{FlodePotEvap_Hourly} object.}
 }
 \value{
-A \link{PotEvap_15min} object whose readings contain columns
+A \link{FlodePotEvap_15min} object whose readings contain columns
 \code{dateTime} (POSIXct), \code{date} (Date), and \code{value} (numeric).
 }
 \description{
-\code{disagg_to_15min()} is an S7 generic. Converts a \link{PotEvap_Daily} or
-\link{PotEvap_Hourly} object to a \link{PotEvap_15min} object using uniform
+\code{disagg_to_15min()} is an S7 generic. Converts a \link{FlodePotEvap_Daily} or
+\link{FlodePotEvap_Hourly} object to a \link{FlodePotEvap_15min} object using uniform
 disaggregation:
 }
 \details{
@@ -29,10 +29,22 @@ consecutive 15-minute intervals (method \code{"uniform_daily"}).
 Values are assumed to represent totals (e.g. mm) and are split
 proportionally. If your values are rates (mm/hr), convert to totals
 first.
+
+The hourly method treats each \code{dateTime} as the start of its hour and adds
+offsets of 0, 15, 30 and 45 minutes. The daily method builds 96 steps of 15
+minutes from the start of each \code{date} (not from \code{dateTime}), in the time zone
+of the \code{dateTime} column (UTC if none is recorded); the fixed 96 steps assume
+24-hour days, so a time zone with daylight saving would not line up on
+changeover days. In both cases \code{date} is recomputed from the new \code{dateTime},
+other columns are repeated on every sub-interval, \code{NA} values stay \code{NA}, and
+the sub-interval values sum to the original value. \code{source_name},
+\code{from_date} and \code{to_date} are carried over, \code{created_at} is the time of
+conversion, and the input object is not modified. Each input row expands in
+place, so sorted input stays sorted.
 }
 \examples{
 \dontrun{
-pe_hr  <- PotEvap_Hourly(readings = hourly_dt, source_name = "CHESS-PE")
+pe_hr  <- FlodePotEvap_Hourly(readings = hourly_dt, source_name = "CHESS-PE")
 pe_15m <- disagg_to_15min(pe_hr)
 }
 }

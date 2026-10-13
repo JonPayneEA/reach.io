@@ -24,6 +24,22 @@ Reads a subset of columns from every Silver Parquet file and returns
 per-gauge statistics: date range, total row count, and the distribution
 of QC flags (counts and percentage Good).
 }
+\details{
+Files are selected by path fragment (\verb{/<data_type>/} directory and
+\verb{_<site_id>_} in the file name; several values are OR-ed) before anything is
+read, then only \code{timestamp}, \code{site_id}, \code{data_type} and \code{qc_flag} are loaded.
+A file that cannot be read is skipped silently, so a corrupt file simply
+drops out of the totals.
+
+Counts are over the rows of every matching file. If the same observations
+were promoted more than once (Silver files are per received dataset) they
+are counted each time. \code{pct_good} is the share of all rows with \code{qc_flag == 1}
+(rows with a missing flag stay in the denominator), rounded to one decimal.
+\code{start} and \code{end} are the first and last dates as \code{"YYYY-MM-DD"} text.
+Messages (not errors) are issued, with an empty table returned, when the
+store, files or matches are missing. Related: \code{\link[=list_silver_gauges]{list_silver_gauges()}},
+\code{\link[=check_silver_gaps]{check_silver_gaps()}}, \code{\link[=promote_to_silver]{promote_to_silver()}}.
+}
 \examples{
 \dontrun{
 summarise_silver_coverage("data/hydro")

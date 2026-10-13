@@ -17,6 +17,14 @@ Character vector of supplier codes, NA for unrecognised values.
 Converts the \code{source_system} column values used in the gauge registry
 to the EA-standard supplier codes used in dataset IDs.
 }
+\details{
+A plain lookup in the internal supplier table: \code{"HDE"} maps to \code{"EA"}, and
+both \code{"WISKI"} and \code{"WISKI_ALL"} map to \code{"WISKI"}. The orchestrators
+(\code{\link[=run_backfill]{run_backfill()}}, \code{\link[=run_incremental]{run_incremental()}}) treat \code{NA} as an error so that an
+unrecognised \code{source_system} cannot create a stray supplier directory; check
+for it yourself if you call this directly. Lookup is exact and
+case-sensitive.
+}
 \examples{
 source_to_supplier("HDE")     # "EA"
 source_to_supplier("WISKI")   # "WISKI"

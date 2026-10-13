@@ -7,7 +7,7 @@
 check_limb_continuity(x, ...)
 }
 \arguments{
-\item{x}{A \link{RatingCurve}.}
+\item{x}{A \link{FlodeRatingCurve}.}
 
 \item{tol_pct}{Numeric scalar. Percentage tolerance for declaring a junction
 connected. Default \code{1} (i.e. 1 \%).}
@@ -34,6 +34,20 @@ when the relative gap is within \code{tol_pct}.
 \details{
 Use \code{\link[=fix_limb_continuity]{fix_limb_continuity()}} to correct any discontinuities by adjusting
 the \code{C} parameters.
+
+Each junction is evaluated with the two limbs' own \code{C}, \code{a} and \code{b} at the
+shared stage \code{upper[i]}, with \code{(h - a)} floored at zero. \code{gap_m3s} keeps its
+sign (upper minus lower limb), but \code{gap_pct} is unsigned and is taken
+relative to the lower limb's discharge. When that discharge is zero (the
+junction is at or below the lower limb's \code{a}) the percentage is undefined, so
+\code{gap_pct} is \code{NA} and the junction counts as \strong{not} connected, even if both
+limbs give zero.
+
+A curve with one limb has no junctions: a message is printed and an empty
+table returned. Otherwise a message says how many junctions exceed
+\code{tol_pct}; when any do, the failing rows are also printed to the console.
+The full table is returned invisibly in either case. The curve is not
+modified; see \code{\link[=fix_limb_continuity]{fix_limb_continuity()}} to correct it.
 }
 \examples{
 \dontrun{

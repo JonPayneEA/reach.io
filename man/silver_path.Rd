@@ -4,7 +4,7 @@
 \alias{silver_path}
 \title{Build the Silver Parquet file path for a dataset}
 \usage{
-silver_path(output_dir, category, data_type, dataset_id)
+silver_path(output_dir, category, data_type, dataset_id, year = NULL)
 }
 \arguments{
 \item{output_dir}{Character. Root store directory.}
@@ -13,8 +13,12 @@ silver_path(output_dir, category, data_type, dataset_id)
 
 \item{data_type}{Character. Framework data type code, e.g. \code{"Q"}.}
 
-\item{dataset_id}{Character. Bronze dataset ID. Year is parsed from the
-trailing eight-digit date component.}
+\item{dataset_id}{Character. Bronze dataset ID. Unless \code{year} is given, the
+year is parsed from the trailing eight-digit date component.}
+
+\item{year}{Character or integer or \code{NULL}. Year folder to use. \code{NULL}
+(default) takes it from \code{dataset_id} (the received year); pass the
+observation year to file by when the data was observed.}
 }
 \value{
 Character. Full file path including filename.
@@ -26,7 +30,20 @@ Constructs the Silver file path following the framework folder structure:
 \details{
 The Silver tier drops the supplier code level present in Bronze, as
 promoted data is normalised to a common schema regardless of origin.
+
+By default the \verb{<YYYY>} folder is taken from the date at the end of
+\code{dataset_id}, which is the date the data was \emph{received}. Silver, like
+Bronze (see \code{\link[=bronze_path]{bronze_path()}}), is filed by \emph{observation} year, so
+\code{\link[=promote_to_silver]{promote_to_silver()}} always passes \code{year} explicitly and writes one file per
+dataset and calendar year; date-range reads that narrow by year folder (such
+as \code{\link[=read_silver]{read_silver()}} with \code{start}/\code{end}) rely on that. The received-year
+default exists only for backwards compatibility and for callers that file a
+whole dataset under one folder. Silver files written by older versions used
+the received year and should be re-promoted. The function only builds a
+path; it creates no directories.
 }
 \examples{
 silver_path("data/hydrometric", "hydrometric", "Q", "EA_39001_Q_20260115")
+silver_path("data/hydrometric", "hydrometric", "Q", "EA_39001_Q_20260115",
+            year = 2020)
 }

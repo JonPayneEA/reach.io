@@ -38,6 +38,20 @@ Evaluates the goodness-of-fit of a sine curve (defined by parameters
 and \eqn{R^2}, and optionally a \code{ggplot2} plot overlaying the observed
 and fitted series.
 }
+\details{
+The fitted series is \verb{max(0, B + A sin(2 pi / 365.25 (doy - phi)))}: the
+same curve and zero floor as \code{\link[=generate_pe_sine]{generate_pe_sine()}}. \code{\link[=fit_pe_sine]{fit_pe_sine()}} does not
+apply the floor, so its own \code{rmse} and \code{r_squared} can differ slightly from
+the values here for series that dip below zero.
+
+\code{bias} is fitted minus observed, so a positive value means the model
+over-estimates. \code{r_squared} is \code{1 - SS_res / SS_tot} against the mean of
+\code{pe}: it is negative when the curve fits worse than a constant at the
+observed mean, and \code{NA} when \code{pe} is constant. Dates need not be contiguous
+or sorted, and \code{B}, \code{A} and \code{phi} are not validated beyond being used in the
+formula. The \code{fitted} element holds \code{date}, \code{observed} and the (floored)
+curve for every input row.
+}
 \note{
 The \code{plot = TRUE} functionality will be moved to the \code{reach.viz}
 package in a future release. The diagnostic return values (\code{rmse},

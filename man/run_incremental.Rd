@@ -12,87 +12,146 @@ run_incremental(
   default_start = "2000-01-01",
   log_path = "logs/incremental_log.csv",
   gauge_ids = NULL,
-  n_workers = parallel::detectCores() - 1L
+  n_workers = .default_workers()
 )
 }
 \arguments{
 \item{registry_path}{Character. Path to the gauge registry Parquet file
 written by \code{\link[=build_gauge_registry]{build_gauge_registry()}}.}
 
-\item{output_dir}{Character. Root Bronze output directory containing
-per-gauge Hive partitions (\verb{gauge_id=<id>/}).}
+\item{output_dir}{Character. Root of the data store (contains \verb{bronze/}).}
 
-\item{end_date}{Character. Fetch data up to this date in \code{"YYYY-MM-DD"}
-format. Defaults to today.}
+\item{register_path}{Character. Path to the Hydrometric Data Register CSV.
+Defaults to \verb{<output_dir>/register/hydrometric_data_register.csv}.}
+
+\item{end_date}{Character. Fetch data up to this date (\strong{exclusive}) in
+\code{"YYYY-MM-DD"} format. Defaults to today.}
 
 \item{default_start}{Character. Fallback start date in \code{"YYYY-MM-DD"}
-format for gauges with no existing partition. Defaults to \code{"2000-01-01"}.}
+format for gauges with no existing Bronze data. Defaults to
+\code{"2000-01-01"}.}
 
 \item{log_path}{Character. Path to write the per-gauge result log CSV.
-Each run appends a new timestamped block to this file if it already
-exists, preserving the full run history. Default
-\code{"logs/incremental_log.csv"}.}
+Each run appends to the file if it already exists, preserving the full
+run history. Default \code{"logs/incremental_log.csv"}.}
 
 \item{gauge_ids}{Character vector or \code{NULL}. Restrict the run to a subset
-of gauge IDs. \code{NULL} (default) runs all active gauges in the registry.}
+of gauge IDs. \code{NULL} (default) runs all active, live gauges.}
 
-\item{n_workers}{Integer. Number of parallel workers. Defaults to one
-fewer than the number of detected cores.}
+\item{n_workers}{Integer. Number of parallel workers; \code{1} runs sequentially
+in the current session. Default: one fewer than the detected cores,
+capped at 4.}
 }
 \value{
 The log \code{data.table} for this run invisibly, with columns
-\code{run_at} (POSIXct), \code{gauge_id}, \code{watermark} (the start date used),
-\code{end_date}, \code{status} (\code{"SUCCESS"}, \code{"EMPTY"}, \code{"NO_NEW_DATA"}, or
-\code{"FAILED"}), \code{rows}, \code{elapsed_s}, and \code{error}.
+\code{run_at} (character, UTC), \code{gauge_id}, \code{data_type}, \code{watermark} (the
+latest timestamp found before the run), \code{end_date}, \code{status}
+(\code{"SUCCESS"}, \code{"EMPTY"}, \code{"NO_NEW_DATA"}, or \code{"FAILED"}), \code{rows},
+\code{elapsed_s}, and \code{error}.
 }
 \description{
-For each active gauge in the registry, determines the latest \code{datetime}
-already present in the Bronze partition (the \emph{high watermark}), then
-fetches only the data from that point forward via \code{\link[=route_gauge]{route_gauge()}}. New
-data is written as a dated Parquet file alongside the existing partition
-files — deduplication of any overlap is handled at read time by Arrow
-when \code{open_dataset()} reads the full partition directory.
+For each active, live gauge in the registry, finds the latest \code{timestamp}
+already present in the Bronze store (the \emph{high watermark}, see
+\code{\link[=read_bronze]{read_bronze()}} for the layout), then fetches data from that day forward via
+\code{\link[=route_gauge]{route_gauge()}} and keeps only rows strictly newer than the watermark. New
+rows are written as year-partitioned Bronze files alongside the existing
+ones, with a provenance record per file.
 }
 \details{
-Gauges with no existing partition (i.e. not yet backfilled) fall back to
-\code{default_start}, so \code{run_incremental()} is safe to run even on a partially
-backfilled registry.
+Gauges with no existing Bronze data fall back to \code{default_start}, so
+\code{run_incremental()} is safe to run on a partially backfilled registry.
+Registry rows with \code{live = FALSE} (for example historical WISKI \code{.all}
+dumps) are skipped.
 
-Like \code{\link[=run_backfill]{run_backfill()}}, work is distributed across CPU cores and every
-outcome is logged to a CSV. A steward alert warning is raised if more than
-5\% of gauges fail.
-\subsection{Deduplication strategy}{
+Like \code{\link[=run_backfill]{run_backfill()}}, work is distributed across workers and every outcome
+is logged to a CSV; a fetch error is logged as \code{FAILED}, never as \code{EMPTY}. A
+steward alert warning is raised if more than 5\% of gauges fail.
+\subsection{Deduplication}{
 
-Overlapping rows between existing and new Parquet files are deduplicated
-at read time by Arrow. When consuming a partition directory with
-\code{arrow::open_dataset()}, duplicate \code{datetime} rows across files are
-eliminated with \code{data.table::unique()} after collecting. This avoids the cost of rewriting
-historical files on every incremental run.
+Bronze is append-only and rows at or before the watermark are discarded, so
+normal runs do not create duplicates. If overlap does occur (for example a
+gauge re-backfilled later), \code{\link[=read_bronze]{read_bronze()}} keeps the most recently received
+row for each timestamp.
+}
+
+\subsection{Watermark}{
+
+The watermark is the maximum Bronze \code{timestamp} for the gauge and data type,
+taken from the newest observation-year directory only. If a gauge has
+several series of one type (WISKI traces) the watermark is the maximum
+across all of them, and it is applied to every series fetched. Because the
+fetch starts on the watermark's own day, rows from earlier that day are
+fetched again and discarded. Values that arrive late or are revised with a
+timestamp at or before the watermark are not picked up; use
+\code{\link[=run_backfill]{run_backfill()}} for those.
+}
+
+\subsection{Date window}{
+
+\code{end_date} is exclusive and the API works in whole days. A series whose
+watermark day is on or after \code{end_date} is logged \code{NO_NEW_DATA} without a
+request. With the default \code{end_date} (today) the current, incomplete day is
+therefore never fetched.
+}
+
+\subsection{Status values}{
+\itemize{
+\item \code{SUCCESS}: new rows were written (\code{rows} counts them).
+\item \code{NO_NEW_DATA}: already up to date, or the source returned only rows at
+or before the watermark.
+\item \code{EMPTY}: the source returned nothing for the requested days.
+\item \code{FAILED}: an error was raised (including a registry row whose
+\code{source_system} or \code{data_type} cannot be resolved, such as an \code{NA}
+\code{data_type}). The message is in \code{error}.
 }
 }
+
+\subsection{Order of work and side effects}{
+
+Workers read the watermark, fetch, filter and write Bronze files. Once
+every gauge has finished, the main process appends the provenance rows to
+the register CSV, then appends this run's rows to \code{log_path} (columns are
+unioned, so older logs with a different layout stay readable). Unlike
+\code{\link[=run_backfill]{run_backfill()}} there is no batching: if the run is interrupted, Bronze
+files already written have no register records. The registry is not
+modified, so \code{backfill_done} is untouched.
+
+Bronze file names end in the received date (see \code{\link[=read_bronze]{read_bronze()}}). If a
+series is written twice for the same observation year on the same calendar
+day, for example by a second run or by this function after a same-day
+\code{\link[=run_backfill]{run_backfill()}}, the new rows are merged into the existing file rather
+than replacing it, so nothing already stored is lost.
+
+\code{gauge_ids} that are not in the registry at all, and ids that are registered
+but skipped because the row is inactive or has \code{live = FALSE}, are warned
+about separately. It is an error only if no requested gauge is left to run.
+}
+}
+\section{EA fair use}{
+
+The EA Hydrology API fair-use guidance asks for one request at a time, and
+each HDE worker issues its own requests. The default \code{n_workers} is
+therefore capped at 4. Increase it only for sources that are not rate
+limited, such as local WISKI \code{.all} files.
+}
+
 \examples{
 \dontrun{
 # Sync all active gauges up to today
 log_dt <- run_incremental(
-  registry_path = "data/fw_bronze/gauge_registry/gauge_registry.parquet",
-  output_dir    = "data/fw_bronze/flow",
+  registry_path = "data/hydrometric/register/gauge_registry.parquet",
+  output_dir    = "data/hydrometric",
   log_path      = "logs/incremental_log.csv"
 )
 
 # Sync a specific subset of gauges
 log_dt <- run_incremental(
-  registry_path = "data/fw_bronze/gauge_registry/gauge_registry.parquet",
-  output_dir    = "data/fw_bronze/flow",
-  gauge_ids     = c("39001", "39002"),
-  log_path      = "logs/incremental_log.csv"
+  registry_path = "data/hydrometric/register/gauge_registry.parquet",
+  output_dir    = "data/hydrometric",
+  gauge_ids     = c("39001", "39002")
 )
 
-# Read the full partition for a gauge. Deduplication of overlapping rows
-# across backfill and incremental files is done with data.table after collect.
-dt <- data.table::as.data.table(
-  arrow::collect(arrow::open_dataset("data/fw_bronze/flow/gauge_id=39001"))
-)
-data.table::setkeyv(dt, c("gauge_id", "datetime"))
-dt <- unique(dt, by = c("gauge_id", "datetime"))
+# Read a gauge back (duplicates across files are resolved for you)
+obj <- read_bronze("data/hydrometric", "39001", "Q")
 }
 }

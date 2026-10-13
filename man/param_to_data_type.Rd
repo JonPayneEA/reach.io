@@ -16,6 +16,14 @@ Character vector of data type codes, NA for unrecognised values.
 Converts parameter names used internally (\code{"flow"}, \code{"level"},
 \code{"rainfall"}) to the framework data type codes (\code{"Q"}, \code{"H"}, \code{"P"}).
 }
+\details{
+The lookup table also covers \code{"soil_moisture"} (\code{"SM"}), \code{"snow"} (\code{"SWE"})
+and \code{"pe"} (\code{"PE"}), although only flow, level and rainfall can currently
+be downloaded or read back as S7 objects. Lookup is exact and
+case-sensitive, and returns \code{NA} rather than an error for unknown names;
+the download and ingest paths that need a code turn that \code{NA} into an
+error.
+}
 \examples{
 param_to_data_type("flow")     # "Q"
 param_to_data_type("rainfall") # "P"

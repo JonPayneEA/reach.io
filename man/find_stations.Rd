@@ -35,45 +35,68 @@ supplied with \code{long} and \code{dist}.}
 \item{dist}{Numeric or \code{NULL}. Search radius in km.}
 }
 \value{
-A \code{data.table} with columns:
+A \code{data.table}, one row per measure, with columns:
 \describe{
 \item{\code{label}}{Station name.}
 \item{\code{notation}}{Station SUID.}
 \item{\code{wiskiID}}{WISKI identifier (where available).}
 \item{\code{RLOIid}}{River Levels on the Internet identifier (where
 available).}
-\item{\code{lat}, \code{long}}{Coordinates.}
+\item{\code{lat}, \code{long}, \code{easting}, \code{northing}}{Coordinates.}
 \item{\code{riverName}}{Associated river name (where available).}
-\item{\code{station_uri}}{Full station URI used by the measures endpoint.}
-\item{\code{measures}}{List column. Each element is a character vector of
-measure notation strings available at that station.}
+\item{\code{measure_notation}}{Measure notation — the ID passed to the
+readings endpoint, e.g. \code{"<uuid>-flow-i-900-m3s-qualified"}.}
+\item{\code{station.notation}}{Deprecated alias of \code{measure_notation}
+(misleading name kept for backwards compatibility).}
+\item{\code{parameter}}{\code{"rainfall"}, \code{"flow"} or \code{"level"}.}
+\item{\code{value_type}}{e.g. \code{"mean"}, \code{"instantaneous"}, \code{"total"}.}
+\item{\code{period}}{\code{"15min"} or \code{"daily"}.}
 }
 Returns an empty \code{data.table} if no stations are found.
 }
 \description{
 Looks up stations from the EA Hydrology API by one or more identifier
-types and returns a \code{data.table} of matches. Multiple identifier types
-can be supplied simultaneously — results are pooled and de-duplicated.
+types and returns a \code{data.table} with \strong{one row per measure} (time series)
+available at each matched station. Multiple identifier types can be supplied
+simultaneously — results are pooled and de-duplicated by station.
 }
 \details{
-Each row in the returned table includes a \code{measures} list column
-containing the notation strings for every measure time series available
-at that station (e.g. daily mean flow, 15-minute level, daily rainfall).
-This means a second call to \code{get_measures()} is not needed for the common
-case where you already know which stations you want.
-
-A \code{station_uri} column is also included containing the full station URI
-used by the measures endpoint as its station filter value.
+The measure notation is parsed into \code{parameter}, \code{value_type} and \code{period}
+columns, so a second call to \code{\link[=get_measures]{get_measures()}} is not needed for the common
+case where you already know which stations you want. Only rainfall, flow
+and level measures are returned.
+\itemize{
+\item \strong{Requests.} One request is made per name, WISKI ID, RLOIid and
+notation supplied, plus one for the proximity search, in that order. They
+run sequentially and are not paced by this function (no sleep), so very
+long identifier vectors are best batched by the caller. No files are
+written.
+\item \strong{Not-found handling.} A WISKI ID, RLOIid or notation that matches no
+station gives a warning; a name or proximity search that finds nothing
+only prints a message. If nothing at all is found, or no matched station
+has a rainfall, flow or level measure, an empty \code{data.table} is
+returned (not an error), so callers should check \code{nrow()}.
+\item \strong{Proximity search.} Used only when \code{lat}, \code{long} and \code{dist} are all
+supplied; if any is missing the other two are silently ignored.
+\item \strong{Pooling.} Results from all identifier types are stacked and
+de-duplicated on the station notation, so a station found twice (say by
+name and by WISKI ID) appears once, with one row per measure.
+\item \strong{Measure parsing.} Each measure's \code{measure_notation} is the final path
+component of its API URI. \code{parameter}, \code{value_type} and \code{period} are
+parsed from it (\code{"m"} becomes \code{"mean"}, \code{"i"} \code{"instantaneous"}, \code{"900"}
+\code{"15min"}, \code{"86400"} \code{"daily"}; other codes pass through unchanged). A
+notation that does not start with a station UUID gets a warning and \code{NA}
+fields, and is then dropped by the rainfall/flow/level filter.
+\item Station-level columns that are list-valued in the API response are
+collapsed to comma-separated strings.
+}
 }
 \examples{
 \dontrun{
 stns <- find_stations(wiski_ids = "SS92F014")
 
-# Inspect available measures for the first station
-stns$measures[[1]]
-
-# Unnest to a flat table of all measure notations
-stns[, .(measure = unlist(measures)), by = .(label, wiskiID)]
+# One row per measure available at the station
+stns[, .(label, wiskiID, parameter, period, value_type, measure_notation)]
 
 # Other lookup methods
 find_stations(names = "Thames")

@@ -4,7 +4,14 @@
 \alias{bronze_path}
 \title{Build the Bronze Parquet file path for a dataset}
 \usage{
-bronze_path(output_dir, category, supplier_code, data_type, dataset_id)
+bronze_path(
+  output_dir,
+  category,
+  supplier_code,
+  data_type,
+  dataset_id,
+  year = NULL
+)
 }
 \arguments{
 \item{output_dir}{Character. Root store directory.}
@@ -17,6 +24,12 @@ bronze_path(output_dir, category, supplier_code, data_type, dataset_id)
 \item{data_type}{Character. Framework data type code.}
 
 \item{dataset_id}{Character. Full Bronze dataset ID.}
+
+\item{year}{Character or integer or \code{NULL}. Year directory to use. When
+\code{NULL} (default) the year is extracted from the date portion of
+\code{dataset_id}. Supply an explicit value to partition by data year rather
+than ingest year (e.g. when writing one file per calendar year of
+observations).}
 }
 \value{
 Character. Full file path including filename.
@@ -25,6 +38,16 @@ Character. Full file path including filename.
 Constructs the file path following the framework folder structure:
 \verb{bronze/<Category>/<SupplierCode>/<DataType>/<YYYY>/<DatasetID>.parquet}
 }
+\details{
+Only builds a string: nothing is created on disk and no component is
+checked. The two possible meanings of \verb{<YYYY>} matter here. With
+\code{year = NULL} it is the \emph{received} year, taken from the last eight
+characters of \code{dataset_id}; every Bronze writer instead passes the
+\emph{observation} year explicitly (via \code{.write_bronze_by_year()}), which is
+what \code{\link[=read_bronze]{read_bronze()}} expects when it narrows the search by \code{start} and
+\code{end}. Use the default only if you really want a path keyed on ingest date.
+}
 \examples{
 bronze_path("data/hydrometric", "hydrometric", "EA", "Q", "EA_39001_Q_20260115")
+bronze_path("data/hydrometric", "hydrometric", "EA", "Q", "EA_39001_Q_20260115", year = 2020)
 }

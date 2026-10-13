@@ -4,7 +4,13 @@
 \alias{fetch_from_hde}
 \title{Fetch data from the EA Hydrology Data Explorer (HDE)}
 \usage{
-fetch_from_hde(gauge_id, data_type, start_date, end_date)
+fetch_from_hde(
+  gauge_id,
+  data_type,
+  start_date,
+  end_date,
+  on_error = c("warn", "stop")
+)
 }
 \arguments{
 \item{gauge_id}{Character. WISKI ID for HDE-sourced gauges.}
@@ -12,9 +18,14 @@ fetch_from_hde(gauge_id, data_type, start_date, end_date)
 \item{data_type}{Character. Parameter: \code{"flow"}, \code{"level"}, or
 \code{"rainfall"}.}
 
-\item{start_date}{Character. Start date in \code{"YYYY-MM-DD"} format.}
+\item{start_date}{Character. Start date (inclusive) in \code{"YYYY-MM-DD"} format.}
 
-\item{end_date}{Character. End date in \code{"YYYY-MM-DD"} format.}
+\item{end_date}{Character. End date (\strong{exclusive}) in \code{"YYYY-MM-DD"} format.}
+
+\item{on_error}{Character. \code{"warn"} (default) turns problems into warnings
+and returns what was fetched (or an empty table); \code{"stop"} raises an error
+instead, for an unknown gauge, a missing measure, or (after all chunks have
+been tried) one or more failed chunks.}
 }
 \value{
 A \code{data.table} conforming to the Bronze schema (\code{timestamp},
@@ -28,8 +39,42 @@ measure notation via \code{\link[=find_stations]{find_stations()}}, selecting th
 \code{PARAMETER_CONFIG} (e.g. 15-minute instantaneous flow), then fetches
 readings in annual chunks via \code{\link[=fetch_readings]{fetch_readings()}}.
 }
+\details{
+\itemize{
+\item \strong{Fixed resolution.} The measure is chosen from \code{PARAMETER_CONFIG}
+(its \code{default_period}, plus \code{value_type} where one is set), so this
+function cannot be pointed at a different resolution, such as daily
+means; use \code{\link[=download_hydrology]{download_hydrology()}} for that. If more than one measure
+matches, the first returned by the API is used without warning.
+\item \strong{Requests.} One station lookup (\code{\link[=find_stations]{find_stations()}}), then one readings
+request per annual chunk from \code{\link[=make_date_chunks]{make_date_chunks()}}, with a one second
+pause after every chunk. Nothing is written to disk: the caller (for
+example \code{\link[=run_backfill]{run_backfill()}} or \code{\link[=run_incremental]{run_incremental()}}, via \code{\link[=route_gauge]{route_gauge()}})
+stores the result.
+\item \strong{Missing data.} An unknown gauge, or a gauge with no matching measure,
+gives a warning (the latter lists the resolutions that do exist) and an
+empty \code{data.table} with \code{on_error = "warn"}; with \code{"stop"} it is an error,
+so an orchestrator records the gauge as \code{FAILED} rather than \code{EMPTY}. A chunk whose request fails is handled
+according to \code{on_error}: with \code{"warn"} (the default) each failure is a
+warning, the remaining chunks are still fetched and the data returned is
+incomplete; with \code{"stop"} all chunks are still attempted and then an error
+is raised naming the chunks that failed, so a partial series is never
+returned as if it were complete. \code{\link[=route_gauge]{route_gauge()}} passes its own \code{on_error}
+through, which is how \code{\link[=run_backfill]{run_backfill()}} and \code{\link[=run_incremental]{run_incremental()}} record such
+a gauge as \code{FAILED}. Errors from the station lookup itself (for example an
+HTTP failure) are always raised.
+\item \strong{Timestamps.} \code{timestamp} comes from the readings' \code{dateTime}. For
+daily aggregates that is midnight UTC; the time of occurrence of a daily
+maximum or minimum is not available from this endpoint. If no valid
+\code{dateTime} is present, the date-only \code{date} column is used instead, with
+a warning.
+\item \strong{Bronze fields.} \code{supplier_flag} is the EA \code{quality} code, \code{site_id} is
+\code{gauge_id}, and \code{dataset_id} uses supplier code \code{"EA"} and today's date as
+the received date.
+}
+}
 \examples{
 \dontrun{
-fetch_from_hde("SS92F014", "flow", "2020-01-01", "2020-12-31")
+fetch_from_hde("SS92F014", "flow", "2020-01-01", "2021-01-01")
 }
 }

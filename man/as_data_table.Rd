@@ -2,22 +2,29 @@
 % Please edit documentation in R/classes.R
 \name{as_data_table}
 \alias{as_data_table}
-\title{Extract the readings data.table from a HydroData object}
+\title{Extract the readings data.table from a FlodeHydroData object}
 \usage{
 as_data_table(x, ...)
 }
 \arguments{
-\item{x}{A \link{Rainfall_Daily}, \link{Rainfall_15min}, \link{Flow_Daily}, \link{Flow_15min},
-\link{Level_Daily}, \link{Level_15min}, \link{PotEvap_Daily}, \link{PotEvap_Hourly}, or
-\link{PotEvap_15min} object.}
+\item{x}{A \link{FlodeRainfall_Daily}, \link{FlodeRainfall_15min}, \link{FlodeFlow_Daily}, \link{FlodeFlow_15min},
+\link{FlodeLevel_Daily}, \link{FlodeLevel_15min}, \link{FlodePotEvap_Daily}, \link{FlodePotEvap_Hourly}, or
+\link{FlodePotEvap_15min} object.}
 }
 \value{
 A \code{data.table} of readings.
 }
 \description{
 \code{as_data_table()} is an S7 generic. Returns the inner \code{data.table} from
-any \code{HydroData}- or \code{PotEvapData}-derived object for direct use with
+any \code{FlodeHydroData}- or \code{FlodePotEvapData}-derived object for direct use with
 \code{data.table} or \code{arrow} without touching \verb{@readings}.
+}
+\details{
+The table returned is the one stored in the object, not a copy, so changing
+it by reference (\verb{:=}, \code{set()}, \code{setorder()}) also changes the object. Take
+\code{data.table::copy()} first if the object must stay intact; \code{\link[=as_long]{as_long()}}
+returns a copy. Methods exist for the hydrometric and potential evaporation
+classes only.
 }
 \examples{
 \dontrun{

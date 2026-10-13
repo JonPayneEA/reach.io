@@ -116,12 +116,38 @@ extends the Bronze schema with four QC columns: \code{qc_flag}, \code{qc_value},
 QC checks are applied independently per \code{site_id}. The series for each
 gauge is sorted by \code{timestamp} before checks are run.
 
+The steps run in a fixed order, and the order matters:
+\enumerate{
+\item Read the input (a Parquet path or a \code{data.table}; a table is copied so
+the caller's object is never modified).
+\item De-duplicate on \verb{(site_id, timestamp)}, keeping the last row, so the QC
+checks never see two values for one instant.
+\item Validate that the Bronze columns are present.
+\item Resolve off-grid 15-minute timestamps with \code{\link[=snap_offgrid_timestamps]{snap_offgrid_timestamps()}};
+snapped rows are later downgraded from Good to Estimated.
+\item Sort by site and time and run the QC checks for the data type (see the
+sections below). The data type is read from the \emph{first} row, so one
+call should contain a single data type.
+\item Derive \code{qc_value} (the accepted value, \code{NA} where Rejected) and stamp
+\code{qc_flagged_at}.
+\item Optionally estimate missing timesteps per site (\code{annotate_gaps}).
+\item Optionally write Silver files with \code{\link[=silver_path]{silver_path()}}: one file per
+\code{dataset_id} and observation year (UTC), named after that dataset, so
+input covering several datasets or years is split accordingly. Existing
+files of the same name are replaced.
+}
+
 Only the \strong{traditional QC checks} (Y-digit of the UK-Flow15 three-digit
 code) are implemented here. The consistency checks against NRFA daily /
 AMAX / POT data (X-digit) and the high-flow hydrological plausibility
 checks (Z-digit) require external reference datasets and are not applied
 automatically; they can be added to the output manually via the
 \code{qc_x_code} and \code{qc_z_code} columns after this step.
+}
+\note{
+Quality control is outside the scope of \code{reach.io} (input/output
+only). This function will move to the \code{reach.validate} package in a
+future release and be deprecated here once that package is available.
 }
 \section{QC flag definitions}{
 

@@ -18,17 +18,6 @@ data sources through to partitioned Parquet Bronze storage.
 }
 }
 
-\subsection{Schema and provenance tools}{
-\itemize{
-\item \code{\link[=make_dataset_id]{make_dataset_id()}} -- generate a Bronze dataset ID
-\item \code{\link[=source_to_supplier]{source_to_supplier()}} -- map source_system to supplier code
-\item \code{\link[=param_to_data_type]{param_to_data_type()}} -- map parameter name to framework data type code
-\item \code{\link[=apply_bronze_schema]{apply_bronze_schema()}} -- coerce a data.table to the Bronze Parquet schema
-\item \code{\link[=bronze_path]{bronze_path()}} -- build the Bronze file path following framework Appendix C
-\item \code{\link[=write_provenance_record]{write_provenance_record()}} -- append a provenance record to the register
-}
-}
-
 \subsection{Setup}{
 \itemize{
 \item \code{\link[=setup_hydro_store]{setup_hydro_store()}} -- create the hydrometric data store directory structure

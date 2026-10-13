@@ -7,10 +7,10 @@
 fix_limb_continuity(x, ...)
 }
 \arguments{
-\item{x}{A \link{RatingCurve}.}
+\item{x}{A \link{FlodeRatingCurve}.}
 }
 \value{
-A new \link{RatingCurve} with updated \code{C} values. A message is printed
+A new \link{FlodeRatingCurve} with updated \code{C} values. A message is printed
 for each limb showing the old and new \code{C} and the percentage change.
 }
 \description{
@@ -24,6 +24,26 @@ preserved; only \eqn{C} is rescaled.
 Adjustment propagates upward from limb 1 (the anchor), so a change to
 \eqn{C_2} feeds into the computation of \eqn{C_3}, and so on. The anchor
 limb's \eqn{C} is never modified.
+
+Junctions are processed from the lowest upward and each is forced to match
+exactly; there is no tolerance, so a junction that already agreed within
+\code{\link[=check_limb_continuity]{check_limb_continuity()}}'s tolerance still has its \code{C} nudged (usually by a
+tiny percentage). Each new \code{C} is computed from the limb below as already
+corrected, so a change at one junction carries through to all later limbs.
+Only \code{C} of limbs 2 and up is rescaled, so every rated flow within such a
+limb moves by the same factor as its \code{C}; flows in limb 1 are unchanged.
+\code{lower}, \code{upper}, \code{a}, \code{b} and \code{doubtful} are untouched.
+
+A junction is skipped with a warning (the limb keeps its \code{C}, and later
+junctions continue from that unchanged value) when the junction stage is at
+or below the upper limb's \code{a} (that limb gives zero flow whatever \code{C} is, so
+\code{C} cannot be solved) or when the lower limb gives zero or negative flow
+there (the new \code{C} would be zero, which a \link{FlodeRatingCurve} forbids).
+
+The original object is not changed; the result keeps the validity dates,
+\code{station_id} and \code{source}, and is re-validated by the constructor. A
+single-limb curve is returned as is, with a message. Nothing is written to
+the store: use \code{\link[=save_rating]{save_rating()}} to keep the corrected curve.
 }
 \examples{
 \dontrun{

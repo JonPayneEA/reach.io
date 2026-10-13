@@ -33,6 +33,21 @@ has 366 days.}
 The function modifies \code{dt} by reference (data.table semantics) and returns
 it invisibly, so it can be chained:
 \code{add_hydro_year(dt)[]}.
+
+Only the calendar date is used: the time of day is discarded, so every
+reading on one date gets the same \code{hydro_year} and \code{hydro_year_day}.
+\code{POSIXct} input is converted with \code{as.Date()}, which reads it in UTC unless
+told otherwise, so a timestamp is labelled by its UTC date. If the
+hydrological day should follow local time, convert to \code{Date} in the required
+time zone before calling.
+
+Missing dates are not supported: remove or fill them first (depending on
+where it sits, a missing date can make \code{as.Date()} fail inside the function).
+
+Existing \code{hydro_year} / \code{hydro_year_day} columns are replaced without
+warning. Because \code{dt} is modified by reference, the caller's table changes
+even when the return value is not assigned; take \code{data.table::copy()} first
+to keep the original intact.
 }
 \examples{
 library(data.table)

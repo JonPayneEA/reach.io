@@ -16,21 +16,40 @@ used when the curve was saved).}
 \code{"gold"} (default).}
 
 \item{version}{Integer or \code{NULL}. When \code{NULL} (default), all versions are
-loaded and returned as a \link{RatingSet} ordered by version number.
+loaded and returned as a \link{FlodeRatingSet} ordered by version number.
 When a specific integer is given, only that version is returned as a
-\link{RatingCurve}.}
+\link{FlodeRatingCurve}.}
 }
 \value{
-A \link{RatingCurve} (single version) or \link{RatingSet} (all versions).
+A \link{FlodeRatingCurve} (single version) or \link{FlodeRatingSet} (all versions).
 }
 \description{
 Reads the shared ratings Parquet, filters to \code{site_id}, and reconstructs
-either one \link{RatingCurve} (when \code{version} is specified) or a \link{RatingSet}
+either one \link{FlodeRatingCurve} (when \code{version} is specified) or a \link{FlodeRatingSet}
 containing every stored version for that site (default).
+}
+\details{
+The shared Parquet of the chosen tier is read in full and filtered to
+\code{site_id}. The register is not consulted, so a version's \code{status}
+(\code{"Active"} or \code{"Superseded"}) has no effect on what is loaded. Each stored
+version is rebuilt through the \link{FlodeRatingCurve} constructor, which
+re-validates it. A missing Parquet, an unknown site and an unknown \code{version}
+are errors; nothing is printed.
+
+With \code{version = NULL} all versions are returned as a \link{FlodeRatingSet}, whose
+validator requires non-overlapping validity windows. A window with
+\code{valid_to = NA} is open-ended, so an earlier version saved without a
+\code{valid_to} overlaps any later version that has a \code{valid_from}, and loading
+fails with the set's overlap error. Give superseded versions a closed window
+when saving them, or load them one at a time with \code{version}. A version saved
+without \code{valid_from} loads, but cannot be selected by \code{\link[=apply_rating]{apply_rating()}} inside
+a set.
+
+Related: \code{\link[=save_rating]{save_rating()}}, \code{\link[=list_ratings]{list_ratings()}}, \code{\link[=apply_rating]{apply_rating()}}.
 }
 \examples{
 \dontrun{
-# Gold (default) — all versions as a RatingSet for apply_rating()
+# Gold (default) — all versions as a FlodeRatingSet for apply_rating()
 rs   <- load_rating("510310", root = "data/hydro")
 flow <- apply_rating(level_obj, rs)
 

@@ -22,6 +22,20 @@ The register \code{data.table}, invisibly.
 Reads \verb{<root>/register/rating_register.csv} and prints a summary of
 stored versions. Optionally filtered to one or more sites.
 }
+\details{
+Only the register is read (not the Parquet), so the listing shows what was
+recorded at save time, including each version's \code{status}: \code{"Superseded"}
+rows stay listed. Filters are exact any-of matches. If the register is
+missing, or nothing matches, a message (not an error) is issued and an empty
+table is returned.
+
+The printed table is a condensed view (identity, validity, provenance and
+note columns; \code{file_path} and any other columns are left out), but the
+invisibly returned value is the complete filtered register. Column types here
+come from \code{fread()} autodetection (\code{version} is integer), unlike
+\code{\link[=save_rating]{save_rating()}}, which reads the register as text. Related: \code{\link[=save_rating]{save_rating()}},
+\code{\link[=load_rating]{load_rating()}}.
+}
 \examples{
 \dontrun{
 list_ratings("data/hydro")

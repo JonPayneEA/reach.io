@@ -8,10 +8,11 @@ snap_offgrid_timestamps(dt)
 }
 \arguments{
 \item{dt}{A \code{data.table} with at least columns \code{site_id}
-(character) and \code{timestamp} (POSIXct, UTC).}
+(character) and \code{timestamp} (POSIXct, UTC), and optionally
+\code{period}. The input is not modified.}
 }
 \value{
-The modified \code{data.table} with a \code{.snapped} logical column
+A new \code{data.table} with a \code{.snapped} logical column
 appended (\code{TRUE} for rows whose timestamp was adjusted).
 }
 \description{
@@ -24,13 +25,41 @@ on-grid readings already present for the same site:
 \item If the nearest 15-min slot is already occupied by an on-grid reading
 for the same site, the off-grid row is \strong{dropped} (redundant copy).
 \item Otherwise the timestamp is \strong{snapped} to the nearest slot and
-the row is retained with \code{.snapped = TRUE}.
+the row is retained with \code{.snapped = TRUE}. If several off-grid rows
+compete for the same empty slot, only the nearest is retained and the
+others are dropped.
 }
 
 A \code{warning()} is emitted for each class of action taken (drops and
 snaps reported separately). The function is called automatically inside
 \code{\link[=promote_to_silver]{promote_to_silver()}}, but can also be used standalone when cleaning data
 before ad-hoc analysis.
+
+The algorithm works on \emph{slots}: the slot index of a timestamp is its
+Unix time divided by 900 seconds, so every 15-minute boundary has a unique
+integer index and the comparison does not depend on time zone or on string
+formatting. For each off-grid row the nearest slot is found by rounding to
+the closest multiple of 900 seconds, and the slot is looked up (per
+\code{site_id}) in the set of slots already held by on-grid rows.
+
+Dropping rather than snapping when the slot is taken is deliberate: an
+off-grid reading next to a genuine on-grid reading is almost always a
+duplicate transmission or clock-drift copy, and keeping both would create
+two values for one timestamp. When the slot is empty there is no better
+record, so the reading is moved onto the grid and \code{.snapped} is set so
+that \code{\link[=promote_to_silver]{promote_to_silver()}} can downgrade it to \emph{Estimated}.
+
+Rows that are already on the grid, and rows exempted by the \code{period}
+rule below, are returned unchanged. If two \emph{different} off-grid rows of
+a site round to the same empty slot, only the one nearest the slot (the
+earlier, on a tie) is snapped and the other is dropped as redundant, so
+snapping never creates two rows for one site and timestamp.
+
+Only 15-minute data is touched. If \code{dt} has a \code{period} column
+(as Bronze data does), rows whose \code{period} is non-missing and not
+\code{"15min"} are left exactly as they are, so hourly, daily, or
+irregular (e.g. tipping-bucket) series are never snapped or dropped. Without
+a \code{period} column every row is treated as 15-minute data.
 }
 \examples{
 dt <- data.table::data.table(

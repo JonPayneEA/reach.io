@@ -18,13 +18,22 @@ read_silver_multi(root, gauge_ids, data_type, ...)
 \code{end}, \code{min_quality}).}
 }
 \value{
-A named list of S7 \code{HydroData} objects, one per successfully read
+A named list of S7 \code{FlodeHydroData} objects, one per successfully read
 gauge. Names match \code{gauge_ids}. Gauges with no data are omitted.
 }
 \description{
 Calls \code{\link[=read_silver]{read_silver()}} for each supplied \code{gauge_id} and returns the results
 as a named list. Gauges that fail (e.g. no Silver data exists) are
 skipped with a warning rather than stopping the whole call.
+}
+\details{
+Gauges are read sequentially with identical arguments, so one \code{start},
+\code{end} and \code{min_quality} applies to all of them. Every failure, including a
+gauge whose rows all fail the quality filter, becomes a warning, so compare
+\code{names(result)} with \code{gauge_ids} to see what was skipped. If every gauge
+fails the result is an empty list rather than an error; only an empty
+\code{gauge_ids} stops the call. For raw, un-flagged data use
+\code{\link[=read_bronze_multi]{read_bronze_multi()}}.
 }
 \examples{
 \dontrun{

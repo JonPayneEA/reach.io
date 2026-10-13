@@ -24,11 +24,13 @@ the \code{dataset_id} embedded in file names).}
 \item{data_type}{Character. Framework data type code: \code{"Q"} (flow),
 \code{"H"} (stage/level), or \code{"P"} (rainfall).}
 
-\item{start}{Date or character (\code{"YYYY-MM-DD"}) or \code{NULL}. Earliest
-timestamp to include. \code{NULL} reads from the beginning of the record.}
+\item{start}{Date, POSIXct or character (\code{"YYYY-MM-DD"} or
+\code{"YYYY-MM-DD HH:MM:SS"}) or \code{NULL}. Earliest timestamp to include (a bare
+date means midnight UTC). \code{NULL} reads from the beginning of the record.}
 
-\item{end}{Date or character (\code{"YYYY-MM-DD"}) or \code{NULL}. Latest
-timestamp to include. \code{NULL} reads to the end of the record.}
+\item{end}{Date, POSIXct or character or \code{NULL}. Latest timestamp to include;
+a bare date includes the whole of that day. \code{NULL} reads to the end of the
+record.}
 
 \item{min_quality}{Integer or \code{NULL}. Maximum \code{qc_flag} value to include.
 \code{1} = Good only; \code{2} = Good + Estimated; \code{3} = Good + Estimated +
@@ -39,8 +41,8 @@ schema to include in \verb{@readings} beyond the defaults. \code{NULL} returns a
 columns.}
 }
 \value{
-An S7 object of the appropriate \code{HydroData} subclass
-(\link{Flow_15min}, \link{Level_15min}, \link{Rainfall_15min}, \link{Flow_Daily}, etc.),
+An S7 object of the appropriate \code{FlodeHydroData} subclass
+(\link{FlodeFlow_15min}, \link{FlodeLevel_15min}, \link{FlodeRainfall_15min}, \link{FlodeFlow_Daily}, etc.),
 depending on the data type and observed timestep. The \verb{@readings}
 slot is a \code{data.table} containing \code{dateTime}, \code{date}, \code{value}
 (\code{qc_value}), \code{measure_notation}, \code{raw_value}, \code{supplier_flag},
@@ -48,7 +50,7 @@ slot is a \code{data.table} containing \code{dateTime}, \code{date}, \code{value
 }
 \description{
 Locates all Silver Parquet files for the specified gauge and data type,
-applies optional date and quality filters, and returns an S7 \code{HydroData}
+applies optional date and quality filters, and returns an S7 \code{FlodeHydroData}
 object consistent with the output of \code{\link[=download_hydrology]{download_hydrology()}}.
 }
 \details{
@@ -56,6 +58,33 @@ The primary \code{value} column in \verb{@readings} is \code{qc_value} (the QC-a
 reading). The original observed \code{value} is retained as \code{raw_value}.
 \code{qc_flag} and \code{qc_y_code} are always present in \verb{@readings} so callers
 can apply their own thresholds if needed.
+
+Processing order: the data type is validated, matching files are located
+(narrowed by the year directories implied by \code{start} and \code{end}), read and
+combined, trimmed to the exact \code{start}/\code{end} window, filtered on
+\code{qc_flag}, sorted by time, and wrapped in the S7 class. Files that cannot be
+read are skipped with a warning; an error is raised if no file can be read or
+if a filter leaves no rows. There is no fallback to Bronze: if Silver is
+absent the call stops, and the message points to \code{\link[=promote_to_silver]{promote_to_silver()}}.
+
+\code{end} is inclusive (a bare date covers the whole day, in UTC), unlike the
+exclusive \code{to_date}/\code{end_date} arguments of \code{\link[=download_hydrology]{download_hydrology()}},
+\code{\link[=run_backfill]{run_backfill()}} and \code{\link[=run_incremental]{run_incremental()}}.
+
+The quality filter keeps rows with \code{qc_flag <= min_quality}, so rows with a
+missing flag are dropped whenever a threshold is set. \code{qc_value} is \code{NA} for
+Rejected rows, so with \code{min_quality = NULL} those rows have an \code{NA} \code{value}
+and the observation survives only in \code{raw_value}.
+
+Unlike \code{\link[=read_bronze]{read_bronze()}}, no de-duplication is performed: if a gauge has been
+promoted more than once, repeated timestamps will appear in \verb{@readings}.
+Files are matched on the gauge ID alone, across all categories, since the
+Silver layout has no supplier level and there is no \code{trace} argument. The S7
+class is chosen from the median timestep of the rows returned (15-minute or
+daily); for any other period a warning is issued and the plain \code{readings}
+\code{data.table} is returned instead of an S7 object. \code{cols} only chooses among
+the columns listed under Value; unknown names are ignored, and \code{dateTime},
+\code{date}, \code{value} and \code{measure_notation} are always kept.
 }
 \examples{
 \dontrun{

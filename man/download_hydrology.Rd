@@ -11,6 +11,8 @@ download_hydrology(
   method = c("sync", "batch"),
   output = c("memory", "disk"),
   out_dir = NULL,
+  category = "hydrometric",
+  register_path = NULL,
   period_name = NULL,
   value_type = NULL,
   observation_type = NULL,
@@ -27,7 +29,8 @@ download_hydrology(
 
 \item{from_date}{Character. Start date (inclusive) in \code{"YYYY-MM-DD"} format.}
 
-\item{to_date}{Character. End date (exclusive) in \code{"YYYY-MM-DD"} format.}
+\item{to_date}{Character. End date (\strong{exclusive}) in \code{"YYYY-MM-DD"} format;
+to include 31 December pass 1 January of the following year.}
 
 \item{method}{Character. \code{"sync"} (default) or \code{"batch"}.}
 
@@ -37,8 +40,9 @@ download_hydrology(
 \code{output = "disk"}. Bronze Parquet files are written under
 \verb{out_dir/bronze/hydrometric/EA/<data_type>/}.}
 
-\item{period_name}{Character. Temporal resolution: \code{"daily"} (default)
-or \code{"15min"}.}
+\item{period_name}{Character. Temporal resolution: \code{"daily"} or \code{"15min"}.
+\code{NULL} (default) uses each parameter's default from \code{PARAMETER_CONFIG}
+(currently \code{"15min"}).}
 
 \item{value_type}{Character or \code{NULL}. Value statistic filter, e.g.
 \code{"mean"}, \code{"max"}, \code{"total"}. \code{"all"} skips the filter. \code{NULL} uses
@@ -67,7 +71,8 @@ Default 600. Applies to \code{method = "batch"} only.}
 In \code{"memory"} mode: a named list with one \code{data.table} per
 requested parameter plus a \code{summary} \code{data.table} with columns
 \code{parameter}, \code{measure}, \code{file}, \code{rows}, and \code{ok}. In \code{"disk"} mode:
-the summary \code{data.table} invisibly, with CSVs written to \code{out_dir}.
+the summary \code{data.table} invisibly, with Bronze Parquet written under
+\code{out_dir} (\code{file} holds the paths written, joined by \code{"; "}).
 }
 \description{
 Single entry point for downloading rainfall, flow, and/or level data from
@@ -95,14 +100,97 @@ out.
 \item \strong{\code{"memory"}} — Returns a named list with one \code{data.table} per
 parameter (e.g. \code{result$flow}, \code{result$rainfall}) plus a \code{summary}
 element. No files are written.
-\item \strong{\code{"disk"}} — Writes one Bronze-tier Parquet file per measure under
-\code{out_dir}, following the path convention
+\item \strong{\code{"disk"}} — Writes one Bronze-tier Parquet file per measure per
+observation year under \code{out_dir}, following the path convention
 \verb{bronze/hydrometric/EA/<data_type>/<YYYY>/<dataset_id>.parquet}.
 Returns the summary \code{data.table} invisibly.
 }
 
 The EA API fair-use guidance asks that automated users issue only one
 request at a time. Both methods are intentionally sequential.
+}
+
+\subsection{Station resolution}{
+
+If any of \code{wiski_ids}, \code{rloi_ids} or \code{notations} is supplied,
+\code{\link[=find_stations]{find_stations()}} is called once up front (one request per identifier) and
+its one-row-per-measure table is reused for every parameter, filtered to
+that parameter's \code{period_name} and \code{value_type}. Identifiers that match no
+station are warned about by \code{\link[=find_stations]{find_stations()}}; the call stops only if none
+of them resolve. The station identifier recorded in the Bronze \code{site_id}
+is the WISKI ID, falling back to the station notation (SUID) when the
+station has no WISKI ID.
+
+If no identifier is supplied, \code{\link[=get_measures]{get_measures()}} is queried once per
+parameter and every matching measure in the country is downloaded.
+}
+
+\subsection{Defaults and filters}{
+
+\code{period_name = NULL} and \code{value_type = NULL} fall back, per parameter, to
+the defaults in \code{PARAMETER_CONFIG} (currently 15-minute data; instantaneous
+for flow and level, no value-type filter for rainfall). The value \code{"all"}
+skips the corresponding filter, but \code{period_name = "all"} is only
+meaningful when station identifiers are supplied: the \code{\link[=get_measures]{get_measures()}}
+path passes the period straight to the API.
+\code{parameters} is not validated against \code{PARAMETER_CONFIG}; an unrecognised
+name surfaces as "no measures" (or an error from \code{\link[=get_measures]{get_measures()}}).
+}
+
+\subsection{Ordering and failure handling}{
+
+Parameters are processed in the order given and, within a parameter,
+measures in the order returned by the lookup. A failed fetch for one
+measure (or one sync chunk) is reported as a message rather than an error:
+the loop carries on and the failure is recorded as \code{ok = FALSE} in
+\code{summary}. Errors while writing Parquet in disk mode are not caught. In
+sync mode a measure with one failed chunk still keeps the chunks that
+succeeded, so \code{ok = FALSE} can accompany partial data; always check
+\code{summary$ok} before treating a download as complete. \code{rows} counts rows
+fetched, and is \code{NA} for a failed batch job.
+}
+
+\subsection{Memory mode}{
+
+Each parameter's readings are combined across measures and wrapped in the
+S7 class for that parameter and period (see \code{HYDRO_CLASS}); if no class
+exists for the combination a plain \code{data.table} is returned with a warning.
+A parameter with no data is simply absent from the result list, so index it
+defensively; \code{summary} is always present.
+}
+
+\subsection{Disk mode}{
+\itemize{
+\item Each measure is written by \code{handle_output()} through the shared
+year-partitioned Bronze writer, so sync and batch give the same layout.
+\code{dataset_id} ends in the date of receipt, so Bronze is append-only:
+downloading the same series on a later day adds files, while repeating it
+on the same day merges the new rows into that day's files (new values
+win for timestamps present in both).
+\item A \code{dataset_id} carries the site and data type but not the period or value
+type. When one run selects several measures of a data type at the same
+station (for example with \code{period_name = "all"} or \code{value_type = "all"}),
+each is given a trace built from its period and value type (such as
+\code{"15min_instantaneous"}) so they are filed separately instead of mixing in
+one file. Read one back with \code{read_bronze(trace = )}. A station with a
+single selected measure keeps the plain, trace-free \code{dataset_id}.
+\item One provenance row per file written is appended to the Hydrometric Data
+Register at \code{register_path} (default
+\verb{<out_dir>/register/hydrometric_data_register.csv}).
+\item \code{download_summary.csv} is written to \code{out_dir} and replaced on every
+call.
+\item Under \code{method = "batch"} each measure's whole CSV is held in memory
+while it is converted, so very large batch results need correspondingly
+large RAM.
+}
+}
+
+\subsection{Network}{
+
+Requests are strictly sequential, with a one second pause after each sync
+chunk that returns data and after each batch download. Station lookup
+costs one request per identifier. See \code{\link[=fetch_readings]{fetch_readings()}} for the sync
+request and \code{\link[=make_date_chunks]{make_date_chunks()}} for the annual chunking.
 }
 }
 \examples{
@@ -111,7 +199,7 @@ request at a time. Both methods are intentionally sequential.
 result <- download_hydrology(
   parameters = c("flow", "level"),
   from_date  = "2022-01-01",
-  to_date    = "2022-12-31",
+  to_date    = "2023-01-01",
   wiski_ids  = c("SS92F014", "S11512_FW")
 )
 result$flow
@@ -122,7 +210,7 @@ result$summary
 download_hydrology(
   parameters = "flow",
   from_date  = "2022-01-01",
-  to_date    = "2022-12-31",
+  to_date    = "2023-01-01",
   output     = "disk",
   out_dir    = "hydrology_data",
   rloi_ids   = c("5022", "7001")
@@ -133,7 +221,7 @@ stns <- find_stations(names = "Avon")
 result <- download_hydrology(
   parameters = "rainfall",
   from_date  = "2022-01-01",
-  to_date    = "2022-12-31",
+  to_date    = "2023-01-01",
   wiski_ids  = stns$wiskiID
 )
 

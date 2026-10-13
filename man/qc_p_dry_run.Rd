@@ -26,3 +26,8 @@ an external \code{wet_period_mask} (a logical vector of the same length
 as \code{value}, \code{TRUE} where the period is known to be wet) and is
 therefore not applied automatically inside \code{promote_to_silver()}.
 }
+\note{
+Quality control is outside the scope of \code{reach.io} (input/output
+only). This function will move to the \code{reach.validate} package in a
+future release and be deprecated here once that package is available.
+}

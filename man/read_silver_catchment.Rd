@@ -21,9 +21,9 @@ on.}
 
 \item{data_type}{Character. Framework data type code.}
 
-\item{registry}{A \code{data.table} or \code{data.frame} with at minimum columns
-\code{site_id} and \code{catchment_id}. Typically the output of
-\code{\link[=build_gauge_registry]{build_gauge_registry()}}.}
+\item{registry}{A \code{data.table} or \code{data.frame} with an id column
+(\code{site_id} or \code{gauge_id}) and a catchment column (\code{catchment_id}, or
+\code{catchment}). Typically the output of \code{\link[=build_gauge_registry]{build_gauge_registry()}}.}
 
 \item{catchment_col}{Character. Column name in \code{registry} that holds
 catchment identifiers. Default \code{"catchment_id"}.}
@@ -31,7 +31,7 @@ catchment identifiers. Default \code{"catchment_id"}.}
 \item{...}{Additional arguments passed to \code{\link[=read_silver_multi]{read_silver_multi()}}.}
 }
 \value{
-A named list of S7 \code{HydroData} objects, one per gauge in the
+A named list of S7 \code{FlodeHydroData} objects, one per gauge in the
 catchment that has Silver data.
 }
 \description{
@@ -39,6 +39,17 @@ Looks up gauge identifiers for the specified catchment from the gauge
 registry, then delegates to \code{\link[=read_silver_multi]{read_silver_multi()}}. Requires the registry
 to contain a \code{catchment_id} column (or equivalent) mapping sites to
 catchments.
+}
+\details{
+The registry needs an id column (\code{site_id}, or \code{gauge_id} as written by
+\code{\link[=build_gauge_registry]{build_gauge_registry()}}) and the catchment column named by \code{catchment_col};
+with the default \code{"catchment_id"}, a registry that has \code{catchment} instead
+(again as \code{\link[=build_gauge_registry]{build_gauge_registry()}} writes it) is accepted. A gauge appears
+once per data type in the registry, so ids are de-duplicated. Gauges are matched on exact equality with
+\code{catchment_id}; the registry's \code{data_type} and \code{category} are not consulted,
+so the single \code{data_type} you pass is requested for every gauge. A catchment
+with no gauges in the registry is an error, whereas gauges that have no
+Silver data are skipped with a warning (see \code{\link[=read_silver_multi]{read_silver_multi()}}).
 }
 \examples{
 \dontrun{

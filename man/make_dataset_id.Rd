@@ -19,7 +19,7 @@ make_dataset_id(
 \item{site_id}{Character. Gauge or site identifier.}
 
 \item{data_type}{Character. Framework data type code: \code{"Q"}, \code{"H"},
-\code{"P"}, \code{"SM"}, or \code{"SWE"}. Use \code{\link[=param_to_data_type]{param_to_data_type()}} to derive from
+\code{"P"}, \code{"SM"}, \code{"SWE"} or \code{"PE"}. Use \code{\link[=param_to_data_type]{param_to_data_type()}} to derive from
 parameter name.}
 
 \item{received_date}{Date or character. Date the data was received or
@@ -46,6 +46,19 @@ the date: \verb{[SupplierCode]_[SiteID]_[DataType]_[Trace]_[YYYYMMDD]}. This is
 used by the WISKI \code{.all} ingestor to distinguish multiple time series for the
 same station that share a data type — for example upstream stage (\code{sg}) and
 downstream stage (\code{sg_ds}) at the same WISKI station number.
+
+The trailing \code{YYYYMMDD} is the \emph{received} date, not an observation date.
+Because Bronze is append-only, the same series ingested on different days
+gets different IDs (and so different files), whereas re-ingesting on the
+same day produces the same ID, and the writer merges into that day's files. Readers
+rely on this layout: \code{\link[=read_bronze]{read_bronze()}} orders files by the trailing date to
+decide which copy of a duplicated observation is the most recent, and
+strips it again to recognise rows of the same series.
+
+An empty-string \code{trace} is treated like \code{NULL}. Nothing is validated or
+sanitised: the components are pasted as given, so a \verb{_} or \code{/} inside one
+would make the ID ambiguous to parse or alter the path built by
+\code{\link[=bronze_path]{bronze_path()}}.
 }
 \examples{
 make_dataset_id("EA", "39001", "Q")

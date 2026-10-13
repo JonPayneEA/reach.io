@@ -4,30 +4,47 @@
 \alias{fetch_from_wiski_all}
 \title{Fetch data from a WISKI .all export file}
 \usage{
-fetch_from_wiski_all(gauge_id, data_type, start_date, end_date)
+fetch_from_wiski_all(
+  gauge_id,
+  data_type,
+  start_date,
+  end_date,
+  on_error = c("warn", "stop")
+)
 }
 \arguments{
 \item{gauge_id}{Character. Gauge identifier matching \code{gauge_id} in the
 registry, and the station number embedded in the \code{.all} file.}
 
-\item{data_type}{Character. Parameter type — used for logging only as
-\code{.all} files carry all parameters for a station together.}
+\item{data_type}{Character. Parameter type: \code{"flow"}, \code{"level"}, or
+\code{"rainfall"}. A \code{.all} file carries all parameters for a station
+together; this selects which to return.}
 
-\item{start_date}{Character. Start date in \code{"YYYY-MM-DD"} format.}
+\item{start_date}{Character. Start date (inclusive) in \code{"YYYY-MM-DD"}
+format.}
 
-\item{end_date}{Character. End date in \code{"YYYY-MM-DD"} format.}
+\item{end_date}{Character. End date (\strong{exclusive}) in \code{"YYYY-MM-DD"}
+format.}
+
+\item{on_error}{Character. \code{"warn"} (default) gives a warning and an empty
+result when the \code{.all} file is missing or holds no series of the requested
+type; \code{"stop"} raises an error instead, which \code{\link[=route_gauge]{route_gauge()}} passes down
+so the orchestrators log such a gauge as \code{FAILED} rather than \code{EMPTY}.}
 }
 \value{
-A \code{data.table} with columns \code{gauge_id}, \code{datetime} (POSIXct),
-\code{value} (numeric), \code{unit} (character), \code{flag} (integer), filtered to
-the requested date range. Returns an empty \code{data.table} if no file
-is found.
+A \code{data.table} conforming to the Bronze schema (\code{timestamp},
+\code{value}, \code{supplier_flag}, \code{dataset_id}, \code{site_id}, \code{data_type}, \code{period}),
+filtered to the requested date range. A station with several series of the
+requested type (e.g. upstream and downstream stage) returns all of them,
+distinguished by \code{dataset_id}. Returns an empty \code{data.table} if no file or
+matching series is found.
 }
 \description{
 Locates the \code{.all} file for a gauge under \code{WISKI_ALL_ROOT}, runs
-\code{\link[=ingest_all_file]{ingest_all_file()}}, and returns the resulting data filtered to the
-requested date range. The file root is read from the environment variable
-\code{WISKI_ALL_ROOT}. Within that root, files are expected at:
+\code{\link[=ingest_all_file]{ingest_all_file()}} into a temporary store, and returns the resulting
+Bronze-schema data for the requested data type and date range. The file
+root is read from the environment variable \code{WISKI_ALL_ROOT}. Within that
+root, files are expected at:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{<WISKI_ALL_ROOT>/<gauge_id>.all
 }\if{html}{\out{</div>}}
@@ -37,10 +54,31 @@ Set the root path before use:
 
 \if{html}{\out{<div class="sourceCode">}}\preformatted{Sys.setenv(WISKI_ALL_ROOT = "/mnt/wiski/exports")
 }\if{html}{\out{</div>}}
+
+The whole \code{.all} file is parsed on every call, so for large exports prefer
+\code{\link[=ingest_all_file]{ingest_all_file()}} once rather than fetching gauge by gauge.
+
+This is the \code{WISKI_ALL} branch of \code{\link[=route_gauge]{route_gauge()}}. The file is ingested
+into a throwaway store with \code{category = "hydrometric"} and the default
+\code{tz = "UTC"} (neither can be set from the registry), so the provenance
+rows it writes go to that temporary register and nothing is added to your
+real register or Bronze store. Every station and parameter in the file is
+ingested, not only the requested ones; only the requested \code{data_type} is
+read back. The store is deleted when the function exits.
+
+The date filter is half-open, \verb{[start_date, end_date)}, with both dates
+read as UTC midnight.
+
+A missing file only produces a warning and an empty result. Through
+\code{\link[=run_backfill]{run_backfill()}} or \code{\link[=run_incremental]{run_incremental()}} (which call \code{\link[=route_gauge]{route_gauge()}} with
+\code{on_error = "stop"}) that is therefore logged as \code{EMPTY}, not \code{FAILED}; a
+missing \code{WISKI_ALL_ROOT}, an unsupported \code{data_type} or a parsing error is
+an error and is logged \code{FAILED}. An empty result also occurs when the file
+holds no series of the requested type.
 }
 \examples{
 \dontrun{
 Sys.setenv(WISKI_ALL_ROOT = "/mnt/wiski/exports")
-fetch_from_wiski_all("2723TH", "flow", "2010-01-01", "2012-12-31")
+fetch_from_wiski_all("2723TH", "flow", "2010-01-01", "2013-01-01")
 }
 }

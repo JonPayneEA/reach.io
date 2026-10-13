@@ -23,15 +23,39 @@ A \code{data.table} with one row per site + data-type, printed as a
 coverage summary. Returned invisibly.
 }
 \description{
-Reports the time span, record count, and completeness percentage for each
-gauge in the Bronze store.  Completeness is estimated from the register
-(\code{time_period_start} / \code{time_period_end} / \code{temporal_resolution}) without
-reading the underlying Parquet files, so it reflects the \emph{intended} coverage
-per ingest batch rather than the literal row count.
+Reports, for each gauge in the Bronze store, the time span held and the number
+of observations that span \emph{should} contain at the register's resolution. Both
+come from the register (\code{time_period_start} / \code{time_period_end} /
+\code{temporal_resolution}) without reading the underlying Parquet files, so they
+describe the \emph{intended} coverage rather than the literal row count.
 }
 \details{
 To inspect actual record counts or detect individual missing timesteps, use
 \code{check_gaps()}.
+
+Like \code{\link[=list_available_gauges]{list_available_gauges()}}, this reads only the register (Bronze rows;
+\code{category} derived from \code{file_path}) and opens no Parquet files, so it cannot
+report actual record counts or a completeness percentage (the table has
+neither); use \code{\link[=check_gaps]{check_gaps()}} for that. Rows are grouped by site, category, supplier, data
+type and temporal resolution, and the table adds:
+\itemize{
+\item \code{start}, \code{end}: earliest and latest period dates recorded, as
+\code{"YYYY-MM-DD"} text.
+\item \code{n_datasets}: number of register rows (one per year file; every ingest
+appends more).
+\item \code{days_held}: whole days between \code{start} and \code{end}. Gaps inside the span
+are not subtracted.
+\item \code{expected_obs}: the number of steps of the register's resolution in the
+whole days from \code{start} to \code{end} inclusive (for example 96 per day for
+15-minute data). It is a count for the span, not for the data held: gaps
+are not subtracted. It is \code{NA} where the resolution is missing or not one
+of \code{"15min"}, \code{"hourly"}, \code{"daily"}.
+}
+
+Filters are exact any-of matches applied before summarising, and one whose
+column is absent from the register is ignored. A message (not an error) is
+issued, with an empty table returned, when the register is missing or
+nothing matches. Related: \code{\link[=list_available_gauges]{list_available_gauges()}}, \code{\link[=check_gaps]{check_gaps()}}.
 }
 \examples{
 \dontrun{

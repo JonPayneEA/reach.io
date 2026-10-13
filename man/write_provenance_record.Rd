@@ -64,14 +64,34 @@ codes provided by the supplier.}
 The provenance record as a one-row \code{data.table}, invisibly.
 }
 \description{
-Appends a provenance record row to the register CSV file for the given
-Bronze dataset. This satisfies the Section 4.2 requirement that every
-Bronze dataset has a complete provenance record before storage.
+Appends a provenance record row to the register CSV file for a Bronze
+file. This satisfies the Section 4.2 requirement that every Bronze dataset
+has a complete provenance record before storage.
 }
 \details{
-The register CSV is created if it does not exist. Each row represents
-one Bronze dataset following the field list in Section 10.1 of the
-framework.
+The register CSV is created if it does not exist. Each row follows the
+field list in Section 10.1 of the framework and describes one Bronze
+\emph{file}: a dataset is written as one file per observation year, so
+several rows can share a \code{dataset_id} (see Details).
+
+Because Bronze is written one file per observation year, a single ingest
+produces several records: they share \code{dataset_id} but each carries its own
+\code{file_path} and the \code{time_period_start}/\code{time_period_end} of that file. Use
+\code{file_path} (not \code{dataset_id}) to identify a physical file.
+
+\code{tier} (\code{"Bronze"}), \code{status} (\code{"Active"}) and \code{file_format_received}
+(\code{"Parquet"}) are fixed, and \code{date_received} is always the date of this
+call (\code{Sys.Date()}), not the date embedded in \code{dataset_id}; the two differ
+if \code{make_dataset_id()} was given an earlier \code{received_date}.
+
+Rows are appended with \code{data.table::fwrite()}, which does not check the
+existing header, so the column set and order must not change between calls.
+The write is also not safe for concurrent use, so call it only from the main
+R process; the orchestrators (\code{\link[=run_backfill]{run_backfill()}}, \code{\link[=run_incremental]{run_incremental()}}) have
+parallel workers return their records and append them afterwards. The parent
+directory is created if needed, one message is printed per record, and the
+record is returned invisibly. See \code{\link[=make_dataset_id]{make_dataset_id()}} and \code{\link[=bronze_path]{bronze_path()}}
+for how \code{dataset_id} and \code{file_path} are normally derived.
 }
 \examples{
 \dontrun{
@@ -86,7 +106,7 @@ write_provenance_record(
   time_period_end     = "2024-12-31",
   temporal_resolution = "15min",
   method_of_receipt   = "API pull",
-  file_path           = "data/hydrometric/bronze/EA/Q/2026/EA_39001_Q_20260115.parquet"
+  file_path           = "data/hydrometric/bronze/hydrometric/EA/Q/2024/EA_39001_Q_20260115.parquet"
 )
 }
 }

@@ -28,6 +28,25 @@ Reads timestamps from all Silver Parquet files for the specified \code{site_id}
 and \code{data_type}, infers the expected observation interval, and reports any
 contiguous periods of missing data.
 }
+\details{
+Same method as \code{\link[=check_gaps]{check_gaps()}} but for the Silver tier: timestamps are pooled
+from every file found under \verb{<root>/silver} whose path contains
+\verb{/<data_type>/} and \verb{_<site_id>_} (any category), duplicates are removed, and
+a regular grid from the first to the last timestamp is compared with what
+was found. Differences from the Bronze version: the register is never
+consulted, so the interval comes from \code{expected_interval} or, failing that,
+the median observed spacing (reported in a message); and files that cannot
+be read are skipped silently.
+
+A grid step is present only on an exact timestamp match, so off-grid
+timestamps leave the steps around them reported as missing
+(see \code{\link[=snap_offgrid_timestamps]{snap_offgrid_timestamps()}}). \code{gap_start} and \code{gap_end} are the first
+and last missing steps of a period. Messages (not errors) are issued, with an
+empty table returned, when no files match or fewer than two timestamps are
+found; an unrecognised \code{expected_interval} is an error. A summary and the
+gap table are printed. Related: \code{\link[=list_silver_gauges]{list_silver_gauges()}},
+\code{\link[=summarise_silver_coverage]{summarise_silver_coverage()}}.
+}
 \examples{
 \dontrun{
 check_silver_gaps("data/hydro", site_id = "39001", data_type = "Q")

@@ -17,8 +17,8 @@ into. Created if it does not exist. The file is written as
 \code{gauge_registry.parquet} inside this directory.}
 
 \item{overwrite}{Logical. If \code{TRUE} (default), replace any existing
-registry. If \code{FALSE}, merge new gauges into the existing registry,
-preserving metadata for gauges already registered.}
+registry. If \code{FALSE}, merge new series into the existing registry,
+preserving metadata for series already registered.}
 }
 \value{
 The registry \code{data.table} invisibly (full merged registry when
@@ -31,27 +31,62 @@ and writes the result as a Parquet file that every other pipeline tool reads
 from. Must be run before any backfill starts.
 }
 \details{
-By default (\code{overwrite = TRUE}) the existing registry is replaced. Set
-\code{overwrite = FALSE} to merge new gauges into an existing registry: gauges
-already present (matched on \code{gauge_id}) are left untouched, and only new
-rows are appended. This lets you update the gauge list CSV without losing
-\code{backfill_done} status or other metadata already written for existing gauges.
+A registry row is one \emph{series}: the key is \code{gauge_id} + \code{data_type}, so a
+gauge that records both flow and level has two rows. The input is validated
+before anything is written: \code{gauge_id} must be non-empty, \code{data_type} must be
+present for every source except \code{"WISKI_ALL"} (whose files hold several
+parameters), and each key may appear only once.
 
-In a live Databricks environment the \code{write_parquet()} call can be replaced
-with a Delta write via \code{sparklyr} or the Databricks REST API without
-changing any other logic.
+By default (\code{overwrite = TRUE}) the existing registry is replaced. Set
+\code{overwrite = FALSE} to merge new series into an existing registry: series
+already present (matched on \code{gauge_id} + \code{data_type}) are left untouched,
+and only new rows are appended. This lets you update the gauge list CSV
+without losing \code{backfill_done} status or other metadata already written for
+existing series.
+\subsection{Validation and defaults}{
+
+Checks run in this order and the first failure stops the function, before
+anything is written, so a bad CSV can never replace a good registry:
+required columns, empty \code{gauge_id}, missing \code{data_type}, duplicate keys,
+unknown \code{source_system} (see \code{VALID_SOURCES}), unknown \code{category}. Both
+\code{gauge_id} and \code{data_type} are read as character and trimmed, so numeric IDs
+such as \code{39001} keep their identity; an empty \code{data_type} becomes \code{NA}.
+
+Pipeline columns are added with fixed defaults: \code{active = TRUE},
+\code{live = TRUE}, \code{backfill_done = FALSE}, \code{notes = NA} and \code{date_added} set
+to today. Any other columns in the CSV are dropped, so the stored schema
+does not depend on the input file. \code{\link[=run_backfill]{run_backfill()}} and \code{\link[=run_incremental]{run_incremental()}}
+only process rows with \code{active == TRUE}, and \code{\link[=run_incremental]{run_incremental()}} also
+skips \code{live == FALSE}. These flags cannot be set from the CSV (any such
+columns are overwritten); change them in the Parquet file.
+
+A \code{WISKI_ALL} row may have no \code{data_type}, but the orchestrators need a
+concrete type to fetch a series and log such a row as \code{FAILED}.
+}
+
+\subsection{Overwrite versus merge}{
+
+With \code{overwrite = TRUE} the registry is rebuilt from the CSV, so existing
+\code{backfill_done}, \code{active}, \code{live} and \code{notes} values are lost. With
+\code{overwrite = FALSE} only series not yet present are appended: attributes of
+an existing series (for example a changed \code{catchment}) are \emph{not} updated
+from the CSV, and series missing from the CSV are not removed. If no
+registry exists yet, \code{overwrite = FALSE} behaves like a first build. Rows
+that \code{\link[=ingest_all_file]{ingest_all_file()}} adds (when given a \code{registry_path}) use the same
+\code{gauge_id} + \code{data_type} key.
+}
 }
 \section{Windows file-locking}{
 
 Arrow memory-maps Parquet files on Windows when reading, keeping a file
 handle open. Writing back to the same path while that map is live causes
 \strong{Windows error 1224} ("The requested operation cannot be performed on a
-file with a user-mapped section open"). This function avoids the issue by
-writing to a temporary \code{.tmp} file and then using \code{file.rename()} to
-atomically replace the target — the rename only happens after the read map
-is released. If you observe the error despite this, check that no other
-process (e.g. an open R session or file explorer preview) is holding the
-registry file open.
+file with a user-mapped section open"). This function writes to a temporary
+\code{.tmp} file and then replaces the target (renaming, or copying if the rename
+is refused). If the target still cannot be replaced the function \strong{stops
+with an error} rather than silently keeping the old registry — check that
+no other process (e.g. an open R session or file explorer preview) is
+holding the registry file open.
 }
 
 \examples{

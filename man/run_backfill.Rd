@@ -9,25 +9,29 @@ run_backfill(
   output_dir,
   start_date,
   end_date,
-  register_path = "data/hydrometric/register/register.csv",
+  register_path = file.path(output_dir, "register", "hydrometric_data_register.csv"),
   log_path = "logs/backfill_log.csv",
   failed_only = FALSE,
-  n_workers = parallel::detectCores() - 1L
+  n_workers = .default_workers(),
+  batch_size = max(50L, 10L * as.integer(n_workers))
 )
 }
 \arguments{
 \item{registry_path}{Character. Path to the gauge registry Parquet file
 written by \code{\link[=build_gauge_registry]{build_gauge_registry()}}.}
 
-\item{output_dir}{Character. Root output directory (\verb{hydrometric/}). Bronze
-files are written under \verb{output_dir/bronze/<SupplierCode>/<DataType>/<YYYY>/}.}
+\item{output_dir}{Character. Root of the data store. Bronze files are
+written under \verb{output_dir/bronze/<category>/<SupplierCode>/<DataType>/<YYYY>/}.}
 
-\item{start_date}{Character. Backfill start date in \code{"YYYY-MM-DD"} format.}
+\item{start_date}{Character. Backfill start date (inclusive) in
+\code{"YYYY-MM-DD"} format.}
 
-\item{end_date}{Character. Backfill end date in \code{"YYYY-MM-DD"} format.}
+\item{end_date}{Character. Backfill end date (\strong{exclusive}) in
+\code{"YYYY-MM-DD"} format.}
 
 \item{register_path}{Character. Path to the Hydrometric Data Register CSV.
-A provenance record is appended for each successfully ingested dataset.}
+A provenance record is appended for each Bronze file written. Defaults to
+\verb{<output_dir>/register/hydrometric_data_register.csv}.}
 
 \item{log_path}{Character. Path to write the per-gauge result log CSV.
 Directory is created if absent. Default \code{"logs/backfill_log.csv"}.}
@@ -36,47 +40,117 @@ Directory is created if absent. Default \code{"logs/backfill_log.csv"}.}
 run to gauges recorded as \code{"FAILED"} in the previous log. Default
 \code{FALSE}.}
 
-\item{n_workers}{Integer. Number of parallel workers. Defaults to one
-fewer than the number of detected cores so the host remains responsive.}
+\item{n_workers}{Integer. Number of parallel workers; \code{1} runs sequentially
+in the current session. Default: one fewer than the detected cores,
+capped at 4 (see \emph{EA fair use}).}
+
+\item{batch_size}{Integer. Gauges per batch between log/register
+checkpoints. Default \code{max(50, 10 * n_workers)}.}
 }
 \value{
 The log \code{data.table} invisibly, with columns \code{gauge_id},
-\code{status} (\code{"SUCCESS"}, \code{"EMPTY"}, or \code{"FAILED"}), \code{rows},
-\code{elapsed_s}, and \code{error}. The log is also written to \code{log_path}.
+\code{data_type}, \code{status} (\code{"SUCCESS"}, \code{"EMPTY"}, or \code{"FAILED"}), \code{rows},
+\code{elapsed_s}, and \code{error}. The log is also written to \code{log_path}. With
+\code{failed_only = TRUE} the returned (and written) log is the previous log
+updated with the re-run results.
 }
 \description{
-Distributes all active gauges in the registry across available cores using
+Distributes all active gauges in the registry across workers using
 \code{future.apply::future_lapply()}. Each gauge is routed to its source system
-via \code{\link[=route_gauge]{route_gauge()}}, and the resulting data is written to partitioned
-Parquet in the Bronze output directory. Per-gauge success, failure, and
-row counts are logged to a CSV file.
+via \code{\link[=route_gauge]{route_gauge()}}, and the resulting data is written to the Bronze tier as
+Parquet, one file per calendar year of observations
+(\verb{bronze/<category>/<supplier>/<data_type>/<YYYY>/<dataset_id>.parquet}).
+Per-gauge success, failure, and row counts are logged to a CSV file.
 }
 \details{
-Supports re-running only previously failed gauges by setting
-\code{failed_only = TRUE}, which filters the registry to gauges recorded as
-\code{"FAILED"} in an existing log file. This avoids re-fetching gauges that
-already completed successfully.
+Gauges are processed in batches. After every batch the log is rewritten,
+provenance records are appended to the register, and successful gauges are
+marked \code{backfill_done = TRUE} in the registry, so an interrupted run keeps
+its progress.
+
+Supports re-running only previously failed gauges with \code{failed_only = TRUE},
+which restricts the run to rows recorded as \code{"FAILED"} in the existing log.
+The new results replace those rows in the log; rows for gauges that
+succeeded earlier are kept.
 
 A steward alert warning is raised if more than 5\% of gauges fail, to
 prompt investigation before results are promoted to Silver.
+\subsection{What is processed}{
+
+Only registry rows with \code{active == TRUE} are run. The \code{live} flag is
+ignored here (unlike \code{\link[=run_incremental]{run_incremental()}}), so historical \code{WISKI_ALL} rows
+can be backfilled. A registry row is one series (\code{gauge_id} + \code{data_type}),
+so a gauge with flow and level is fetched twice. \code{backfill_done} is a
+record, not a filter: a plain re-run fetches every active row again and
+adds new, dated Bronze files alongside the old ones (Bronze is
+append-only; \code{\link[=read_bronze]{read_bronze()}} resolves the overlap).
 }
+
+\subsection{Order of work}{
+
+Workers fetch and write Bronze files; they never touch the register or the
+registry. After each batch the main process (in this order) appends the
+batch's provenance rows to the register CSV, sets \code{backfill_done = TRUE}
+for \code{SUCCESS} rows only (\code{EMPTY} and \code{FAILED} stay \code{FALSE}), and rewrites
+the log. Doing these in the main process avoids concurrent CSV appends and
+Parquet rewrites. Each batch rewrites the whole registry file once, which
+is one reason the work is batched.
+}
+
+\subsection{Status values}{
+
+\code{FAILED} means the fetch or the store step raised an error; \code{EMPTY} means
+the source genuinely returned nothing. The distinction matters for
+\code{failed_only}, which re-runs \code{FAILED} rows only. Files written by a gauge
+that then fails part-way stay on disk without register records.
+}
+
+\subsection{Log handling and reruns}{
+
+A normal run overwrites \code{log_path} (it does not append, unlike
+\code{\link[=run_incremental]{run_incremental()}}). With \code{failed_only = TRUE}, failed rows are matched to
+the registry on \code{gauge_id} + \code{data_type} (on \code{gauge_id} alone if the old
+log has no \code{data_type} column) and replaced in the previous log by the new
+results. Edge cases:
+\itemize{
+\item If \code{log_path} does not exist, the function errors before doing anything.
+\item If the log holds no \code{FAILED} rows, the previous log is returned unchanged.
+\item A failed series that is no longer \code{active} is not re-run and stays
+\code{FAILED} in the log.
+\item After an interrupted run, gauges in batches that never started have no
+log row, so \code{failed_only} does not pick them up; re-run the full range.
+}
+
+The steward alert compares failures with the number of gauges in \emph{this}
+run, so on a \code{failed_only} re-run the denominator is the re-run subset. The
+warning is raised after the log is saved.
+}
+}
+\section{EA fair use}{
+
+The EA Hydrology API fair-use guidance asks for one request at a time, and
+each HDE worker issues its own requests. The default \code{n_workers} is
+therefore capped at 4. Increase it only for sources that are not rate
+limited, such as local WISKI \code{.all} files.
+}
+
 \examples{
 \dontrun{
 # First full run
 log_dt <- run_backfill(
-  registry_path = "data/fw_bronze/gauge_registry/gauge_registry.parquet",
-  output_dir    = "data/fw_bronze/flow",
+  registry_path = "data/hydrometric/register/gauge_registry.parquet",
+  output_dir    = "data/hydrometric",
   start_date    = "2000-01-01",
-  end_date      = "2024-12-31",
+  end_date      = "2025-01-01",
   log_path      = "logs/backfill_log.csv"
 )
 
 # Re-run failed gauges only
 log_dt <- run_backfill(
-  registry_path = "data/fw_bronze/gauge_registry/gauge_registry.parquet",
-  output_dir    = "data/fw_bronze/flow",
+  registry_path = "data/hydrometric/register/gauge_registry.parquet",
+  output_dir    = "data/hydrometric",
   start_date    = "2000-01-01",
-  end_date      = "2024-12-31",
+  end_date      = "2025-01-01",
   log_path      = "logs/backfill_log.csv",
   failed_only   = TRUE
 )

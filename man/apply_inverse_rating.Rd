@@ -7,15 +7,15 @@
 apply_inverse_rating(flow, rating, measure_notation = "rated_level")
 }
 \arguments{
-\item{flow}{A \link{Flow_Daily} or \link{Flow_15min} object.}
+\item{flow}{A \link{FlodeFlow_Daily} or \link{FlodeFlow_15min} object.}
 
-\item{rating}{A \link{RatingCurve} or \link{RatingSet}.}
+\item{rating}{A \link{FlodeRatingCurve} or \link{FlodeRatingSet}.}
 
 \item{measure_notation}{Character scalar placed in the \code{measure_notation}
 column of the output. Defaults to \code{"rated_level"}.}
 }
 \value{
-A \link{Level_Daily} or \link{Level_15min} object matching the timestep of
+A \link{FlodeLevel_Daily} or \link{FlodeLevel_15min} object matching the timestep of
 \code{flow}. Stage values are in metres. Flow values of \code{NA} or below zero
 are returned as \code{NA}.
 }
@@ -26,11 +26,11 @@ Applies the inverse of the stage-discharge equation
 \details{
 \deqn{h = \left(\frac{Q}{C}\right)^{1/b} + a}
 
-to each observation in a \link{Flow_Daily} or \link{Flow_15min} object and returns a
-\link{Level_Daily} or \link{Level_15min} object of the same period.
+to each observation in a \link{FlodeFlow_Daily} or \link{FlodeFlow_15min} object and returns a
+\link{FlodeLevel_Daily} or \link{FlodeLevel_15min} object of the same period.
 
-When \code{rating} is a \link{RatingSet}, each observation is matched to the
-applicable \link{RatingCurve} by date, exactly as \code{\link[=apply_rating]{apply_rating()}} does for the
+When \code{rating} is a \link{FlodeRatingSet}, each observation is matched to the
+applicable \link{FlodeRatingCurve} by date, exactly as \code{\link[=apply_rating]{apply_rating()}} does for the
 forward direction.
 
 \strong{Discontinuity gaps:} Where consecutive limbs do not meet at their shared
@@ -38,6 +38,30 @@ boundary (i.e. \code{check_limb_continuity()} reports a non-zero gap), a flow
 value that falls inside the gap is mapped to the junction stage
 (the upper boundary of the lower limb). Use \code{\link[=fix_limb_continuity]{fix_limb_continuity()}} to
 remove gaps before inverting if this behaviour is undesirable.
+
+Each flow is inverted as follows:
+\itemize{
+\item An \code{NA} or negative flow gives \code{NA}. A zero flow gives the first limb's
+\code{lower}, not the datum \code{a}.
+\item A positive flow is assigned to the first limb whose discharge at its upper
+boundary (from that limb's own equation) reaches the flow, then inverted
+with the equation above. If limbs overlap in discharge because the curve
+steps down at a junction, the lower limb wins. Flows above the last limb
+are extrapolated with the last limb.
+\item A flow inside a gap between limbs gives the junction stage (see above).
+\item A flow below the discharge the first limb gives at its own \code{lower} is
+inverted by extending the first limb below that stage, whereas
+\code{\link[=apply_rating]{apply_rating()}} returns \code{NA} for such stages, so a round trip is not exact
+there.
+}
+
+As in \code{\link[=apply_rating]{apply_rating()}}, a single \link{FlodeRatingCurve} is applied to every row
+regardless of its validity dates, while a \link{FlodeRatingSet} matches each row
+on its \code{date} column and sets rows outside every window to \code{NA} with a
+warning. No other warnings are issued. The \code{doubtful} column of the flow
+object, if present, is dropped because stage has no such flag, and
+\code{measure_notation} is replaced by the single label given. The input is not
+modified.
 }
 \examples{
 \dontrun{
@@ -49,7 +73,7 @@ limbs <- data.table::data.table(
   b        = c(1.641, 2.706),
   doubtful = c(FALSE, TRUE)
 )
-rc    <- RatingCurve(limbs, station_id = "510310", source = "WISKI")
+rc    <- FlodeRatingCurve(limbs, station_id = "510310", source = "WISKI")
 flow  <- apply_rating(level_obj, rc)
 level <- apply_inverse_rating(flow, rc)
 }

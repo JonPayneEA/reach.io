@@ -19,10 +19,10 @@ double_mass_plot(
 )
 }
 \arguments{
-\item{x_data}{A \code{HydroData} or \code{PotEvapData} object, \strong{or} a list of
+\item{x_data}{A \code{FlodeHydroData} or \code{FlodePotEvapData} object, \strong{or} a list of
 such objects, contributing to the X axis.}
 
-\item{y_data}{A \code{HydroData} or \code{PotEvapData} object, \strong{or} a list of
+\item{y_data}{A \code{FlodeHydroData} or \code{FlodePotEvapData} object, \strong{or} a list of
 such objects, contributing to the Y axis.}
 
 \item{catchment_area_km2}{Numeric scalar. Catchment area in km².
@@ -35,7 +35,7 @@ weights for each X source. Defaults to \code{1} for all sources.}
 \item{weights_y}{Numeric vector, length \code{length(y_data)}. Multiplicative
 weights for each Y source. Defaults to \code{1} for all sources.}
 
-\item{pe}{An optional \link{PotEvap_Daily} object. When provided, the PE
+\item{pe}{An optional \link{FlodePotEvap_Daily} object. When provided, the PE
 signal is subtracted from every rainfall source on both axes before
 any volume scaling or weighting is applied.}
 
@@ -52,14 +52,14 @@ range of the aligned data.}
 parameter types and \code{output_units} when \code{NULL}.}
 }
 \value{
-A \code{ggplot} object. The aligned, cumulative \code{data.table} used
+A \code{ggplot} object (requires the suggested package 'ggplot2'). The aligned, cumulative \code{data.table} used
 to build the plot is attached as \code{attr(p, "data")} for inspection or
 further processing.
 }
 \description{
 Builds two cumulative volume series — one for each axis — from any
-combination of \link{Rainfall_Daily}, \link{Rainfall_15min}, \link{Flow_Daily},
-\link{Flow_15min}, \link{PotEvap_Daily}, \link{PotEvap_Hourly}, or \link{PotEvap_15min}
+combination of \link{FlodeRainfall_Daily}, \link{FlodeRainfall_15min}, \link{FlodeFlow_Daily},
+\link{FlodeFlow_15min}, \link{FlodePotEvap_Daily}, \link{FlodePotEvap_Hourly}, or \link{FlodePotEvap_15min}
 objects, then plots the cumulative X series against the cumulative Y
 series. A perfectly consistent volume ratio plots as a straight line.
 }

@@ -38,12 +38,33 @@ as a \code{data.table}. The default API cap of 100,000 rows is overridden to
 the hard maximum of 2,000,000. For larger requests use
 \code{\link[=download_hydrology]{download_hydrology()}} with \code{method = "batch"}.
 }
+\details{
+\itemize{
+\item \strong{One request, no paging.} Exactly one HTTP request is made and its
+items are taken as they come. If the range holds more than \code{limit} rows
+the result is silently truncated; \code{\link[=make_date_chunks]{make_date_chunks()}} and
+\code{\link[=download_hydrology]{download_hydrology()}} exist to keep each call below that.
+\item \strong{No pacing or retries.} This function does not sleep or retry, so a
+caller looping over many measures or chunks must pause between calls to
+respect the EA fair-use request (one request at a time).
+\item \strong{Errors.} An HTTP error status raises an error (via
+\code{httr::stop_for_status()}); an empty response is not an error and returns
+an empty \code{data.table}.
+\item \strong{Date bounds.} \code{from_date} is sent as \code{mineq-date} (inclusive) and
+\code{to_date} as \code{max-date} (strictly before), so adjacent ranges that share
+a boundary neither overlap nor leave a gap.
+\item \strong{Types.} \code{date} is returned as \code{Date} and \code{dateTime} as UTC \code{POSIXct},
+identically to the batch path.
+\item Nothing is written to disk; for Bronze output use
+\code{\link[=download_hydrology]{download_hydrology()}} with \code{output = "disk"}.
+}
+}
 \examples{
 \dontrun{
 fetch_readings(
   "abc123-flow-m-86400-m3s-qualified",
   from_date = "2022-01-01",
-  to_date   = "2022-12-31"
+  to_date   = "2023-01-01"
 )
 }
 }

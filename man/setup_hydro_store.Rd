@@ -53,28 +53,58 @@ where category is one of \code{"hydrometric"}, \code{"radarH19"}, or \code{"MOSE
 │   ├── radarH19/
 │   │   └── MO/P/
 │   └── MOSES/
-│       └── MO/SM/
+│       └── MO/SM/  MO/PE/
 ├── silver/
 │   ├── hydrometric/Q/  hydrometric/H/  hydrometric/P/
 │   ├── radarH19/P/
-│   └── MOSES/SM/
+│   └── MOSES/SM/  MOSES/PE/
 ├── bronze/
 │   └── hydrometric/
-│       └── ratings/
+│       └── rating_curves/ratings/
 ├── silver/
 │   └── hydrometric/
-│       └── ratings/
+│       └── rating_curves/ratings/
 ├── gold/
 │   ├── hydrometric/
-│   │   ├── ratings/
+│   │   ├── rating_curves/ratings/
 │   │   ├── Q/FFA/
 │   │   └── P/catchment_average/
 │   ├── radarH19/P/
-│   └── MOSES/SM/
+│   └── MOSES/SM/  MOSES/PE/
 └── register/
 }\if{html}{\out{</div>}}
 
 Safe to re-run on an existing store — existing directories are untouched.
+
+Only the tier, category, supplier and data-type folders are created. The
+\verb{<YYYY>} observation-year folders under Bronze are not made here: the
+Bronze writers create them when data first lands (see \code{\link[=run_backfill]{run_backfill()}} and
+\code{\link[=ingest_all_file]{ingest_all_file()}}). The \verb{register/} folder is created, but the register
+CSV itself is only created by the first provenance record.
+
+How \code{categories} is applied:
+\itemize{
+\item Bronze folders are made per supplier and data type, except that the
+\code{NRFA} supplier only gets \code{Q} (it carries flow only), whatever
+\code{data_types} says.
+\item Silver and Gold folders are made per data type, not per supplier.
+\item \code{gold_purposes} entries add \verb{gold/<category>/<data_type>/<purpose>/}
+folders, and only for data types listed in that category's \code{data_types}.
+\item Rating folders (\verb{<tier>/hydrometric/rating_curves/ratings/} in every
+tier) are created only when \code{"rating_curves"} is listed as a
+\code{hydrometric} supplier. It is not a data supplier, so no
+\verb{<data_type>} folders are created for it (earlier versions made empty
+\verb{bronze/hydrometric/rating_curves/\{Q,H,P\}/} folders as well).
+}
+
+The returned manifest has one row per directory considered, with \code{created}
+\code{FALSE} for those that already existed, so it doubles as a check of what a
+re-run changed. \code{verbose = FALSE} silences the per-directory messages but
+not the closing summary.
+
+Run this before \code{\link[=run_backfill]{run_backfill()}}, \code{\link[=run_incremental]{run_incremental()}} or
+\code{\link[=ingest_all_file]{ingest_all_file()}} if you want the full tree up front. Their writers
+create what they need on demand.
 }
 \examples{
 \dontrun{

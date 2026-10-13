@@ -30,6 +30,16 @@ rainfall-runoff modelling software:
 
 The measure column is named \code{"rainfall"}, \code{"flow"}, or \code{"level"} according
 to the \code{measure} argument.
+
+Rows are reshaped one-for-one and in the order given: nothing is sorted,
+de-duplicated, gap-filled or unit-converted, and \code{value} is passed through
+untouched (including \code{NA}). Any other columns in \code{dt} are dropped. The
+date-time components are expressed in \code{tz}, so supply the zone the model
+expects; the default \code{"GMT"} has no daylight-saving shift, which avoids
+duplicated or missing local hours in the output. Seconds are truncated to
+whole numbers. Nothing is written to disk; to take data from the store first
+use \code{\link[=read_bronze]{read_bronze()}}, and see \code{\link[=format_for_fmp]{format_for_fmp()}} for the Flood Modeller
+equivalent.
 }
 \examples{
 library(data.table)

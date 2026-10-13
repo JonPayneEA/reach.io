@@ -4,7 +4,7 @@
 \alias{route_gauge}
 \title{Route a single gauge fetch to the correct source system}
 \usage{
-route_gauge(gauge_row, start_date, end_date)
+route_gauge(gauge_row, start_date, end_date, on_error = c("warn", "stop"))
 }
 \arguments{
 \item{gauge_row}{A one-row \code{data.table} from the gauge registry. Must
@@ -12,23 +12,54 @@ contain columns \code{gauge_id}, \code{source_system}, and \code{data_type}.}
 
 \item{start_date}{Character. Start date in \code{"YYYY-MM-DD"} format.}
 
-\item{end_date}{Character. End date in \code{"YYYY-MM-DD"} format.}
+\item{end_date}{Character. End date (\strong{exclusive}) in \code{"YYYY-MM-DD"} format.}
+
+\item{on_error}{Character. \code{"warn"} (default) returns \code{NULL} with a warning
+when the fetch fails; \code{"stop"} re-raises the error.}
 }
 \value{
-A \code{data.table} conforming to the Bronze schema, or \code{NULL} if the
-fetch failed.
+A \code{data.table} conforming to the Bronze schema (empty if no data
+was found), or \code{NULL} if the fetch failed and \code{on_error = "warn"}.
 }
 \description{
 Reads the \code{source_system} field of a one-row registry \code{data.table} and
 dispatches to \code{\link[=fetch_from_hde]{fetch_from_hde()}}, \code{\link[=fetch_from_wiski]{fetch_from_wiski()}},
-or \code{\link[=fetch_from_wiski_all]{fetch_from_wiski_all()}}. Fetch errors are
-caught and returned as \code{NULL} with a warning so the caller can log and
-continue.
+or \code{\link[=fetch_from_wiski_all]{fetch_from_wiski_all()}}.
 }
 \details{
+With the default \code{on_error = "warn"}, fetch errors are caught and \code{NULL} is
+returned with a warning, which suits interactive use. Orchestrators such as
+\code{\link[=run_backfill]{run_backfill()}} use \code{on_error = "stop"} so that a failed fetch is recorded
+as \code{FAILED} rather than being mistaken for an empty response.
+
 To add a new source system: write a \verb{fetch_from_<n>()} function returning
 the Bronze schema, add a case to the \code{switch()} below, update
 \code{VALID_SOURCES} in \code{package.R}, and re-run \code{\link[=build_gauge_registry]{build_gauge_registry()}}.
+\itemize{
+\item \strong{Dispatch.} \code{source_system} selects the client (\code{"HDE"}, \code{"WISKI"} or
+\code{"WISKI_ALL"}); any other value raises \verb{No client for source_system},
+which is then handled according to \code{on_error} like any fetch error.
+\code{gauge_id} and \code{data_type} are passed through unchanged along with the
+dates, so \code{end_date} keeps the package-wide exclusive meaning.
+Pass exactly one row, such as \code{registry_dt[gauge_id == "39001"]}; a
+multi-row input fails inside \code{switch()} and is handled as a fetch error.
+\item \strong{Errors versus empty data.} An empty \code{data.table} is a normal result
+(the source had nothing) and is returned as is, whereas an error is a
+failure. With \code{on_error = "warn"} a failure comes back as \code{NULL}, which a
+caller that treats \code{NULL} and empty alike would read as "no data" (the
+orchestrators would log \code{EMPTY}). Batch workflows should therefore use
+\code{"stop"} and record the failure, as \code{\link[=run_backfill]{run_backfill()}} and
+\code{\link[=run_incremental]{run_incremental()}} do. The re-raised error is prefixed with the gauge ID
+and drops the original call.
+\item \strong{Warnings are not errors.} Problems the clients report as warnings
+(for example an unknown gauge in \code{\link[=fetch_from_hde]{fetch_from_hde()}}) are not intercepted
+here and do not trigger \code{on_error}. A failed HDE chunk is handled
+separately: \code{on_error} is passed down, so with \code{"stop"} it becomes an
+error here.
+\item \strong{Side effects.} None of its own: the network or file access is done by
+the chosen client, and the result is not written to Bronze here.
+\code{\link[=fetch_from_wiski]{fetch_from_wiski()}} always errors at present.
+}
 }
 \examples{
 \dontrun{
@@ -39,6 +70,6 @@ registry_dt <- data.table::as.data.table(
 )
 dt <- route_gauge(registry_dt[gauge_id == "39001"],
                   start_date = "2020-01-01",
-                  end_date   = "2020-12-31")
+                  end_date   = "2021-01-01")
 }
 }

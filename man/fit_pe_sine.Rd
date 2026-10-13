@@ -21,7 +21,8 @@ A named list with elements:
 \describe{
 \item{\code{B}}{Annual mean PE (mm day\eqn{^{-1}}).}
 \item{\code{A}}{Amplitude (mm day\eqn{^{-1}}).}
-\item{\code{phi}}{Phase offset (day of year of peak PE).}
+\item{\code{phi}}{Phase offset: day of year at which the curve rises through
+\code{B}. Peak PE falls about 91 days later (\code{phi + 91.3}).}
 \item{\code{r_squared}}{Coefficient of determination of the sine fit.}
 \item{\code{rmse}}{Root mean squared error (mm day\eqn{^{-1}}).}
 \item{\code{method}}{The method actually used (may differ from \code{method} if
@@ -33,9 +34,11 @@ NLS fell back to \code{"lm_fourier"}).}
 Estimates the three parameters of the annual PE sine model:
 \deqn{PE(t) = B + A \sin\!\left(\frac{2\pi}{365.25}(doy - \phi)\right)}
 where \eqn{B} is the annual mean (mm day\eqn{^{-1}}), \eqn{A} is the
-amplitude (mm day\eqn{^{-1}}), and \eqn{\phi} is the phase offset
-(day of year of peak PE; approximately 172 for UK lowland catchments,
-i.e. around 21 June).
+amplitude (mm day\eqn{^{-1}}), and \eqn{\phi} is the phase offset: the
+day of year at which the curve rises through the annual mean \eqn{B}. PE
+peaks about 91 days later (\eqn{\phi + 365.25/4}), so a UK-like mid-June
+peak (day of year about 172) corresponds to \eqn{\phi} of roughly 81, not
+172.
 }
 \details{
 Two fitting methods are available. \code{"lm_fourier"} (the default) rewrites
@@ -48,6 +51,41 @@ The sine approximation is reliable for UK lowland catchments. In upland or
 coastal sites where PE timing is shifted by elevation or sea surface
 temperature, inspect \code{r_squared} before using the fitted curve
 operationally.
+
+\strong{Day of year.} \code{doy} is the day of year (1 to 366) of each date and is the
+only time variable: all years supplied are pooled into one mean annual
+cycle. The period is fixed at 365.25 days, so day 366 of a leap year lies
+just past one full cycle rather than wrapping to day 1.
+
+\strong{Meaning of \code{phi}.} As coded, the curve rises through \code{B} at
+\code{doy = phi} and reaches its maximum about 91 days later, at
+\code{phi + 365.25 / 4}. \code{phi} is therefore the day the curve crosses the annual
+mean going upward, not the day of peak PE. Parameters from this function are
+consistent with \code{\link[=generate_pe_sine]{generate_pe_sine()}} and \code{\link[=compare_pe_sine]{compare_pe_sine()}}, which use the
+same formula; the date of maximum PE is \code{phi + 91.3} (wrapped at 365.25).
+
+\strong{Methods.} \code{"lm_fourier"} expands the sine into
+\verb{B + C1 sin(w doy) + C2 cos(w doy)} (with \verb{w = 2 pi / 365.25}), fits it by
+ordinary least squares, and recovers \code{A = sqrt(C1^2 + C2^2)} and
+\code{phi = atan2(-C2, C1) / w}, wrapped into \verb{[0, 365.25)}. \code{A} is a norm, so it
+is never negative. \code{"nls"} fits \code{B}, \code{A} and \code{phi} directly, starting from
+the \code{"lm_fourier"} solution (the exact least-squares answer for this model,
+so NLS refines rather than searches), without bounds, so
+\code{A} can come back negative (equivalent to shifting \code{phi} by half a year);
+\code{phi} is wrapped but the sign of \code{A} is not normalised. If NLS fails, a
+warning is issued and the \code{"lm_fourier"} result is returned instead; check
+the \code{method} element to see which was used.
+
+\strong{Fit statistics.} \code{r_squared} and \code{rmse} are computed on the fitted sine
+without the zero floor that \code{\link[=generate_pe_sine]{generate_pe_sine()}} and \code{\link[=compare_pe_sine]{compare_pe_sine()}}
+apply, so they can differ slightly from \code{compare_pe_sine()} where the curve
+dips below zero. \code{r_squared} is \code{NA} for a constant series.
+
+\strong{Data requirements.} At least 14 non-missing observations are required,
+but that is only a guard on the count: nothing checks that the data span a
+full year, and a short window leaves \code{A} and \code{phi} poorly determined.
+Observations need not be sorted. Apart from the NLS warning the function
+has no side effects.
 }
 \examples{
 # Synthetic noiseless series with known parameters

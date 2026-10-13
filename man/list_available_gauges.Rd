@@ -36,6 +36,32 @@ data type.
 \details{
 The register is the primary source of truth. If it does not yet exist, a
 message is printed and an empty table is returned.
+
+Only the register is consulted; the file system is not scanned. Files that
+exist on disk but were never registered do not appear, and registered files
+that have since been deleted still do. Use \code{\link[=check_gaps]{check_gaps()}} when the Parquet
+files themselves matter.
+
+Only Bronze rows are kept (where the register has a \code{tier} column). The
+register written by this package has no category column, so \code{category} is
+derived from each \code{file_path} as the first directory below
+\verb{<root>/bronze/}; that works only if the recorded paths sit under \code{root}.
+Filters are exact matches (any-of when a vector is given) and are applied
+before summarising. A filter whose column is absent from the register is
+ignored rather than raising an error.
+
+Rows are grouped by site, category, supplier, data type and temporal
+resolution, so one site can appear several times (for example when two
+suppliers hold it). \code{start} and \code{end} are the earliest and latest period
+dates recorded (\code{"YYYY-MM-DD"} text). \code{n_datasets} counts register rows: the
+Bronze writers record one row per year file and every ingest appends more
+(a same-day re-ingest merges into the existing file but still adds a row), so it counts
+registered files rather than distinct series.
+
+A header line and the table are printed to the console. When the register is
+missing or nothing matches, a message (not an error) is issued and an empty
+table is returned. Related: \code{\link[=summarise_coverage]{summarise_coverage()}}, \code{\link[=check_gaps]{check_gaps()}},
+\code{\link[=read_bronze]{read_bronze()}}, \code{\link[=setup_hydro_store]{setup_hydro_store()}}.
 }
 \examples{
 \dontrun{

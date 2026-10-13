@@ -11,7 +11,9 @@ generate_pe_sine(B, A, phi, start, end, as_s7 = TRUE)
 
 \item{A}{Numeric. Amplitude (mm day\eqn{^{-1}}).}
 
-\item{phi}{Numeric. Phase offset — day of year of peak PE (~172 for UK).}
+\item{phi}{Numeric. Phase offset: the day of year at which the curve rises
+through \code{B} (peak PE is about 91 days later, so about 81 for a UK-like
+mid-June peak).}
 
 \item{start}{Date or character (\code{"YYYY-MM-DD"}). Start of the output series
 (inclusive).}
@@ -20,11 +22,11 @@ generate_pe_sine(B, A, phi, start, end, as_s7 = TRUE)
 (inclusive).}
 
 \item{as_s7}{Logical. If \code{TRUE} (default), wrap the result in a
-\link{PotEvap_Daily} S7 object with \code{source_name = "sine_curve"}.
+\link{FlodePotEvap_Daily} S7 object with \code{source_name = "sine_curve"}.
 If \code{FALSE}, return a plain \code{data.table} with columns \code{date} and \code{pe}.}
 }
 \value{
-A \link{PotEvap_Daily} S7 object (when \code{as_s7 = TRUE}) or a
+A \link{FlodePotEvap_Daily} S7 object (when \code{as_s7 = TRUE}) or a
 \code{data.table} with columns \code{date} (Date) and \code{pe} (numeric,
 mm day\eqn{^{-1}}) (when \code{as_s7 = FALSE}).
 }
@@ -35,12 +37,25 @@ standard annual sine model:
 Values are clamped to zero so physically impossible negative PE is never
 returned.
 }
+\details{
+The series is daily from \code{start} to \code{end} inclusive, using the same
+day-of-year (1 to 366) and 365.25-day period as \code{\link[=fit_pe_sine]{fit_pe_sine()}}, so
+parameters fitted there reproduce the same curve here. Because negative
+values are clamped to zero, a series with \code{A > B} has a mean above \code{B} and
+does not round-trip exactly through \code{fit_pe_sine()}.
+
+With \code{as_s7 = TRUE} the readings table has columns \code{dateTime} (midnight UTC
+of each date), \code{date} and \code{value}; with \code{as_s7 = FALSE} the same numbers
+come back as \code{date} and \code{pe}. \code{from_date} / \code{to_date} on the S7 object are
+the requested range. Nothing is written to disk. Use \code{\link[=disagg_to_15min]{disagg_to_15min()}} on
+the S7 result for a finer timestep.
+}
 \examples{
 # Generate 5 years of synthetic PE from fitted parameters
 params <- list(B = 2.5, A = 2.0, phi = 172)
 pe_obj <- generate_pe_sine(params$B, params$A, params$phi,
                            start = "2010-01-01", end = "2014-12-31")
-pe_obj  # PotEvap_Daily S7 object
+pe_obj  # FlodePotEvap_Daily S7 object
 
 # Plain data.table output
 dt <- generate_pe_sine(2.5, 2.0, 172,

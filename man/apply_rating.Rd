@@ -7,31 +7,60 @@
 apply_rating(level, rating, measure_notation = "rated_flow")
 }
 \arguments{
-\item{level}{A \link{Level_Daily} or \link{Level_15min} object.}
+\item{level}{A \link{FlodeLevel_Daily} or \link{FlodeLevel_15min} object.}
 
-\item{rating}{A \link{RatingCurve} or \link{RatingSet}.}
+\item{rating}{A \link{FlodeRatingCurve} or \link{FlodeRatingSet}.}
 
 \item{measure_notation}{Character scalar placed in the \code{measure_notation}
 column of the output. Defaults to \code{"rated_flow"}.}
 }
 \value{
-A \link{Flow_Daily} or \link{Flow_15min} object matching the timestep of
+A \link{FlodeFlow_Daily} or \link{FlodeFlow_15min} object matching the timestep of
 \code{level}. Rated flows are in m³/s (consistent with the rating equation).
 Stages below the lowest limb boundary, or outside the validity window of
-any curve in a \link{RatingSet}, are returned as \code{NA}.
+any curve in a \link{FlodeRatingSet}, are returned as \code{NA}.
 }
 \description{
 Applies the stage-discharge rating equation \eqn{Q = C(h - a)^b} to each
-observation in a \link{Level_Daily} or \link{Level_15min} object and returns a
-\link{Flow_Daily} or \link{Flow_15min} object of the same period.
+observation in a \link{FlodeLevel_Daily} or \link{FlodeLevel_15min} object and returns a
+\link{FlodeFlow_Daily} or \link{FlodeFlow_15min} object of the same period.
 }
 \details{
-When \code{rating} is a \link{RatingSet}, each observation is matched to whichever
-\link{RatingCurve} has a validity window that spans that observation's date.
+When \code{rating} is a \link{FlodeRatingSet}, each observation is matched to whichever
+\link{FlodeRatingCurve} has a validity window that spans that observation's date.
 Observations that fall outside all validity windows are set to \code{NA}.
 
 The output \code{readings} data.table carries an extra \code{doubtful} column
 (\code{TRUE} where the applicable rating limb has its doubtful flag set).
+
+Each stage is rated as follows:
+\itemize{
+\item An \code{NA} stage stays \code{NA}.
+\item A stage below the lowest limb's \code{lower} has no rating and gives \code{NA}, so a
+negative stage on a curve whose first limb starts at 0 is \code{NA}, not zero
+flow.
+\item Otherwise the limb with the greatest \code{lower} not above the stage is used.
+A stage exactly on a junction therefore uses the upper limb, and stages
+above the last limb's \code{upper} are extrapolated with the last limb.
+\item A stage at or below the limb's datum offset \code{a} gives \code{Q = 0}, not \code{NA}.
+}
+
+With a single \link{FlodeRatingCurve}, \code{valid_from} / \code{valid_to} are \strong{not}
+consulted: the curve is applied to every row. Validity windows take effect
+only through a \link{FlodeRatingSet}, where each row is matched on its \code{date}
+column (calendar date, both ends inclusive, \code{valid_to = NA} open-ended; the
+time of day plays no part). A curve whose \code{valid_from} is \code{NA} never matches
+inside a set.
+
+Counts of rows set to \code{NA} are reported as warnings, not errors: one for
+stages below the lowest limb and, for a set, one for rows outside every
+validity window. The input object is not modified. The output keeps the
+input columns (such as \code{quality}), replaces \code{value} with discharge, sets
+\code{measure_notation} to the single label given (so the result has one measure
+whatever the input had), and adds \code{doubtful}, which is \code{NA} where no limb
+applied. \code{from_date} and \code{to_date} are copied from \code{level}. See also
+\code{\link[=apply_inverse_rating]{apply_inverse_rating()}} for the reverse conversion and
+\code{\link[=check_limb_continuity]{check_limb_continuity()}} to inspect a curve before using it.
 }
 \examples{
 \dontrun{
@@ -43,7 +72,7 @@ limbs <- data.table::data.table(
   b        = c(1.641, 2.706),
   doubtful = c(FALSE, TRUE)
 )
-rc    <- RatingCurve(limbs, station_id = "510310", source = "WISKI")
+rc    <- FlodeRatingCurve(limbs, station_id = "510310", source = "WISKI")
 flow  <- apply_rating(level_obj, rc)
 }
 }

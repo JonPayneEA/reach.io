@@ -7,7 +7,7 @@
 save_rating(x, ...)
 }
 \arguments{
-\item{x}{A \link{RatingCurve} or \link{RatingSet}. The curve's \code{station_id} slot
+\item{x}{A \link{FlodeRatingCurve} or \link{FlodeRatingSet}. The curve's \code{station_id} slot
 must be set to a non-empty string.}
 
 \item{root}{Character. Root of the data store
@@ -42,7 +42,7 @@ row (e.g. \code{"Post-survey 2023 refit — upper limb revised"}).}
 The path(s) to the written Parquet file(s), invisibly.
 }
 \description{
-Writes a \link{RatingCurve} (or every curve in a \link{RatingSet}) into the
+Writes a \link{FlodeRatingCurve} (or every curve in a \link{FlodeRatingSet}) into the
 shared \verb{<root>/<tier>/hydrometric/ratings/ratings.parquet} file and
 appends a governance row to \verb{<root>/register/rating_register.csv}.
 }
@@ -64,14 +64,45 @@ so the full lineage (bronze → silver → gold) is traceable.
 
 The ratings directory and register are created automatically if they
 do not yet exist (no need to call \code{\link[=setup_hydro_store]{setup_hydro_store()}} first).
+
+Order of work: the curve's \code{station_id} is checked (a missing or empty one is
+an error); the next version number is read from the register; the limbs are
+appended to the tier's Parquet (the whole file is read, the new rows stacked
+on, and the file rewritten); then earlier \code{"Active"} rows for the same site
+and tier are marked \code{"Superseded"} and the new register row is appended. The
+register, not the Parquet, is
+the source of version numbers, and numbers are never reused.
+
+The two writes are not atomic. If the process stops after the Parquet is
+rewritten but before the register is, the Parquet holds a version the
+register does not know about, and the next save for that site and tier takes
+the same number again. Writers are also not safe to run concurrently against
+one store, since each does a read-modify-write of the whole Parquet and
+register.
+
+Validity windows are stored as given and are not compared with those of
+existing versions at save time. Overlaps only surface when the versions are
+loaded together (see \code{\link[=load_rating]{load_rating()}}).
+
+For a \link{FlodeRatingSet}, each curve is saved in list order through the same
+method, using the curve's own \code{station_id} (the set's is ignored). Each gets
+its own version and register row. The members of a set are the rating for
+different periods, so they are all current together: the site's previous
+\code{"Active"} versions are marked \code{"Superseded"} once, before the set is saved,
+and every member of the new set is left \code{"Active"}. The return value is one
+path per curve, all the same file.
+
+Directories are created as needed. A message reports any superseding and the
+file written. Related: \code{\link[=list_ratings]{list_ratings()}}, \code{\link[=load_rating]{load_rating()}},
+\code{\link[=check_limb_continuity]{check_limb_continuity()}}, \code{\link[=fix_limb_continuity]{fix_limb_continuity()}}.
 }
 \section{Provenance register}{
 
 Every saved curve gets a unique \code{rating_id} of the form
 \verb{\{site_id\}_RATING_\{tier\}_v\{version\}} (e.g. \verb{510310_RATING_gold_v2}).
 The register also records a \code{status} column. When a new version is saved,
-any previously \code{"Active"} version for the same site and tier is
-automatically updated to \code{"Superseded"}, so \code{list_ratings()} always
+any previously \code{"Active"} version for the same site and tier (other tiers
+are not affected) is automatically updated to \code{"Superseded"}, so \code{list_ratings()} always
 shows which version is currently in use.
 }
 

@@ -16,7 +16,7 @@ format_for_fmp(
 )
 }
 \arguments{
-\item{flows}{A named \code{list} of \link{Flow_Daily} or \link{Flow_15min} objects, one per
+\item{flows}{A named \code{list} of \link{FlodeFlow_Daily} or \link{FlodeFlow_15min} objects, one per
 gauge. A single (unnamed) object is also accepted and wrapped automatically.
 List names are used to construct IED references when \code{ied_refs} is \code{NULL}.}
 
@@ -51,7 +51,7 @@ If \code{out_file} is \code{NULL}, a character vector of CSV lines (invisibly).
 If \code{out_file} is supplied, \code{out_file} as a character scalar (invisibly).
 }
 \description{
-Writes one or more \link{Flow_Daily} or \link{Flow_15min} objects to the four-header-row
+Writes one or more \link{FlodeFlow_Daily} or \link{FlodeFlow_15min} objects to the four-header-row
 CSV format used by Flood Modeller Pro (FMP) to assign flow boundary conditions
 to named 1D IED (node) references at simulation runtime.
 }
@@ -95,6 +95,26 @@ Omitting \code{out_file} returns the formatted lines as a character vector,
 which is convenient for inspection (\code{cat(lines, sep = "\\n")}) and unit
 testing without touching the file system. Supply \code{out_file} to write
 directly to disk; parent directories are created automatically.
+
+Inputs are validated first (object classes and the lengths of \code{gauge_ids}
+and \code{ied_refs}), so nothing is written if they are wrong. Mixed
+\code{period_name} values across \code{flows} (for example daily and 15-minute) are
+allowed but raise a warning, because the outer join then leaves \code{NA} where
+timesteps do not coincide.
+
+The merge assumes each series has at most one reading per \code{dateTime}; a
+duplicated timestamp inside one series would be matched against every
+reading at that time in the others and so add rows. The merged table is
+sorted by time before the relative hours are computed. A \code{start_time} later
+than some readings gives negative hours rather than an error.
+
+Flow values are written as supplied (the layout assumes m3/s; no unit
+conversion or check is made) to three decimal places, as is the time
+column. \code{NA} is replaced by \code{na_fill} before formatting, so
+\code{na_fill = 0} appears as \code{0.000} while the default leaves an empty cell.
+Header rows 1 and 2 are padded with empty cells so that every line has one
+field for the time column plus one per site. Use \code{\link[=read_bronze]{read_bronze()}} to obtain
+flow objects from the store, and \code{\link[=format_for_pdm]{format_for_pdm()}} for PDM for PCs.
 }
 \examples{
 \dontrun{

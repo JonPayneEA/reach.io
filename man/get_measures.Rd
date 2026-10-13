@@ -15,13 +15,13 @@ get_measures(
 \item{parameter}{Character. One of \code{"rainfall"}, \code{"flow"}, or \code{"level"}.}
 
 \item{period_name}{Character or \code{NULL}. \code{"daily"} or \code{"15min"}. Defaults
-to the parameter's built-in default (daily for all three).}
+to the parameter's built-in default (currently \code{"15min"} for all three).}
 
 \item{value_type}{Character or \code{NULL}. Value statistic filter, e.g.
 \code{"mean"}, \code{"min"}, \code{"max"}, \code{"instantaneous"}, \code{"total"}. \code{NULL} uses
 the parameter default. \code{"all"} skips the filter entirely.}
 
-\item{limit}{Integer. Maximum number of measures to return. Default 2000.}
+\item{limit}{Integer. Maximum number of measures to return. Default 5000.}
 }
 \value{
 A \code{data.table} of measure metadata. Key columns include
@@ -38,8 +38,21 @@ stations after fetching rather than making multiple per-station API calls.
 }
 \details{
 For the common case where you already know which stations you want,
-\code{find_stations()} returns measure notations directly in its \code{measures}
-list column, avoiding a second API call entirely.
+\code{find_stations()} returns measure notations directly in its
+\code{measure_notation} column, avoiding a second API call entirely.
+
+A single request is made, with no paging: at most \code{limit} measures come
+back, so for a wide query (every 15-minute rainfall gauge, say) check the
+row count against \code{limit} before assuming the list is complete. An empty
+result gives a warning and an empty \code{data.table}, not an error; an HTTP
+error status is raised. Unlike \code{\link[=find_stations]{find_stations()}}, the columns are the
+API's own (flattened \verb{station.*} fields, \code{periodName}, \code{valueType}), with
+no parsing of the notation into \code{period} / \code{value_type}, and the \code{notation}
+column is already the measure ID. Only \code{parameter} is validated
+(\code{match.arg()}); \code{period_name} and \code{value_type} go to the API as given,
+except that \code{value_type = "all"} omits the \code{valueType} filter. Nothing is
+written to disk. \code{\link[=download_hydrology]{download_hydrology()}} calls this only when no station
+identifiers are supplied.
 }
 \examples{
 \dontrun{

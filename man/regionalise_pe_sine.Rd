@@ -35,6 +35,24 @@ estimating PE at ungauged catchments by pooling neighbouring gauges.
 Phase (\eqn{\phi}) averaging is performed on the unit circle to avoid
 wrap-around artefacts when gauges span the day 0/365 boundary (e.g.
 mixing gauges with \eqn{\phi = 5} and \eqn{\phi = 360}).
+
+Order of operations: \code{NULL} entries are dropped first. \code{weights}, if given,
+are checked against the length of the original \code{params_list} (so they line
+up with the \code{NULL} entries too), reduced to the kept fits, and rescaled to
+sum to 1. A weight attached to a failed fit is therefore discarded, and
+weights that sum to zero over the kept fits are an error.
+
+\code{B} and \code{A} are weighted arithmetic means. \code{phi} is treated as an angle on a
+circle of 365.25 days and averaged as a weighted mean of unit vectors, so
+phases either side of the year boundary combine sensibly. The length of the
+mean vector is discarded; if the phases cancel exactly (for example two
+equally weighted gauges half a year apart) the result is arbitrary.
+
+Only the \code{B}, \code{A} and \code{phi} elements of each entry are read, so any list
+with those elements works. A fit from \code{fit_pe_sine(method = "nls")} can carry
+a negative \code{A}; averaging it with positive amplitudes mixes sign
+conventions, so the default \code{"lm_fourier"} fits (always \code{A >= 0}) are the
+safer input. The result can be passed to \code{\link[=generate_pe_sine]{generate_pe_sine()}}.
 }
 \examples{
 dates  <- seq(as.Date("2010-01-01"), as.Date("2019-12-31"), by = "day")

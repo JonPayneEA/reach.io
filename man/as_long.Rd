@@ -2,13 +2,13 @@
 % Please edit documentation in R/classes.R
 \name{as_long}
 \alias{as_long}
-\title{Reshape a HydroData object to long format}
+\title{Reshape a FlodeHydroData object to long format}
 \usage{
 as_long(x, ...)
 }
 \arguments{
-\item{x}{A \link{Rainfall_Daily}, \link{Rainfall_15min}, \link{Flow_Daily}, \link{Flow_15min},
-\link{Level_Daily}, or \link{Level_15min} object.}
+\item{x}{A \link{FlodeRainfall_Daily}, \link{FlodeRainfall_15min}, \link{FlodeFlow_Daily}, \link{FlodeFlow_15min},
+\link{FlodeLevel_Daily}, or \link{FlodeLevel_15min} object.}
 }
 \value{
 A \code{data.table} with columns \code{parameter}, \code{measure_notation},
@@ -18,6 +18,15 @@ readings (e.g. \code{quality}, \code{completeness}).
 \description{
 \code{as_long()} is an S7 generic. Adds a \code{parameter} column and reorders so
 results from multiple parameter objects can be combined with \code{rbind()}.
+}
+\details{
+Works on a copy, so the object is unchanged. The \code{parameter} column holds
+\code{"rainfall"}, \code{"flow"} or \code{"level"}. The first five columns are \code{parameter},
+\code{measure_notation}, \code{date}, \code{dateTime} and \code{value}; any other columns follow
+in their original order. Binding results for different parameters with
+\code{rbind()} needs identical columns, so use \code{data.table::rbindlist()} with
+\code{fill = TRUE} if some carry extras (for example \code{doubtful} from
+\code{\link[=apply_rating]{apply_rating()}}). No method exists for potential evaporation objects.
 }
 \examples{
 \dontrun{
