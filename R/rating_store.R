@@ -195,27 +195,28 @@ NULL
 #'
 #' @param x A [FlodeRatingCurve] or [FlodeRatingSet]. The curve's `station_id` slot
 #'   must be set to a non-empty string.
-#' @param root Character. Root of the data store
-#'   (the directory that contains `bronze/`, `silver/`, `gold/`,
-#'   `register/`).
-#' @param tier Character. Storage tier: `"bronze"`, `"silver"`, or
-#'   `"gold"` (default).
-#' @param saved_by Character. Name or username of the person saving the
-#'   curve. Recorded in the register. Defaults to `Sys.info()[["user"]]`.
-#' @param method_of_receipt Character. How the rating was obtained, e.g.
-#'   `"WISKI export"`, `"consultant report"`, `"manual entry"`. Recorded
-#'   in the register. Defaults to `NA`.
-#' @param derivation_method Character. How the rating was developed.
-#'   Suggested values: `"spot gaugings"` (field measurements only),
-#'   `"hydraulic model"` (e.g. HEC-RAS, ISIS, TUFLOW), `"statistical model"`,
-#'   or `"mixed"` (gaugings calibrated to a model). Free text is also
-#'   accepted. Defaults to `NA`.
-#' @param model_or_project Character. Name of the hydraulic model, statistical
-#'   framework, project, or team that produced the rating (free text).
-#'   Useful when the same site has ratings from different sources over time.
-#'   Defaults to `NA`.
-#' @param notes Character. Optional free-text note appended to the register
-#'   row (e.g. `"Post-survey 2023 refit — upper limb revised"`).
+#' @param ... Arguments passed to the method. For a [FlodeRatingCurve] or
+#'   [FlodeRatingSet] these are:
+#'   - `root`: Character. Root of the data store (the directory that contains
+#'     `bronze/`, `silver/`, `gold/`, `register/`).
+#'   - `tier`: Character. Storage tier: `"bronze"`, `"silver"`, or `"gold"`
+#'     (default).
+#'   - `saved_by`: Character. Name or username of the person saving the curve.
+#'     Recorded in the register. Defaults to `Sys.info()[["user"]]`.
+#'   - `method_of_receipt`: Character. How the rating was obtained, e.g.
+#'     `"WISKI export"`, `"consultant report"`, `"manual entry"`. Recorded in
+#'     the register. Defaults to `NA`.
+#'   - `derivation_method`: Character. How the rating was developed. Suggested
+#'     values: `"spot gaugings"` (field measurements only), `"hydraulic model"`
+#'     (e.g. HEC-RAS, ISIS, TUFLOW), `"statistical model"`, or `"mixed"`
+#'     (gaugings calibrated to a model). Free text is also accepted. Defaults
+#'     to `NA`.
+#'   - `model_or_project`: Character. Name of the hydraulic model, statistical
+#'     framework, project, or team that produced the rating (free text). Useful
+#'     when the same site has ratings from different sources over time.
+#'     Defaults to `NA`.
+#'   - `notes`: Character. Optional free-text note appended to the register row
+#'     (e.g. `"Post-survey 2023 refit - upper limb revised"`).
 #'
 #' @section Provenance register:
 #' Every saved curve gets a unique `rating_id` of the form

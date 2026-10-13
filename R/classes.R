@@ -384,6 +384,7 @@ HYDRO_CLASS <- list(
 #' @param x A [FlodeRainfall_Daily], [FlodeRainfall_15min], [FlodeFlow_Daily], [FlodeFlow_15min],
 #'   [FlodeLevel_Daily], [FlodeLevel_15min], [FlodePotEvap_Daily], [FlodePotEvap_Hourly], or
 #'   [FlodePotEvap_15min] object.
+#' @param ... Additional arguments for methods (currently unused).
 #'
 #' @returns A `data.table` of readings.
 #'
@@ -416,6 +417,7 @@ S7::method(as_data_table, FlodeHydroData) <- function(x) x@readings
 #'
 #' @param x A [FlodeRainfall_Daily], [FlodeRainfall_15min], [FlodeFlow_Daily], [FlodeFlow_15min],
 #'   [FlodeLevel_Daily], or [FlodeLevel_15min] object.
+#' @param ... Additional arguments for methods (currently unused).
 #'
 #' @returns A `data.table` with columns `parameter`, `measure_notation`,
 #'   `date`, `dateTime`, `value`, and any other columns present in the
@@ -748,6 +750,7 @@ FlodePotEvap_15min <- S7::new_class(
 #' place, so sorted input stays sorted.
 #'
 #' @param x A [FlodePotEvap_Daily] or [FlodePotEvap_Hourly] object.
+#' @param ... Additional arguments for methods (currently unused).
 #'
 #' @returns A [FlodePotEvap_15min] object whose readings contain columns
 #'   `dateTime` (POSIXct), `date` (Date), and `value` (numeric).

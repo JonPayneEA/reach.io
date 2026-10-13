@@ -8,6 +8,9 @@ fix_limb_continuity(x, ...)
 }
 \arguments{
 \item{x}{A \link{FlodeRatingCurve}.}
+
+\item{...}{Additional arguments for methods. The \link{FlodeRatingCurve} method
+takes none.}
 }
 \value{
 A new \link{FlodeRatingCurve} with updated \code{C} values. A message is printed

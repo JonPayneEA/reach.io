@@ -4,3 +4,8 @@
 ^doc$
 ^Meta$
 ^\.github$
+^CLAUDE\.md$
+^DATA_CHECKS\.md$
+^README\.html$
+^UPCOMING_FEATURES\.md$
+^pkgdown$

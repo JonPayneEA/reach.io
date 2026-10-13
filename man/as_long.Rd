@@ -9,6 +9,8 @@ as_long(x, ...)
 \arguments{
 \item{x}{A \link{FlodeRainfall_Daily}, \link{FlodeRainfall_15min}, \link{FlodeFlow_Daily}, \link{FlodeFlow_15min},
 \link{FlodeLevel_Daily}, or \link{FlodeLevel_15min} object.}
+
+\item{...}{Additional arguments for methods (currently unused).}
 }
 \value{
 A \code{data.table} with columns \code{parameter}, \code{measure_notation},

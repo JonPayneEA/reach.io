@@ -6,6 +6,12 @@
 \usage{
 FlodeRatingSet(curves, station_id = NA_character_)
 }
+\arguments{
+\item{curves}{A \code{list} of \link{FlodeRatingCurve} objects with non-overlapping
+validity periods.}
+
+\item{station_id}{Character. Station identifier shared across all curves.}
+}
 \description{
 Groups multiple \link{FlodeRatingCurve} objects that each apply over a distinct
 calendar period — for instance to account for channel changes, re-surveys,
@@ -25,12 +31,3 @@ on the window.
 The order of curves in the list does not matter, and the set's \code{station_id}
 is not compared with the \code{station_id} of its curves.
 }
-\section{Slots}{
-
-\describe{
-\item{\code{curves}}{A \code{list} of \link{FlodeRatingCurve} objects with non-overlapping
-validity periods.}
-
-\item{\code{station_id}}{Character. Station identifier shared across all curves.}
-}}
-

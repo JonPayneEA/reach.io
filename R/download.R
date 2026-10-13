@@ -150,9 +150,17 @@
 #'   to include 31 December pass 1 January of the following year.
 #' @param method Character. `"sync"` (default) or `"batch"`.
 #' @param output Character. `"memory"` (default) or `"disk"`.
-#' @param out_dir Character or `NULL`. Root store directory. Required when
+#' @param out_dir Character or `NULL`. Root of the data store (the directory
+#'   that contains, or will contain, `bronze/`). Required when
 #'   `output = "disk"`. Bronze Parquet files are written under
-#'   `out_dir/bronze/hydrometric/EA/<data_type>/`.
+#'   `out_dir/bronze/<category>/EA/<data_type>/<YYYY>/`.
+#' @param category Character. Bronze data category used in the output path when
+#'   `output = "disk"`; one of `"hydrometric"`, `"radarH19"` or `"MOSES"`.
+#'   Default `"hydrometric"`. Ignored in memory mode.
+#' @param register_path Character or `NULL`. Hydrometric Data Register CSV to
+#'   which a provenance record is appended for every Bronze file written
+#'   (`output = "disk"` only). `NULL` (default) uses
+#'   `<out_dir>/register/hydrometric_data_register.csv`.
 #' @param period_name Character. Temporal resolution: `"daily"` or `"15min"`.
 #'   `NULL` (default) uses each parameter's default from `PARAMETER_CONFIG`
 #'   (currently `"15min"`).

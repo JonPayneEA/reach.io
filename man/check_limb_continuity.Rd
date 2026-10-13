@@ -9,8 +9,9 @@ check_limb_continuity(x, ...)
 \arguments{
 \item{x}{A \link{FlodeRatingCurve}.}
 
-\item{tol_pct}{Numeric scalar. Percentage tolerance for declaring a junction
-connected. Default \code{1} (i.e. 1 \%).}
+\item{...}{Arguments passed to the method. For a \link{FlodeRatingCurve}:
+\code{tol_pct}, a numeric scalar giving the percentage tolerance for declaring
+a junction connected (default \code{1}, i.e. 1 per cent).}
 }
 \value{
 A \code{data.table} (returned invisibly) with one row per junction and

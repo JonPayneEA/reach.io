@@ -10,33 +10,30 @@ save_rating(x, ...)
 \item{x}{A \link{FlodeRatingCurve} or \link{FlodeRatingSet}. The curve's \code{station_id} slot
 must be set to a non-empty string.}
 
-\item{root}{Character. Root of the data store
-(the directory that contains \verb{bronze/}, \verb{silver/}, \verb{gold/},
-\verb{register/}).}
-
-\item{tier}{Character. Storage tier: \code{"bronze"}, \code{"silver"}, or
-\code{"gold"} (default).}
-
-\item{saved_by}{Character. Name or username of the person saving the
-curve. Recorded in the register. Defaults to \code{Sys.info()[["user"]]}.}
-
-\item{method_of_receipt}{Character. How the rating was obtained, e.g.
-\code{"WISKI export"}, \code{"consultant report"}, \code{"manual entry"}. Recorded
-in the register. Defaults to \code{NA}.}
-
-\item{derivation_method}{Character. How the rating was developed.
-Suggested values: \code{"spot gaugings"} (field measurements only),
-\code{"hydraulic model"} (e.g. HEC-RAS, ISIS, TUFLOW), \code{"statistical model"},
-or \code{"mixed"} (gaugings calibrated to a model). Free text is also
-accepted. Defaults to \code{NA}.}
-
-\item{model_or_project}{Character. Name of the hydraulic model, statistical
-framework, project, or team that produced the rating (free text).
-Useful when the same site has ratings from different sources over time.
-Defaults to \code{NA}.}
-
-\item{notes}{Character. Optional free-text note appended to the register
-row (e.g. \code{"Post-survey 2023 refit — upper limb revised"}).}
+\item{...}{Arguments passed to the method. For a \link{FlodeRatingCurve} or
+\link{FlodeRatingSet} these are:
+\itemize{
+\item \code{root}: Character. Root of the data store (the directory that contains
+\verb{bronze/}, \verb{silver/}, \verb{gold/}, \verb{register/}).
+\item \code{tier}: Character. Storage tier: \code{"bronze"}, \code{"silver"}, or \code{"gold"}
+(default).
+\item \code{saved_by}: Character. Name or username of the person saving the curve.
+Recorded in the register. Defaults to \code{Sys.info()[["user"]]}.
+\item \code{method_of_receipt}: Character. How the rating was obtained, e.g.
+\code{"WISKI export"}, \code{"consultant report"}, \code{"manual entry"}. Recorded in
+the register. Defaults to \code{NA}.
+\item \code{derivation_method}: Character. How the rating was developed. Suggested
+values: \code{"spot gaugings"} (field measurements only), \code{"hydraulic model"}
+(e.g. HEC-RAS, ISIS, TUFLOW), \code{"statistical model"}, or \code{"mixed"}
+(gaugings calibrated to a model). Free text is also accepted. Defaults
+to \code{NA}.
+\item \code{model_or_project}: Character. Name of the hydraulic model, statistical
+framework, project, or team that produced the rating (free text). Useful
+when the same site has ratings from different sources over time.
+Defaults to \code{NA}.
+\item \code{notes}: Character. Optional free-text note appended to the register row
+(e.g. \code{"Post-survey 2023 refit - upper limb revised"}).
+}}
 }
 \value{
 The path(s) to the written Parquet file(s), invisibly.

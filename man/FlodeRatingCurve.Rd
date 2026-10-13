@@ -12,6 +12,33 @@ FlodeRatingCurve(
   source = NA_character_
 )
 }
+\arguments{
+\item{limbs}{A \code{data.table} with one row per rating limb and columns:
+\describe{
+\item{\code{lower}}{Lower stage boundary (m). The first limb's lower bound
+is typically 0 or the channel invert.}
+\item{\code{upper}}{Upper stage boundary (m). The final limb should have
+\code{upper = Inf} to handle all stages above the highest measured point.}
+\item{\code{C}}{Multiplier (positive numeric).}
+\item{\code{a}}{Stage offset / datum correction (numeric). Flow is zero when
+\eqn{h \le a}.}
+\item{\code{b}}{Exponent (positive numeric, typically 1.5–3).}
+\item{\code{doubtful}}{Logical flag. \code{TRUE} marks extrapolated (usually
+out-of-bank) limbs whose rated flows should not be plotted or used
+uncritically.}
+}
+Rows must be sorted by \code{lower} (ascending) and boundaries must be
+contiguous (\code{upper[i]} == \code{lower[i+1]}).}
+
+\item{valid_from}{Date (or \code{NA}). Start of the period this curve applies.}
+
+\item{valid_to}{Date (or \code{NA}). End of the period (\code{NA} = open-ended /
+still current).}
+
+\item{station_id}{Character. Station identifier (free-text, for labelling).}
+
+\item{source}{Character. Origin of the curve (e.g. \code{"WISKI"}, \code{"manual"}).}
+}
 \description{
 Holds the limb table for a single rating and an optional validity window.
 The rating equation applied within each limb is:
@@ -49,33 +76,3 @@ upper limb; a stage below the first \code{lower} has no rating (\code{NA}); a st
 above the last \code{upper} is extrapolated with the last limb; and a stage at or
 below \code{a} gives zero discharge.
 }
-\section{Slots}{
-
-\describe{
-\item{\code{limbs}}{A \code{data.table} with one row per rating limb and columns:
-\describe{
-\item{\code{lower}}{Lower stage boundary (m). The first limb's lower bound
-is typically 0 or the channel invert.}
-\item{\code{upper}}{Upper stage boundary (m). The final limb should have
-\code{upper = Inf} to handle all stages above the highest measured point.}
-\item{\code{C}}{Multiplier (positive numeric).}
-\item{\code{a}}{Stage offset / datum correction (numeric). Flow is zero when
-\eqn{h \le a}.}
-\item{\code{b}}{Exponent (positive numeric, typically 1.5–3).}
-\item{\code{doubtful}}{Logical flag. \code{TRUE} marks extrapolated (usually
-out-of-bank) limbs whose rated flows should not be plotted or used
-uncritically.}
-}
-Rows must be sorted by \code{lower} (ascending) and boundaries must be
-contiguous (\code{upper[i]} == \code{lower[i+1]}).}
-
-\item{\code{valid_from}}{Date (or \code{NA}). Start of the period this curve applies.}
-
-\item{\code{valid_to}}{Date (or \code{NA}). End of the period (\code{NA} = open-ended /
-still current).}
-
-\item{\code{station_id}}{Character. Station identifier (free-text, for labelling).}
-
-\item{\code{source}}{Character. Origin of the curve (e.g. \code{"WISKI"}, \code{"manual"}).}
-}}
-

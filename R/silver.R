@@ -1266,6 +1266,29 @@ silver_path <- function(output_dir, category, data_type, dataset_id,
 #'   low-flow truncation. Default 0.1.
 #' @param truncation_high_quantile Numeric (0–1). Quantile floor for
 #'   high-flow truncation. Default 0.9.
+#' @param min_datum,max_credible Numeric. Credible stage range for the level
+#'   range check. Defaults `-Inf` and `Inf` (no limit).
+#' @param spike_k Numeric. MAD multiplier for the level spike threshold.
+#'   Default 5.
+#' @param spike_return_window Integer. Steps within which a level must return
+#'   to be treated as a spike. Default 3.
+#' @param max_rise_per_step,max_fall_per_step Numeric. Maximum credible rise
+#'   and fall per timestep for the level rate-of-change check. Default 0.5.
+#' @param flatline_min_run Integer. Minimum run length of identical level
+#'   values to flag as a flatline. Default 4.
+#' @param shift_window Integer. Width (timesteps) of each window compared by
+#'   the datum-shift check. Default 24.
+#' @param shift_threshold Numeric. Minimum median difference between windows
+#'   (same units as the stage) to flag a datum shift. Default 0.1.
+#' @param max_intensity_15min Numeric. Credible maximum rainfall intensity
+#'   (mm per 15 minutes). Default 50.
+#' @param max_daily_mm Numeric. Credible maximum 24-hour rainfall total (mm).
+#'   Default 300.
+#' @param steps_per_day Integer. Timesteps per 24 hours. Default 96.
+#' @param reset_spike_k Numeric. MAD multiplier for the gauge-reset spike
+#'   threshold. Default 10.
+#' @param reset_return_window Integer. Steps within which a return to normal
+#'   marks a gauge reset. Default 2.
 #' @param write_output Logical. If `TRUE` (default), write Silver Parquet to
 #'   disk. Set `FALSE` to return the result without writing.
 #' @param dedup Logical. If `TRUE` (default), duplicate `(site_id, timestamp)`

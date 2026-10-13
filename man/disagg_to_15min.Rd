@@ -8,6 +8,8 @@ disagg_to_15min(x, ...)
 }
 \arguments{
 \item{x}{A \link{FlodePotEvap_Daily} or \link{FlodePotEvap_Hourly} object.}
+
+\item{...}{Additional arguments for methods (currently unused).}
 }
 \value{
 A \link{FlodePotEvap_15min} object whose readings contain columns

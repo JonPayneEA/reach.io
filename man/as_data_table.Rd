@@ -10,6 +10,8 @@ as_data_table(x, ...)
 \item{x}{A \link{FlodeRainfall_Daily}, \link{FlodeRainfall_15min}, \link{FlodeFlow_Daily}, \link{FlodeFlow_15min},
 \link{FlodeLevel_Daily}, \link{FlodeLevel_15min}, \link{FlodePotEvap_Daily}, \link{FlodePotEvap_Hourly}, or
 \link{FlodePotEvap_15min} object.}
+
+\item{...}{Additional arguments for methods (currently unused).}
 }
 \value{
 A \code{data.table} of readings.

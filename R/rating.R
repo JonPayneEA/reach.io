@@ -170,7 +170,7 @@ NULL
 #' above the last `upper` is extrapolated with the last limb; and a stage at or
 #' below `a` gives zero discharge.
 #'
-#' @slot limbs A `data.table` with one row per rating limb and columns:
+#' @param limbs A `data.table` with one row per rating limb and columns:
 #'   \describe{
 #'     \item{`lower`}{Lower stage boundary (m). The first limb's lower bound
 #'       is typically 0 or the channel invert.}
@@ -186,11 +186,11 @@ NULL
 #'   }
 #'   Rows must be sorted by `lower` (ascending) and boundaries must be
 #'   contiguous (`upper[i]` == `lower[i+1]`).
-#' @slot valid_from Date (or `NA`). Start of the period this curve applies.
-#' @slot valid_to Date (or `NA`). End of the period (`NA` = open-ended /
+#' @param valid_from Date (or `NA`). Start of the period this curve applies.
+#' @param valid_to Date (or `NA`). End of the period (`NA` = open-ended /
 #'   still current).
-#' @slot station_id Character. Station identifier (free-text, for labelling).
-#' @slot source Character. Origin of the curve (e.g. `"WISKI"`, `"manual"`).
+#' @param station_id Character. Station identifier (free-text, for labelling).
+#' @param source Character. Origin of the curve (e.g. `"WISKI"`, `"manual"`).
 #'
 #' @export
 FlodeRatingCurve <- S7::new_class(
@@ -338,9 +338,9 @@ FlodeRatingCurve <- S7::new_class(
 #' The order of curves in the list does not matter, and the set's `station_id`
 #' is not compared with the `station_id` of its curves.
 #'
-#' @slot curves A `list` of [FlodeRatingCurve] objects with non-overlapping
+#' @param curves A `list` of [FlodeRatingCurve] objects with non-overlapping
 #'   validity periods.
-#' @slot station_id Character. Station identifier shared across all curves.
+#' @param station_id Character. Station identifier shared across all curves.
 #'
 #' @export
 FlodeRatingSet <- S7::new_class(
@@ -621,8 +621,9 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
 #' modified; see [fix_limb_continuity()] to correct it.
 #'
 #' @param x A [FlodeRatingCurve].
-#' @param tol_pct Numeric scalar. Percentage tolerance for declaring a junction
-#'   connected. Default `1` (i.e. 1 %).
+#' @param ... Arguments passed to the method. For a [FlodeRatingCurve]:
+#'   `tol_pct`, a numeric scalar giving the percentage tolerance for declaring
+#'   a junction connected (default `1`, i.e. 1 per cent).
 #'
 #' @return A `data.table` (returned invisibly) with one row per junction and
 #'   columns:
@@ -732,6 +733,8 @@ S7::method(check_limb_continuity, FlodeRatingCurve) <- function(x, tol_pct = 1) 
 #' the store: use [save_rating()] to keep the corrected curve.
 #'
 #' @param x A [FlodeRatingCurve].
+#' @param ... Additional arguments for methods. The [FlodeRatingCurve] method
+#'   takes none.
 #'
 #' @return A new [FlodeRatingCurve] with updated `C` values. A message is printed
 #'   for each limb showing the old and new `C` and the percentage change.

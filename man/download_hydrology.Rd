@@ -36,9 +36,19 @@ to include 31 December pass 1 January of the following year.}
 
 \item{output}{Character. \code{"memory"} (default) or \code{"disk"}.}
 
-\item{out_dir}{Character or \code{NULL}. Root store directory. Required when
+\item{out_dir}{Character or \code{NULL}. Root of the data store (the directory
+that contains, or will contain, \verb{bronze/}). Required when
 \code{output = "disk"}. Bronze Parquet files are written under
-\verb{out_dir/bronze/hydrometric/EA/<data_type>/}.}
+\verb{out_dir/bronze/<category>/EA/<data_type>/<YYYY>/}.}
+
+\item{category}{Character. Bronze data category used in the output path when
+\code{output = "disk"}; one of \code{"hydrometric"}, \code{"radarH19"} or \code{"MOSES"}.
+Default \code{"hydrometric"}. Ignored in memory mode.}
+
+\item{register_path}{Character or \code{NULL}. Hydrometric Data Register CSV to
+which a provenance record is appended for every Bronze file written
+(\code{output = "disk"} only). \code{NULL} (default) uses
+\verb{<out_dir>/register/hydrometric_data_register.csv}.}
 
 \item{period_name}{Character. Temporal resolution: \code{"daily"} or \code{"15min"}.
 \code{NULL} (default) uses each parameter's default from \code{PARAMETER_CONFIG}
