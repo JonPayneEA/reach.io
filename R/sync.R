@@ -109,7 +109,7 @@
 #' fetch_readings(
 #'   "abc123-flow-m-86400-m3s-qualified",
 #'   from_date = "2022-01-01",
-#'   to_date   = "2022-12-31"
+#'   to_date   = "2023-01-01"
 #' )
 #' }
 fetch_readings <- function(measure_notation,

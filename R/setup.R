@@ -33,11 +33,11 @@
 #' │   ├── radarH19/
 #' │   │   └── MO/P/
 #' │   └── MOSES/
-#' │       └── MO/SM/
+#' │       └── MO/SM/  MO/PE/
 #' ├── silver/
 #' │   ├── hydrometric/Q/  hydrometric/H/  hydrometric/P/
 #' │   ├── radarH19/P/
-#' │   └── MOSES/SM/
+#' │   └── MOSES/SM/  MOSES/PE/
 #' ├── bronze/
 #' │   └── hydrometric/
 #' │       └── rating_curves/ratings/
@@ -50,7 +50,7 @@
 #' │   │   ├── Q/FFA/
 #' │   │   └── P/catchment_average/
 #' │   ├── radarH19/P/
-#' │   └── MOSES/SM/
+#' │   └── MOSES/SM/  MOSES/PE/
 #' └── register/
 #' ```
 #'
@@ -73,9 +73,9 @@
 #'   folders, and only for data types listed in that category's `data_types`.
 #' - Rating folders (`<tier>/hydrometric/rating_curves/ratings/` in every
 #'   tier) are created only when `"rating_curves"` is listed as a
-#'   `hydrometric` supplier. Because that name also passes through the
-#'   ordinary supplier loop, `bronze/hydrometric/rating_curves/<data_type>/`
-#'   folders are made too.
+#'   `hydrometric` supplier. It is not a data supplier, so no
+#'   `<data_type>` folders are created for it (earlier versions made empty
+#'   `bronze/hydrometric/rating_curves/{Q,H,P}/` folders as well).
 #'
 #' The returned manifest has one row per directory considered, with `created`
 #' `FALSE` for those that already existed, so it doubles as a check of what a
@@ -157,11 +157,14 @@ setup_hydro_store <- function(
 
     # Bronze: <tier>/<category>/<supplier>/<data_type>/
     for (supplier in suppliers) {
-      # NRFA carries flow only, so it is restricted to Q here. Other suppliers
-      # (MO included) get every data type listed for the category, so which
-      # types MO gets is decided by the `categories` argument, not here.
+      # NRFA carries flow only, so it is restricted to Q here. rating_curves
+      # is not a data supplier at all: it only gets the ratings folders created
+      # further down, never <data_type> folders. Other suppliers (MO included)
+      # get every data type listed for the category, so which types MO gets is
+      # decided by the `categories` argument, not here.
       supplier_types <- switch(supplier,
         NRFA = intersect(data_types, "Q"),
+        rating_curves = character(0),
         data_types
       )
       for (dt in supplier_types) {

@@ -405,3 +405,31 @@ test_that("download_hydrology (disk) files several measures at one station separ
   # reading without a trace is ambiguous and says so
   expect_error(read_bronze(root, "SS92F014", "P"), "several series")
 })
+
+
+# -- handle_output(): provenance supplier follows supplier_code ------------------
+
+test_that("handle_output records the source system, not a hard-coded HDE", {
+  root <- withr::local_tempdir()
+  reg  <- file.path(root, "register.csv")
+  dt <- data.table::data.table(dateTime = as.POSIXct("2023-01-01", tz = "UTC"), value = 1)
+  handle_output(dt, "disk", root, "flow", "m", site_id = "X1", register_path = reg)
+  handle_output(dt, "disk", root, "flow", "m", site_id = "X2", register_path = reg,
+                supplier_code = "WISKI")
+  r <- data.table::fread(reg)
+  expect_equal(r[site_id == "X1", supplier], "HDE")
+  expect_equal(r[site_id == "X2", supplier], "WISKI")
+})
+
+
+# -- format_for_fmp(): one timestamp, several sites -------------------------------
+
+test_that("format_for_fmp lays out several sites correctly when there is one timestamp", {
+  mk <- function(v) FlodeFlow_15min(readings = data.table::data.table(
+    dateTime = as.POSIXct("2023-01-01 00:00:00", tz = "UTC"),
+    date = as.Date("2023-01-01"), value = v, measure_notation = "m"))
+  lines <- format_for_fmp(list(A = mk(1.5), B = mk(2.5), C = mk(3.5)))
+  # 4 header rows then one data row: time, then one value per site
+  expect_equal(length(lines), 5L)
+  expect_equal(lines[5L], "0.000,1.500,2.500,3.500")
+})

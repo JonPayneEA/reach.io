@@ -74,7 +74,7 @@
 #'
 #' @examples
 #' \dontrun{
-#' fetch_from_hde("SS92F014", "flow", "2020-01-01", "2020-12-31")
+#' fetch_from_hde("SS92F014", "flow", "2020-01-01", "2021-01-01")
 #' }
 fetch_from_hde <- function(gauge_id, data_type, start_date, end_date,
                            on_error = c("warn", "stop")) {
@@ -241,11 +241,10 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date,
 #'
 #' The source below the `stop()` is the intended KiWIS implementation and is
 #' kept unreachable (and excluded from coverage) until the endpoint is
-#' available. Points to revisit when it is activated: `gauge_id` is passed
+#' available. One point to revisit when it is activated: `gauge_id` is passed
 #' straight through as the KiWIS `ts_id`, so it would have to be a time-series
-#' id rather than a station number; the `period` string treats `end_date` as
-#' inclusive (to 23:59:59), unlike the package-wide exclusive `end_date`; and
-#' no `period` is passed to the Bronze schema, as [fetch_from_hde()] does.
+#' id rather than a station number. (It already treats `end_date` as exclusive,
+#' like the rest of the package, and records the series `period` in Bronze.)
 #'
 #' @inheritParams fetch_from_hde
 #'
@@ -293,7 +292,9 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
     type         = "queryServices",
     request      = "getTimeseriesValues",
     ts_id        = gauge_id,
-    period       = sprintf("from(%sT00:00:00Z)to(%sT23:59:59Z)",
+    # end_date is EXCLUSIVE in this package; KiWIS' to() is inclusive, so ask
+    # up to midnight of end_date and drop that instant after parsing (below)
+    period       = sprintf("from(%sT00:00:00Z)to(%sT00:00:00Z)",
                            start_date, end_date),
     returnfields = "Timestamp,Value,Quality Code",
     format       = "json",
@@ -320,7 +321,8 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
   # Unparseable timestamps or non-numeric values become NA and are dropped
   # (the as.numeric() warning is suppressed since the drop is intended).
   raw[, value        := suppressWarnings(as.numeric(value))]
-  raw <- raw[!is.na(datetime_str) & !is.na(value)]
+  raw <- raw[!is.na(datetime_str) & !is.na(value) &
+               datetime_str < as.POSIXct(end_date, tz = "UTC")]
 
   dataset_id <- make_dataset_id(
     supplier_code = "WISKI",
@@ -335,7 +337,9 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
     data_type         = param_to_data_type(data_type),
     timestamp_col     = "datetime_str",
     value_col         = "value",
-    supplier_flag_col = "supplier_flag"
+    supplier_flag_col = "supplier_flag",
+    # Resolution of the configured series, as fetch_from_hde() records it
+    period            = PARAMETER_CONFIG[[data_type]]$default_period
   )
   # nocov end
 }
@@ -404,7 +408,7 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
 #' )
 #' dt <- route_gauge(registry_dt[gauge_id == "39001"],
 #'                   start_date = "2020-01-01",
-#'                   end_date   = "2020-12-31")
+#'                   end_date   = "2021-01-01")
 #' }
 route_gauge <- function(gauge_row, start_date, end_date,
                         on_error = c("warn", "stop")) {

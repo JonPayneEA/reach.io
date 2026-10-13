@@ -273,3 +273,59 @@ test_that("check_silver_gaps reports separate gap periods separately", {
   capture.output(g <- check_silver_gaps(root, "S1", "Q", expected_interval = "15min"))
   expect_three_gaps(g)
 })
+
+
+# -- summarise_coverage(): expected_obs ------------------------------------------
+#
+# Regression: temporal_resolution is a grouping column, which is not part of .SD,
+# so the lookup always failed and expected_obs was NA for every row.
+
+test_that("summarise_coverage computes expected_obs from the register resolution", {
+  root <- two_series_store()      # S1: 15min, 1 day; S2: daily, 4 days
+  capture.output(cov <- summarise_coverage(root))
+  expect_equal(cov[site_id == "S1", expected_obs], 96L)   # one whole day of 15-min steps
+  expect_equal(cov[site_id == "S2", expected_obs], 4L)    # four daily steps
+  expect_equal(cov[site_id == "S2", days_held], 3L)
+})
+
+test_that("catalogue functions cope with a register that has no period dates", {
+  root <- withr::local_tempdir()
+  dir.create(file.path(root, "register"))
+  data.table::fwrite(
+    data.table::data.table(dataset_id = "EA_S1_Q_20260101", tier = "Bronze",
+                           site_id = "S1", supplier_code = "EA", data_type = "Q",
+                           temporal_resolution = "15min",
+                           file_path = file.path(root, "bronze", "hydrometric", "EA", "Q",
+                                                 "2023", "EA_S1_Q_20260101.parquet")),
+    file.path(root, "register", "hydrometric_data_register.csv")
+  )
+  capture.output(a <- list_available_gauges(root))
+  expect_equal(a$site_id, "S1")
+  expect_true(is.na(a$start))
+  capture.output(b <- summarise_coverage(root))
+  expect_true(is.na(b$expected_obs))
+})
+
+
+# -- catchment readers accept the registry that build_gauge_registry() writes ----
+
+test_that("read_bronze_catchment works with a registry built by build_gauge_registry()", {
+  root <- withr::local_tempdir()
+  register_series(root, "UP1", "Q", "EA", quarter_hours("2023-01-01 00:00:00", 4))
+  register_series(root, "UP1", "H", "EA", quarter_hours("2023-01-01 00:00:00", 4))
+
+  # A gauge with both flow and level appears twice in the registry
+  csv <- tempfile(fileext = ".csv")
+  data.table::fwrite(data.table::data.table(
+    gauge_id = c("UP1", "UP1", "LOW1"), source_system = "HDE",
+    data_type = c("flow", "level", "flow"), category = "hydrometric",
+    catchment = c("Upper", "Upper", "Lower"), ea_site_ref = "X"), csv)
+  reg <- build_gauge_registry(csv, tempfile())          # columns: gauge_id, catchment, ...
+
+  objs <- read_bronze_catchment(root, "Upper", "Q", registry = reg)
+  expect_named(objs, "UP1")                              # one entry, not one per data type
+  expect_error(read_bronze_catchment(root, "Nowhere", "Q", registry = reg),
+               "No gauges found in registry")
+  expect_error(read_bronze_catchment(root, "Upper", "Q", registry = data.table::data.table(x = 1)),
+               "must contain a 'site_id'")
+})

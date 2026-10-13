@@ -347,3 +347,21 @@ test_that("format_for_fmp: errors when ied_refs length mismatches flows", {
     "ied_refs.*has 2"
   )
 })
+
+
+# -- add_hydro_year(): missing dates and name clashes -----------------------------
+
+test_that("add_hydro_year tolerates missing dates in any position", {
+  dt <- data.table(dateTime = as.POSIXct(c(NA, "2023-10-01", "2024-02-29", NA), tz = "UTC"))
+  expect_no_error(add_hydro_year(dt))
+  expect_equal(dt$hydro_year,     c(NA, 2024L, 2024L, NA))
+  expect_equal(dt$hydro_year_day, c(NA, 1L, 152L, NA))        # 1 Oct = day 1; 29 Feb = day 152
+})
+
+test_that("add_hydro_year is not fooled by columns named hy, dates or hy_start", {
+  dt <- data.table(dateTime = as.POSIXct("2023-10-15", tz = "UTC"),
+                   hy = 1999L, dates = as.Date("1999-01-01"), hy_start = as.Date("1999-01-01"))
+  add_hydro_year(dt)
+  expect_equal(dt$hydro_year, 2024L)
+  expect_equal(dt$hydro_year_day, 15L)
+})

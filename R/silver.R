@@ -1143,19 +1143,25 @@ snap_offgrid_timestamps <- function(dt) {
 #' promoted data is normalised to a common schema regardless of origin.
 #'
 #' @details
-#' The `<YYYY>` folder is taken from the date at the end of `dataset_id`, which
-#' is the date the Bronze data was \emph{received}. This differs from Bronze,
-#' where the folder is the \emph{observation} year of the rows in each file
-#' (see [bronze_path()]). A Silver file therefore holds a whole dataset under
-#' its received year, and date-range reads that narrow by year folder (such as
-#' [read_silver()] with `start`/`end`) assume that layout. The function only
-#' builds a path; it creates no directories.
+#' By default the `<YYYY>` folder is taken from the date at the end of
+#' `dataset_id`, which is the date the data was \emph{received}. Silver, like
+#' Bronze (see [bronze_path()]), is filed by \emph{observation} year, so
+#' [promote_to_silver()] always passes `year` explicitly and writes one file per
+#' dataset and calendar year; date-range reads that narrow by year folder (such
+#' as [read_silver()] with `start`/`end`) rely on that. The received-year
+#' default exists only for backwards compatibility and for callers that file a
+#' whole dataset under one folder. Silver files written by older versions used
+#' the received year and should be re-promoted. The function only builds a
+#' path; it creates no directories.
 #'
 #' @param output_dir Character. Root store directory.
 #' @param category Character. Data category, e.g. `"hydrometric"`.
 #' @param data_type Character. Framework data type code, e.g. `"Q"`.
-#' @param dataset_id Character. Bronze dataset ID. Year is parsed from the
-#'   trailing eight-digit date component.
+#' @param dataset_id Character. Bronze dataset ID. Unless `year` is given, the
+#'   year is parsed from the trailing eight-digit date component.
+#' @param year Character or integer or `NULL`. Year folder to use. `NULL`
+#'   (default) takes it from `dataset_id` (the received year); pass the
+#'   observation year to file by when the data was observed.
 #'
 #' @return Character. Full file path including filename.
 #'
@@ -1163,10 +1169,16 @@ snap_offgrid_timestamps <- function(dt) {
 #'
 #' @examples
 #' silver_path("data/hydrometric", "hydrometric", "Q", "EA_39001_Q_20260115")
-silver_path <- function(output_dir, category, data_type, dataset_id) {
-  # dataset_id ends in "_YYYYMMDD"; characters 8 to 5 from the end are the year
-  year <- substr(dataset_id, nchar(dataset_id) - 7L, nchar(dataset_id) - 4L)
-  file.path(output_dir, "silver", category, data_type, year,
+#' silver_path("data/hydrometric", "hydrometric", "Q", "EA_39001_Q_20260115",
+#'             year = 2020)
+silver_path <- function(output_dir, category, data_type, dataset_id,
+                        year = NULL) {
+  # Default: dataset_id ends in "_YYYYMMDD"; characters 8 to 5 from the end are
+  # the (received) year. An explicit `year` overrides it.
+  if (is.null(year)) {
+    year <- substr(dataset_id, nchar(dataset_id) - 7L, nchar(dataset_id) - 4L)
+  }
+  file.path(output_dir, "silver", category, data_type, as.character(year),
             paste0(dataset_id, ".parquet"))
 }
 
@@ -1199,9 +1211,10 @@ silver_path <- function(output_dir, category, data_type, dataset_id) {
 #' 6. Derive `qc_value` (the accepted value, `NA` where Rejected) and stamp
 #'    `qc_flagged_at`.
 #' 7. Optionally estimate missing timesteps per site (`annotate_gaps`).
-#' 8. Optionally write one Silver file with [silver_path()]. The file name comes
-#'    from the \emph{first} row's `dataset_id`, so input covering several
-#'    datasets is written as a single file under that ID.
+#' 8. Optionally write Silver files with [silver_path()]: one file per
+#'    `dataset_id` and observation year (UTC), named after that dataset, so
+#'    input covering several datasets or years is split accordingly. Existing
+#'    files of the same name are replaced.
 #'
 #' Only the **traditional QC checks** (Y-digit of the UK-Flow15 three-digit
 #' code) are implemented here. The consistency checks against NRFA daily /
@@ -1509,13 +1522,25 @@ promote_to_silver <- function(bronze_data,
   # -- Write Silver Parquet ----------------------------------------------------
   # Returned invisibly when written so a script does not print the full table
   if (write_output) {
-    dataset_id  <- dt$dataset_id[[1L]]
-    data_type   <- dt$data_type[[1L]]
-    out_path    <- silver_path(output_dir, category, data_type, dataset_id)
-
-    dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
-    .write_parquet_atomic(dt, out_path)
-    message(sprintf("  Silver file written: %s", out_path))
+    # One file per dataset and observation year, mirroring Bronze, so a
+    # date-range read can pick folders by year. Each dataset_id is written under
+    # its own name (input covering several datasets is no longer folded into the
+    # first one). Silver is derived data, so re-promoting replaces the file.
+    # Rows without a timestamp have no year and cannot be filed.
+    yrs   <- format(dt$timestamp, "%Y", tz = "UTC")
+    n_na  <- sum(is.na(yrs))
+    if (n_na > 0L) {
+      warning(sprintf("%d row(s) with missing timestamp not written to Silver.", n_na),
+              call. = FALSE)
+    }
+    keys <- paste(dt$dataset_id, yrs, sep = "|")
+    for (k in unique(keys[!is.na(yrs)])) {
+      idx      <- which(keys == k)
+      out_path <- silver_path(output_dir, category, dt$data_type[[idx[1L]]],
+                              dt$dataset_id[[idx[1L]]], year = yrs[idx[1L]])
+      .write_parquet_atomic(dt[idx], out_path)
+      message(sprintf("  Silver file written: %s", out_path))
+    }
     invisible(dt)
   } else {
     dt

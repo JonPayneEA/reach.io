@@ -112,9 +112,14 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
   # name is fixed as "HDE" regardless of supplier_code, since this helper only
   # serves the Hydrology API download paths.
   if (!is.null(register_path) && nrow(files) > 0L) {
+    # The register records the source system (e.g. "HDE"), which is the key of
+    # SUPPLIER_CODES whose value is this supplier_code; fall back to the code
+    # itself for a supplier that is not in the table
+    supplier_name <- names(SUPPLIER_CODES)[match(supplier_code, SUPPLIER_CODES)]
+    if (is.na(supplier_name)) supplier_name <- supplier_code
     .write_provenance_rows(
       .bronze_prov_rows(files, dataset_id,
-                        supplier            = "HDE",
+                        supplier            = supplier_name,
                         supplier_code       = supplier_code,
                         site_id             = sid,
                         data_type           = data_type,
@@ -449,11 +454,15 @@ format_for_fmp <- function(flows,
   }
 
   time_col  <- sprintf("%.3f", rel_hours)
-  val_mat   <- as.matrix(merged[, ..val_cols])
-  val_str   <- apply(val_mat, 2L, fmt_val)
-  # With a single site apply() returns a plain vector; restore a rows x 1
-  # matrix so the row loop below can index val_str[i, ]
-  if (is.null(dim(val_str))) dim(val_str) <- c(length(val_str), 1L)
+  # Format column by column and build the matrix explicitly (rows x sites).
+  # apply() returned a plain vector for a single site and a transposed shape
+  # for a single timestamp, so the shape had to be patched afterwards and was
+  # wrong when there was one timestamp but several sites.
+  val_str   <- matrix(
+    vapply(val_cols, function(cn) fmt_val(merged[[cn]]),
+           character(nrow(merged))),
+    nrow = nrow(merged), ncol = length(val_cols)
+  )
 
   row_strs <- vapply(
     seq_len(nrow(val_str)),

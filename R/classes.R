@@ -456,7 +456,9 @@ S7::method(as_long, FlodeHydroData) <- function(x) {
     collapse = "\n"
   )
   cat(
-    sprintf("<reach.io::%s>\n", class(x)[1L]),
+    # class(x)[1L] already carries the package prefix ("reach.io::FlodeFlow_Daily"),
+    # so strip it before adding it back, or the header reads reach.io::reach.io::
+    sprintf("<reach.io::%s>\n", sub("^reach\\.io::", "", class(x)[1L])),
     "Slots (@):\n",
     sprintf("  @parameter      %s\n",  x@parameter),
     sprintf("  @period_name    %s\n",  x@period_name),
@@ -831,7 +833,9 @@ S7::method(as_data_table, FlodePotEvapData) <- function(x) x@readings
   else ""
 
   cat(
-    sprintf("<reach.io::%s>\n", class(x)[1L]),
+    # class(x)[1L] already carries the package prefix ("reach.io::FlodeFlow_Daily"),
+    # so strip it before adding it back, or the header reads reach.io::reach.io::
+    sprintf("<reach.io::%s>\n", sub("^reach\\.io::", "", class(x)[1L])),
     "Slots (@):\n",
     sprintf("  @source_name    %s\n",  x@source_name),
     sprintf("  @period_name    %s\n",  x@period_name),

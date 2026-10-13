@@ -67,11 +67,19 @@ Bronze paths follow: `bronze/<CATEGORY>/<SUPPLIER>/<DATA_TYPE>/<YYYY>/<dataset_i
 - `<YYYY>` is the **observation** year: every writer goes through
   `.write_bronze_by_year()` (`schema.R`), which splits by calendar year.
 - Bronze is **append-only**. The `dataset_id` ends in the received date
-  (`EA_39001_Q_20260115`), so re-ingesting adds files. `read_bronze()` resolves
-  overlap by keeping the most recently received row per (series, timestamp).
+  (`EA_39001_Q_20260115`), so re-ingesting on a later day adds files.
+  `read_bronze()` resolves overlap by keeping the most recently received row
+  per (series, timestamp). A second write of the same series and year on the
+  SAME day lands on the same path and is **merged** into it (new rows win on
+  duplicate timestamps), never replaced - an incremental run after a same-day
+  backfill must not lose rows.
+- Silver is filed by observation year too (`silver_path(..., year = )`);
+  `promote_to_silver()` writes one file per `dataset_id` and year.
 - WISKI stations can hold several series of one type; the trace code is part of
   the `dataset_id` (`WISKI_3401TH_H_sg_ds_20260115`) and selected with
-  `read_bronze(trace = )`.
+  `read_bronze(trace = )`. `download_hydrology(output = "disk")` adds a
+  period + value-type trace (e.g. `15min_instantaneous`) only when a station
+  has several selected measures of one data type.
 - Every file written gets a provenance record in
   `<root>/register/hydrometric_data_register.csv`.
 
@@ -114,11 +122,15 @@ regardless of which store tier data comes from.
 - `read_bronze(root, gauge_id, data_type, supplier_code, category, start, end, trace)` —
   Bronze → S7 object; `read_bronze_multi()`, `read_bronze_catchment()`
 - `read_silver()` / `read_silver_multi()` / `read_silver_catchment()` — Silver → S7 object
+- `*_catchment()` readers accept the registry that `build_gauge_registry()` writes
+  (`gauge_id` + `catchment`) as well as `site_id` + `catchment_id`, and de-duplicate gauges
 
 ### Pipeline
 - `build_gauge_registry(csv_path, output_path)` — registry keyed on `gauge_id` + `data_type`
 - `route_gauge(gauge_row, start_date, end_date, on_error)` — dispatch to the source system;
-  orchestrators use `on_error = "stop"` so failures are logged `FAILED`, not `EMPTY`
+  orchestrators use `on_error = "stop"` so failures are logged `FAILED`, not `EMPTY`.
+  With `"stop"`, `fetch_from_hde()` / `fetch_from_wiski_all()` also raise for an unknown
+  gauge, a missing measure/file, or a failed annual chunk (never a silent partial series).
 - `run_backfill(registry_path, output_dir, start_date, end_date, ...)` — batched, checkpointed
   backfill; `failed_only = TRUE` re-runs failures and merges into the log
 - `run_incremental(registry_path, output_dir, ...)` — fetch from each gauge's high watermark
@@ -179,6 +191,10 @@ devtools::build_vignettes()
   integer-backed and arrow mis-writes it (the writers normalise, but fixtures
   that call `arrow::write_parquet()` directly must too).
 - Tests: `expect_message(x <- f(), "...")` (edition 3 returns the condition, not the value).
+- Tests never sleep: the EA fair-use pause goes through `.pace()` (mocked in `setup-pace.R`).
+  Every bug fix gets a regression test that was checked to fail on the old code.
+- `diff()` of POSIXct is a difftime with auto-chosen units: use
+  `as.numeric(diff(x), units = "secs")` before dividing.
 
 ---
 

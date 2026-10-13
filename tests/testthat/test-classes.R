@@ -200,3 +200,16 @@ test_that("FlodePotEvap_15min print includes disagg method", {
   expect_true(any(grepl("@disagg_method", printed)))
   expect_true(any(grepl("uniform_hourly", printed)))
 })
+
+
+# -- print headers carry the package prefix exactly once ---------------------------
+
+test_that("print headers read <reach.io::Class>, not <reach.io::reach.io::Class>", {
+  hydro <- FlodeFlow_Daily(readings = make_hydro_dt())
+  out   <- capture.output(print(hydro))
+  expect_equal(out[1L], "<reach.io::FlodeFlow_Daily>")
+
+  pe  <- FlodePotEvap_Daily(readings = make_pe_dt(), source_name = "x")
+  out <- capture.output(print(pe))
+  expect_equal(out[1L], "<reach.io::FlodePotEvap_Daily>")
+})

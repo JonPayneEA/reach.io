@@ -81,6 +81,14 @@
                grepl(site_pat, candidates, fixed = TRUE)]
 }
 
+# min()/max() of a character vector that return NA instead of failing when
+# every value is NA (min() of an all-NA character vector is an error, and a
+# register can lack period dates).
+#' @noRd
+.min_chr <- function(x) { x <- x[!is.na(x)]; if (length(x)) min(x) else NA_character_ }
+#' @noRd
+.max_chr <- function(x) { x <- x[!is.na(x)]; if (length(x)) max(x) else NA_character_ }
+
 # Infer the expected observation interval in seconds from a character label.
 #' @noRd
 .interval_seconds <- function(label) {
@@ -220,7 +228,6 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
       "temporal_resolution"),
     names(reg)
   )
-  date_cols <- intersect(c("time_period_start", "time_period_end"), names(reg))
 
   # start/end are the min/max of ISO "YYYY-MM-DD" strings, which order
   # correctly as text. n_datasets counts register ROWS, one per year file.
@@ -228,8 +235,8 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
     start_vals <- if ("time_period_start" %in% names(reg)) time_period_start else NA_character_
     end_vals   <- if ("time_period_end"   %in% names(reg)) time_period_end   else NA_character_
     list(
-      start      = min(start_vals, na.rm = TRUE),
-      end        = max(end_vals,   na.rm = TRUE),
+      start      = .min_chr(start_vals),
+      end        = .max_chr(end_vals),
       n_datasets = .N
     )
   }, by = by_cols]
@@ -251,11 +258,11 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
 
 #' Summarise date coverage for Bronze store gauges
 #'
-#' Reports the time span, record count, and completeness percentage for each
-#' gauge in the Bronze store.  Completeness is estimated from the register
-#' (`time_period_start` / `time_period_end` / `temporal_resolution`) without
-#' reading the underlying Parquet files, so it reflects the *intended* coverage
-#' per ingest batch rather than the literal row count.
+#' Reports, for each gauge in the Bronze store, the time span held and the number
+#' of observations that span *should* contain at the register's resolution. Both
+#' come from the register (`time_period_start` / `time_period_end` /
+#' `temporal_resolution`) without reading the underlying Parquet files, so they
+#' describe the *intended* coverage rather than the literal row count.
 #'
 #' To inspect actual record counts or detect individual missing timesteps, use
 #' `check_gaps()`.
@@ -263,8 +270,8 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
 #' @details
 #' Like [list_available_gauges()], this reads only the register (Bronze rows;
 #' `category` derived from `file_path`) and opens no Parquet files, so it cannot
-#' report actual record counts or a completeness percentage; use
-#' [check_gaps()] for that. Rows are grouped by site, category, supplier, data
+#' report actual record counts or a completeness percentage (the table has
+#' neither); use [check_gaps()] for that. Rows are grouped by site, category, supplier, data
 #' type and temporal resolution, and the table adds:
 #'
 #' - `start`, `end`: earliest and latest period dates recorded, as
@@ -273,10 +280,11 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
 #'   appends more).
 #' - `days_held`: whole days between `start` and `end`. Gaps inside the span
 #'   are not subtracted.
-#' - `expected_obs`: the number of steps of the register's resolution between
-#'   `start` and `end`, inclusive. The register dates have day precision, so
-#'   the final day contributes a single step; treat the figure as indicative.
-#'   It is `NA` where no step length can be derived.
+#' - `expected_obs`: the number of steps of the register's resolution in the
+#'   whole days from `start` to `end` inclusive (for example 96 per day for
+#'   15-minute data). It is a count for the span, not for the data held: gaps
+#'   are not subtracted. It is `NA` where the resolution is missing or not one
+#'   of `"15min"`, `"hourly"`, `"daily"`.
 #'
 #' Filters are exact any-of matches applied before summarising, and one whose
 #' column is absent from the register is ignored. A message (not an error) is
@@ -345,21 +353,30 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
   # registered batches (overlapping re-ingests are not double counted in the
   # span), plus the number of register rows.
   out <- reg[, {
-    start <- if ("time_period_start" %in% names(.SD)) min(time_period_start, na.rm = TRUE) else NA_character_
-    end   <- if ("time_period_end"   %in% names(.SD)) max(time_period_end,   na.rm = TRUE) else NA_character_
-    # NB: grouping columns are not part of .SD, so when temporal_resolution is
-    # one of by_cols (the normal case) this test is FALSE and `res` is NA.
-    res   <- if ("temporal_resolution" %in% names(.SD)) temporal_resolution[1L] else NA_character_
+    start <- if ("time_period_start" %in% names(.SD)) .min_chr(time_period_start) else NA_character_
+    end   <- if ("time_period_end"   %in% names(.SD)) .max_chr(time_period_end)   else NA_character_
+    # Grouping columns are NOT part of .SD, but they are available by name in j.
+    # temporal_resolution is normally a grouping column, so test by_cols first
+    # (testing names(.SD) alone made `res`, and so expected_obs, always NA).
+    res   <- if ("temporal_resolution" %in% by_cols) {
+      temporal_resolution[1L]
+    } else if ("temporal_resolution" %in% names(.SD)) {
+      temporal_resolution[1L]
+    } else NA_character_
 
     # Estimate expected observations from register metadata
     int_sec <- .interval_seconds(res)
-    # Steps between start and end, +1 because both endpoints are counted. The
-    # register dates are day-precision, so `end` is midnight of the last day.
+    # The register dates are day-precision: `start` is the first day and `end`
+    # the last day, both whole days. The covered span is therefore from the
+    # midnight starting `start` to the midnight ENDING `end` (one extra day), and
+    # the expected count is that span divided by the step. (Counting only up to
+    # midnight at the start of the last day, as an earlier version did, left out
+    # the whole last day: 95 steps for 15-minute data.)
     expected <- if (!is.na(int_sec) && !is.na(start) && !is.na(end)) {
       span <- as.numeric(difftime(as.POSIXct(end,   tz = "UTC"),
                                   as.POSIXct(start, tz = "UTC"),
-                                  units = "secs"))
-      as.integer(round(span / int_sec)) + 1L
+                                  units = "secs")) + 86400
+      as.integer(round(span / int_sec))
     } else NA_integer_
 
     list(

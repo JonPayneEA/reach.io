@@ -187,7 +187,7 @@
 #' result <- download_hydrology(
 #'   parameters = c("flow", "level"),
 #'   from_date  = "2022-01-01",
-#'   to_date    = "2022-12-31",
+#'   to_date    = "2023-01-01",
 #'   wiski_ids  = c("SS92F014", "S11512_FW")
 #' )
 #' result$flow
@@ -198,7 +198,7 @@
 #' download_hydrology(
 #'   parameters = "flow",
 #'   from_date  = "2022-01-01",
-#'   to_date    = "2022-12-31",
+#'   to_date    = "2023-01-01",
 #'   output     = "disk",
 #'   out_dir    = "hydrology_data",
 #'   rloi_ids   = c("5022", "7001")
@@ -209,7 +209,7 @@
 #' result <- download_hydrology(
 #'   parameters = "rainfall",
 #'   from_date  = "2022-01-01",
-#'   to_date    = "2022-12-31",
+#'   to_date    = "2023-01-01",
 #'   wiski_ids  = stns$wiskiID
 #' )
 #'
