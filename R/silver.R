@@ -996,6 +996,27 @@ y_to_qc_flag <- function(y) {
 #' [promote_to_silver()], but can also be used standalone when cleaning data
 #' before ad-hoc analysis.
 #'
+#' @details
+#' The algorithm works on \emph{slots}: the slot index of a timestamp is its
+#' Unix time divided by 900 seconds, so every 15-minute boundary has a unique
+#' integer index and the comparison does not depend on time zone or on string
+#' formatting. For each off-grid row the nearest slot is found by rounding to
+#' the closest multiple of 900 seconds, and the slot is looked up (per
+#' \code{site_id}) in the set of slots already held by on-grid rows.
+#'
+#' Dropping rather than snapping when the slot is taken is deliberate: an
+#' off-grid reading next to a genuine on-grid reading is almost always a
+#' duplicate transmission or clock-drift copy, and keeping both would create
+#' two values for one timestamp. When the slot is empty there is no better
+#' record, so the reading is moved onto the grid and \code{.snapped} is set so
+#' that [promote_to_silver()] can downgrade it to \emph{Estimated}.
+#'
+#' Rows that are already on the grid, and rows exempted by the \code{period}
+#' rule below, are returned unchanged. Note that occupancy is judged against
+#' on-grid rows only: if two \emph{different} off-grid rows round to the same
+#' empty slot, both are kept at that timestamp, so callers that need unique
+#' timestamps should de-duplicate afterwards.
+#'
 #' Only 15-minute data is touched. If \code{dt} has a \code{period} column
 #' (as Bronze data does), rows whose \code{period} is non-missing and not
 #' \code{"15min"} are left exactly as they are, so hourly, daily, or
@@ -1018,8 +1039,14 @@ y_to_qc_flag <- function(y) {
 #' )
 #' snap_offgrid_timestamps(dt)
 snap_offgrid_timestamps <- function(dt) {
+  # Work on a copy: the `:=` calls below would otherwise modify the caller's
+  # table by reference, which is surprising for a standalone helper
   dt            <- data.table::copy(dt)
   step_secs     <- 15L * 60L
+
+  # -- Find off-grid rows ---------------------------------------------------
+  # Minutes are read in UTC so the grid is judged on the stored instant, not
+  # on whatever time zone the POSIXct happens to display in
   mins          <- as.integer(format(dt[["timestamp"]], "%M", tz = "UTC"))
   off_grid_mask <- !(mins %in% c(0L, 15L, 30L, 45L))
 
@@ -1028,6 +1055,8 @@ snap_offgrid_timestamps <- function(dt) {
     off_grid_mask <- off_grid_mask & (is.na(dt[["period"]]) | dt[["period"]] == "15min")
   }
 
+  # Nothing to resolve: still add the flag column so the output schema is the
+  # same whether or not any row needed adjusting
   if (!any(off_grid_mask)) {
     dt[, .snapped := FALSE]
     return(dt[])
@@ -1036,13 +1065,17 @@ snap_offgrid_timestamps <- function(dt) {
   on_grid  <- dt[!off_grid_mask]
   off_grid <- dt[ off_grid_mask]
 
+  # -- Nearest 15-min boundary for each off-grid row --------------------------
   off_grid[, snap_ts := as.POSIXct(
     round(as.numeric(timestamp) / step_secs) * step_secs,
     origin = "1970-01-01", tz = "UTC"
   )]
 
+  # -- Is the target slot already taken? --------------------------------------
   # Key: site_id + slot index (Unix seconds / 900). Pipe separator is safe
   # because site_id values are alphanumeric and slot indices are integers.
+  # Dividing seconds by 900 before as.integer() keeps the value inside 32-bit
+  # integer range well past 2038 (raw epoch seconds would overflow).
   occupied      <- on_grid[, paste(site_id,
                                    as.integer(as.numeric(timestamp) / 900),
                                    sep = "|")]
@@ -1054,13 +1087,18 @@ snap_offgrid_timestamps <- function(dt) {
   n_dropped <- sum(off_grid$.covered)
   n_snapped <- sum(!off_grid$.covered)
 
+  # -- Drop redundant rows, move the rest onto the grid -----------------------
+  # Covered rows are simply not carried forward (that is the "drop"); only the
+  # uncovered rows are kept, with their timestamp replaced by the snapped one
   to_snap <- off_grid[!(.covered)]
   to_snap[, timestamp  := snap_ts]
   to_snap[, c("snap_ts", ".snap_key", ".covered") := NULL]
   to_snap[, .snapped   := TRUE]
 
+  # `.snapped` lets promote_to_silver() downgrade adjusted rows to Estimated
   on_grid[, .snapped := FALSE]
 
+  # Report each action separately so a user can see how much data was touched
   if (n_dropped > 0L)
     warning(
       sprintf(
@@ -1078,6 +1116,7 @@ snap_offgrid_timestamps <- function(dt) {
       call. = FALSE
     )
 
+  # Order is not restored here; callers sort by site and timestamp as needed
   data.table::rbindlist(list(on_grid, to_snap))
 }
 
@@ -1092,6 +1131,15 @@ snap_offgrid_timestamps <- function(dt) {
 #' The Silver tier drops the supplier code level present in Bronze, as
 #' promoted data is normalised to a common schema regardless of origin.
 #'
+#' @details
+#' The `<YYYY>` folder is taken from the date at the end of `dataset_id`, which
+#' is the date the Bronze data was \emph{received}. This differs from Bronze,
+#' where the folder is the \emph{observation} year of the rows in each file
+#' (see [bronze_path()]). A Silver file therefore holds a whole dataset under
+#' its received year, and date-range reads that narrow by year folder (such as
+#' [read_silver()] with `start`/`end`) assume that layout. The function only
+#' builds a path; it creates no directories.
+#'
 #' @param output_dir Character. Root store directory.
 #' @param category Character. Data category, e.g. `"hydrometric"`.
 #' @param data_type Character. Framework data type code, e.g. `"Q"`.
@@ -1105,6 +1153,7 @@ snap_offgrid_timestamps <- function(dt) {
 #' @examples
 #' silver_path("data/hydrometric", "hydrometric", "Q", "EA_39001_Q_20260115")
 silver_path <- function(output_dir, category, data_type, dataset_id) {
+  # dataset_id ends in "_YYYYMMDD"; characters 8 to 5 from the end are the year
   year <- substr(dataset_id, nchar(dataset_id) - 7L, nchar(dataset_id) - 4L)
   file.path(output_dir, "silver", category, data_type, year,
             paste0(dataset_id, ".parquet"))
@@ -1123,6 +1172,25 @@ silver_path <- function(output_dir, category, data_type, dataset_id) {
 #'
 #' QC checks are applied independently per `site_id`. The series for each
 #' gauge is sorted by `timestamp` before checks are run.
+#'
+#' @details
+#' The steps run in a fixed order, and the order matters:
+#' 1. Read the input (a Parquet path or a `data.table`; a table is copied so
+#'    the caller's object is never modified).
+#' 2. De-duplicate on `(site_id, timestamp)`, keeping the last row, so the QC
+#'    checks never see two values for one instant.
+#' 3. Validate that the Bronze columns are present.
+#' 4. Resolve off-grid 15-minute timestamps with [snap_offgrid_timestamps()];
+#'    snapped rows are later downgraded from Good to Estimated.
+#' 5. Sort by site and time and run the QC checks for the data type (see the
+#'    sections below). The data type is read from the \emph{first} row, so one
+#'    call should contain a single data type.
+#' 6. Derive `qc_value` (the accepted value, `NA` where Rejected) and stamp
+#'    `qc_flagged_at`.
+#' 7. Optionally estimate missing timesteps per site (`annotate_gaps`).
+#' 8. Optionally write one Silver file with [silver_path()]. The file name comes
+#'    from the \emph{first} row's `dataset_id`, so input covering several
+#'    datasets is written as a single file under that ID.
 #'
 #' Only the **traditional QC checks** (Y-digit of the UK-Flow15 three-digit
 #' code) are implemented here. The consistency checks against NRFA daily /
@@ -1264,6 +1332,8 @@ promote_to_silver <- function(bronze_data,
   )
 
   # -- Read input --------------------------------------------------------------
+  # A path is read from disk; a data.table is copied so the by-reference `:=`
+  # calls below never modify the caller's object
   if (is.character(bronze_data)) {
     if (!file.exists(bronze_data)) {
       stop(sprintf("Bronze file not found: %s", bronze_data))
@@ -1276,6 +1346,8 @@ promote_to_silver <- function(bronze_data,
   }
 
   # -- Deduplication -----------------------------------------------------------
+  # Done before QC (spike/flat-line checks assume one value per timestamp).
+  # fromLast = TRUE keeps the most recent row of each duplicate pair.
   if (dedup) {
     n_before <- nrow(dt)
     dt       <- unique(dt, by = c("site_id", "timestamp"), fromLast = TRUE)
@@ -1290,6 +1362,9 @@ promote_to_silver <- function(bronze_data,
   }
 
   # -- Validate Bronze schema --------------------------------------------------
+  # NB: this runs after de-duplication, so an input missing site_id or
+  # timestamp fails in the dedup step (with a data.table error) before this
+  # clearer message is reached.
   required <- c("timestamp", "value", "supplier_flag",
                 "dataset_id", "site_id", "data_type")
   missing  <- setdiff(required, names(dt))
@@ -1304,6 +1379,9 @@ promote_to_silver <- function(bronze_data,
   # -- Apply QC per site (dispatch by data_type) --------------------------------
   data.table::setorder(dt, site_id, timestamp)
 
+  # One timestamp for the whole run, so every row of a promotion shares the
+  # same qc_flagged_at. The data type of the FIRST row decides which QC suite
+  # runs, so a call should contain a single data type.
   flagged_at     <- as.POSIXct(Sys.time(), tz = "UTC")
   data_type_used <- dt$data_type[[1L]]
 
@@ -1367,13 +1445,18 @@ promote_to_silver <- function(bronze_data,
   }
 
   # Snapped rows inherit at least Estimated quality unless QC found a worse problem
+  # (only flag 1 is raised to 2; Suspect/Rejected rows keep their worse flag).
+  # The helper column is removed so it never reaches the Silver schema.
   dt[.snapped == TRUE & qc_flag == 1L, qc_flag := 2L]
   dt[, .snapped := NULL]
 
+  # qc_value is the accepted reading: the observed value unless Rejected (4)
   dt[, qc_value      := data.table::fifelse(qc_flag < 4L, value, NA_real_)]
   dt[, qc_flagged_at := flagged_at]
 
-  # Reorder to Silver schema column order (code column is data_type-specific)
+  # Reorder to Silver schema column order (code column is data_type-specific).
+  # setcolorder() with a partial vector moves those columns to the front and
+  # leaves any extra input columns (e.g. period) after them
   base_cols  <- c("timestamp", "value", "supplier_flag", "dataset_id",
                   "site_id", "data_type", "qc_flag", "qc_value", "qc_flagged_at")
   col_order  <- if (!is.null(code_col))
@@ -1383,6 +1466,10 @@ promote_to_silver <- function(bronze_data,
   data.table::setcolorder(dt, intersect(col_order, names(dt)))
 
   # -- Gap annotation ----------------------------------------------------------
+  # Estimate, per site, how many timesteps are missing between the first and
+  # last observation, using the median observed interval as the expected step.
+  # This is an estimate (a series with a changing step will mislead it); the
+  # counts are attached as an attribute rather than written to the file.
   if (annotate_gaps) {
     sites   <- dt[, unique(site_id)]
     gap_vec <- vapply(sites, function(sid) {
@@ -1409,6 +1496,7 @@ promote_to_silver <- function(bronze_data,
   }
 
   # -- Write Silver Parquet ----------------------------------------------------
+  # Returned invisibly when written so a script does not print the full table
   if (write_output) {
     dataset_id  <- dt$dataset_id[[1L]]
     data_type   <- dt$data_type[[1L]]
