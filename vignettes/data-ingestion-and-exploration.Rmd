@@ -176,10 +176,11 @@ download_hydrology(
   observation_type = "Qualified",
   wiski_ids        = "SS92F014"
 )
-# Writes: hydrology_data/bronze/hydrometric/EA/Q/<year>/EA_<site>_Q_<date>.parquet
-#         hydrology_data/bronze/hydrometric/EA/H/<year>/...
-#         hydrology_data/register/hydrometric_data_register.csv
-#         hydrology_data/download_summary.csv
+# Files written (under hydrology_data/):
+#   bronze/hydrometric/EA/Q/<year>/EA_<site>_Q_<date>.parquet
+#   bronze/hydrometric/EA/H/<year>/...
+#   the register: register/hydrometric_data_register.csv
+#   download_summary.csv
 # Read it back with read_bronze("hydrology_data", "SS92F014", "Q")
 ```
 
@@ -285,7 +286,7 @@ library(ggplot2)
 
 # Aggregate to daily mean before plotting
 dt_daily <- result$flow@readings[, .(value = mean(value, na.rm = TRUE)),
-                                  by = date]
+                                 by = date]
 
 ggplot(dt_daily, aes(x = date, y = value)) +
   geom_line(colour = "#005EB8") +
@@ -301,14 +302,14 @@ ggplot(dt_daily, aes(x = date, y = value)) +
 ```{r plot-flow-rain}
 # Aggregate both series to daily before merging
 dt_flow <- result$flow@readings[,
-             .(flow_m3s = mean(value, na.rm = TRUE)), by = date]
+                                .(flow_m3s = mean(value, na.rm = TRUE)), by = date]
 dt_rain <- result$rainfall@readings[,
-             .(rain_mm  = sum(value,  na.rm = TRUE)), by = date]
+                                    .(rain_mm  = sum(value,  na.rm = TRUE)), by = date]
 
 combined <- merge(dt_flow, dt_rain, by = "date", all = TRUE)
 
 rain_scale <- max(combined$flow_m3s, na.rm = TRUE) /
-              max(combined$rain_mm,  na.rm = TRUE)
+  max(combined$rain_mm,  na.rm = TRUE)
 
 ggplot(combined, aes(x = date)) +
   geom_col(aes(y = rain_mm * rain_scale), fill = "#5A9FD4", alpha = 0.6) +

@@ -230,9 +230,12 @@ test_that("run_incremental distinguishes unknown ids from inactive / non-live on
   w <- character()
   withCallingHandlers(
     suppressMessages(run_incremental(
-      reg_path, root, gauge_ids = c("RUN", "OFF", "HIST", "GHOST"),
-      n_workers = 1L, log_path = tempfile())),
-    warning = function(cnd) { w <<- c(w, conditionMessage(cnd)); invokeRestart("muffleWarning") }
+                                     reg_path, root, gauge_ids = c("RUN", "OFF", "HIST", "GHOST"),
+                                     n_workers = 1L, log_path = tempfile())),
+    warning = function(cnd) {
+      w <<- c(w, conditionMessage(cnd))
+      invokeRestart("muffleWarning")
+    }
   )
   expect_true(any(grepl("not found in registry: GHOST", w)))
   expect_true(any(grepl("inactive or not live: OFF, HIST", w)))

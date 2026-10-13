@@ -7,7 +7,7 @@ library(data.table)
 
 
 # =============================================================================
-# cumsum_na()
+# -- cumsum_na() --
 # =============================================================================
 
 test_that("cumsum_na treats NA as zero contribution", {
@@ -25,7 +25,7 @@ test_that("cumsum_na returns numeric vector same length as input", {
 
 
 # =============================================================================
-# add_hydro_year()
+# -- add_hydro_year() --
 # =============================================================================
 
 test_that("add_hydro_year: Sep 30 / Oct 1 boundary is correct", {
@@ -95,7 +95,7 @@ make_limbs_inv <- function() {
     upper    = c(0.095, 2.000,   Inf),
     C        = c(12.2495, 23.252, 23.252),
     a        = c(-0.003, -0.098, -0.098),
-    b        = c( 1.641,  2.706,  2.706),
+    b        = c(1.641,  2.706,  2.706),
     doubtful = c(FALSE,   FALSE,  TRUE)
   )
 }
@@ -156,7 +156,7 @@ test_that("apply_inverse_rating errors on non-rating input", {
 
 
 # =============================================================================
-# format_for_pdm()
+# -- format_for_pdm() --
 # =============================================================================
 
 test_that("format_for_pdm returns correct columns for rainfall", {
@@ -205,7 +205,7 @@ test_that("format_for_pdm errors on non-data.frame input", {
 
 
 # =============================================================================
-# format_for_fmp()
+# -- format_for_fmp() --
 # =============================================================================
 
 # Helper: make a small FlodeFlow_15min object with known values
@@ -277,7 +277,7 @@ test_that("format_for_fmp: 15-min data produces relative hours 0.000, 0.250, 0.5
 
 test_that("format_for_fmp: start_time shifts relative hours correctly", {
   flow  <- make_flow_15min_fmp(c(10, 11),
-             start = as.POSIXct("2024-01-01 10:00:00", tz = "UTC"))
+                               start = as.POSIXct("2024-01-01 10:00:00", tz = "UTC"))
   t0    <- as.POSIXct("2024-01-01 09:00:00", tz = "UTC")
   lines <- format_for_fmp(list(s = flow), start_time = t0)
   first_time <- strsplit(lines[5L], ",")[[1L]][1L]

@@ -193,8 +193,8 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
   # Select and order columns explicitly so the schema is stable regardless
   # of what extra columns the input CSV contains (extras are dropped here)
   new_dt <- raw_dt[, .(gauge_id, source_system, data_type, category,
-                        catchment, ea_site_ref,
-                        active, live, date_added, backfill_done, notes)]
+                       catchment, ea_site_ref,
+                       active, live, date_added, backfill_done, notes)]
 
   # -- Merge with existing registry if overwrite = FALSE ----------------------
   # Everything validated above is in memory only; nothing has touched the
@@ -215,7 +215,7 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
     # and notes survive; their other fields are not refreshed from the CSV,
     # and series absent from the CSV are not removed.
     is_new    <- !.registry_key(new_dt$gauge_id, new_dt$data_type) %in%
-                 .registry_key(existing_dt$gauge_id, existing_dt$data_type)
+      .registry_key(existing_dt$gauge_id, existing_dt$data_type)
     added_dt  <- new_dt[is_new]
     # fill = TRUE: a column found on only one side (e.g. extra columns in an
     # older registry) becomes NA for the other rows instead of erroring

@@ -133,7 +133,9 @@ utils::globalVariables(c(
   "station_name", "station_number", "station.notation", "station.wiskiID",
   "status", "temporal_resolution", "time_period_end", "time_period_start",
   "timestamp", "ts_name", "unit", "upper", "value", "value_type", "wiskiID",
-  "x_val", "y_val", "year", "fitted", "date"
+  "x_val", "y_val", "year", "fitted", "date",
+  "connected", "junction", "h_junction", "Q_lower_limb", "Q_upper_limb",
+  "gap_m3s", "gap_pct"
 ))
 
 # -- Null-coalescing operator -------------------------------------------------
@@ -284,10 +286,11 @@ utils::globalVariables(c(
 
 .onLoad <- function(libname, pkgname) {
   # S7 classes dispatch print through S3 under the name "<package>::<class>"
-  registerS3method("print", "reach.io::FlodeRatingCurve",  .print_RatingCurve,  envir = asNamespace(pkgname))
-  registerS3method("print", "reach.io::FlodeRatingSet",    .print_RatingSet,    envir = asNamespace(pkgname))
-  registerS3method("print", "reach.io::FlodeHydroData",    .print_HydroData,    envir = asNamespace(pkgname))
-  registerS3method("print", "reach.io::FlodePotEvapData",  .print_PotEvapData,  envir = asNamespace(pkgname))
+  ns <- asNamespace(pkgname)
+  registerS3method("print", "reach.io::FlodeRatingCurve",  .print_rating_curve,  envir = ns)
+  registerS3method("print", "reach.io::FlodeRatingSet",    .print_rating_set,    envir = ns)
+  registerS3method("print", "reach.io::FlodeHydroData",    .print_hydro_data,    envir = ns)
+  registerS3method("print", "reach.io::FlodePotEvapData",  .print_pe_data,  envir = ns)
 
   # Register this package's pipeline activities so reach.utils::run_pipeline()
   # can dispatch to them by name from a pipeline YAML config.

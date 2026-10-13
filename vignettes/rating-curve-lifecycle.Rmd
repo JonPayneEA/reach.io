@@ -74,7 +74,7 @@ limbs <- data.table(
   upper    = c(0.095, 2.000,   Inf),
   C        = c(12.2495, 23.252, 23.252),
   a        = c(-0.003, -0.098,  -0.098),
-  b        = c( 1.641,  2.706,   2.706),
+  b        = c(1.641,  2.706,   2.706),
   doubtful = c(FALSE,   FALSE,   TRUE)   # upper limb = out-of-bank
 )
 

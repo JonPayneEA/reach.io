@@ -287,7 +287,7 @@ run_backfill <- function(registry_path,
       # a rerun replaces its FAILED row rather than duplicating it) and keep
       # all other old rows. `%||% NA` tolerates a log with no data_type column.
       keep_old <- !(.registry_key(prev_log_dt$gauge_id, prev_log_dt$data_type %||% NA) %in%
-                    .registry_key(new_log$gauge_id, new_log$data_type))
+                      .registry_key(new_log$gauge_id, new_log$data_type))
       data.table::rbindlist(list(prev_log_dt[keep_old], new_log), fill = TRUE)
     }
     dir.create(dirname(log_path), recursive = TRUE, showWarnings = FALSE)

@@ -217,10 +217,11 @@ test_that("run_batch reports an HTTP error instead of saving it as data", {
 # "stop") never saw it and the orchestrators logged SUCCESS for a partial series.
 
 flaky_readings <- function(fail_call) {
-  n <- 0L
+  state <- new.env(parent = emptyenv())
+  state$n <- 0L
   function(measure_notation, from_date, to_date, ...) {
-    n <<- n + 1L
-    if (n == fail_call) stop("HTTP 500")
+    state$n <- state$n + 1L
+    if (state$n == fail_call) stop("HTTP 500")
     d <- data.table::data.table(
       dateTime = paste0(from_date, "T00:00:00"), date = from_date,
       value = 1, quality = "Good", completeness = "Complete"
@@ -314,7 +315,10 @@ test_that("run_sync pauses after every chunk, including empty and failed ones", 
       if (calls == 3L) return(data.table::data.table())
       fake_readings(...)
     },
-    .pace = function(...) { sleeps <<- sleeps + 1L; invisible() }
+    .pace = function(...) {
+      sleeps <<- sleeps + 1L
+      invisible()
+    }
   )
   chunks <- data.table::data.table(chunk_from = c("2020-01-01", "2021-01-01", "2022-01-01"),
                                    chunk_to   = c("2021-01-01", "2022-01-01", "2023-01-01"))
@@ -326,7 +330,7 @@ test_that("run_sync pauses after every chunk, including empty and failed ones", 
 
 # -- argument / column name clashes in the API clients ---------------------------
 
-test_that("fetch_readings tags rows with the requested measure even if the response has that column", {
+test_that("fetch_readings tags rows with the requested measure even if the response has one", {
   items <- data.frame(dateTime = "2022-01-01T00:00:00", date = "2022-01-01",
                       value = 1, measure_notation = "WRONG", stringsAsFactors = FALSE)
   testthat::local_mocked_bindings(
@@ -339,7 +343,7 @@ test_that("fetch_readings tags rows with the requested measure even if the respo
   expect_equal(res$measure_notation, "REQUESTED-ID")
 })
 
-test_that("get_measures sets `parameter` to the requested parameter even if the response has that column", {
+test_that("get_measures sets `parameter` to the requested one even if the response has one", {
   items <- data.frame(notation = "m1", parameter = "WRONG", stringsAsFactors = FALSE)
   testthat::local_mocked_bindings(
     GET = function(...) structure(list(status_code = 200L), class = "response"),
@@ -425,9 +429,14 @@ test_that("handle_output records the source system, not a hard-coded HDE", {
 # -- format_for_fmp(): one timestamp, several sites -------------------------------
 
 test_that("format_for_fmp lays out several sites correctly when there is one timestamp", {
-  mk <- function(v) FlodeFlow_15min(readings = data.table::data.table(
-    dateTime = as.POSIXct("2023-01-01 00:00:00", tz = "UTC"),
-    date = as.Date("2023-01-01"), value = v, measure_notation = "m"))
+  mk <- function(v) {
+    FlodeFlow_15min(readings = data.table::data.table(
+      dateTime = as.POSIXct("2023-01-01 00:00:00", tz = "UTC"),
+      date = as.Date("2023-01-01"),
+      value = v,
+      measure_notation = "m"
+    ))
+  }
   lines <- format_for_fmp(list(A = mk(1.5), B = mk(2.5), C = mk(3.5)))
   # 4 header rows then one data row: time, then one value per site
   expect_equal(length(lines), 5L)

@@ -138,7 +138,7 @@ test_that("read_silver min_quality = 1 excludes Suspect and Rejected rows", {
   root <- make_silver_store()
   # Inject a Suspect row directly into the parquet
   pq_path <- list.files(file.path(root, "silver"), pattern = "\\.parquet$",
-                         recursive = TRUE, full.names = TRUE)[[1L]]
+                        recursive = TRUE, full.names = TRUE)[[1L]]
   # mmap = FALSE: on Windows a memory-mapped file cannot be rewritten (error 1224)
   dt <- data.table::as.data.table(arrow::read_parquet(pq_path, mmap = FALSE))
   dt$qc_flag[1L]  <- 3L   # Suspect
@@ -152,7 +152,7 @@ test_that("read_silver min_quality = 1 excludes Suspect and Rejected rows", {
 test_that("read_silver min_quality = NULL returns all rows", {
   root <- make_silver_store()
   pq_path <- list.files(file.path(root, "silver"), pattern = "\\.parquet$",
-                         recursive = TRUE, full.names = TRUE)[[1L]]
+                        recursive = TRUE, full.names = TRUE)[[1L]]
   dt <- data.table::as.data.table(arrow::read_parquet(pq_path, mmap = FALSE))
   dt$qc_flag[1L] <- 4L   # Rejected
   arrow::write_parquet(dt, pq_path)
@@ -164,7 +164,7 @@ test_that("read_silver min_quality = NULL returns all rows", {
 test_that("read_silver errors informatively when quality filter removes all rows", {
   root <- make_silver_store()
   pq_path <- list.files(file.path(root, "silver"), pattern = "\\.parquet$",
-                         recursive = TRUE, full.names = TRUE)[[1L]]
+                        recursive = TRUE, full.names = TRUE)[[1L]]
   dt <- data.table::as.data.table(arrow::read_parquet(pq_path, mmap = FALSE))
   dt$qc_flag[] <- 4L  # all Rejected
   arrow::write_parquet(dt, pq_path)
@@ -223,7 +223,7 @@ test_that("read_silver_catchment errors when catchment_id column is absent", {
   reg  <- data.table::data.table(site_id = "39001", basin = "Upper")
   expect_error(
     read_silver_catchment(root, "Upper", "Q", registry = reg,
-                           catchment_col = "catchment_id"),
+                          catchment_col = "catchment_id"),
     "not found in registry"
   )
 })

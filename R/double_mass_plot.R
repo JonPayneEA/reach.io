@@ -208,9 +208,9 @@ cumsum_na <- function(x) {
 #' @param label_x,label_y Axis labels. Auto-generated from the source
 #'   parameter types and `output_units` when `NULL`.
 #'
-#' @return A `ggplot` object (requires the suggested package 'ggplot2'). The aligned, cumulative `data.table` used
-#'   to build the plot is attached as `attr(p, "data")` for inspection or
-#'   further processing.
+#' @return A `ggplot` object (requires the suggested package 'ggplot2'). The
+#'   aligned, cumulative `data.table` used to build the plot is attached as
+#'   `attr(p, "data")` for inspection or further processing.
 #'
 #' @note This function will be moved to the `reach.viz` package in a future
 #'   release and deprecated here once that package is available.

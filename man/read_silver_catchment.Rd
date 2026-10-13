@@ -45,9 +45,10 @@ The registry needs an id column (\code{site_id}, or \code{gauge_id} as written b
 \code{\link[=build_gauge_registry]{build_gauge_registry()}}) and the catchment column named by \code{catchment_col};
 with the default \code{"catchment_id"}, a registry that has \code{catchment} instead
 (again as \code{\link[=build_gauge_registry]{build_gauge_registry()}} writes it) is accepted. A gauge appears
-once per data type in the registry, so ids are de-duplicated. Gauges are matched on exact equality with
-\code{catchment_id}; the registry's \code{data_type} and \code{category} are not consulted,
-so the single \code{data_type} you pass is requested for every gauge. A catchment
+once per data type in the registry, so ids are de-duplicated. Gauges are
+matched on exact equality with \code{catchment_id}; the registry's \code{data_type}
+and \code{category} are not consulted, so the single \code{data_type} you pass is
+requested for every gauge. A catchment
 with no gauges in the registry is an error, whereas gauges that have no
 Silver data are skipped with a warning (see \code{\link[=read_silver_multi]{read_silver_multi()}}).
 }

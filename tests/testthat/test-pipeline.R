@@ -127,9 +127,10 @@ test_that("route_gauge dispatches HDE gauges to fetch_from_hde", {
 
 backfill_setup <- function(ids = c("G1", "G2"), env = parent.frame()) {
   root <- withr::local_tempdir(.local_envir = env)
-  reg  <- data.table::rbindlist(lapply(ids, reg_row))
+  # reg_row() and make_test_registry() live in helper-bronze.R, which lintr cannot see
+  reg  <- data.table::rbindlist(lapply(ids, reg_row))  # nolint: object_usage_linter
   list(root = root,
-       reg_path = make_test_registry(root, reg),
+       reg_path = make_test_registry(root, reg),  # nolint: object_usage_linter
        log_path = file.path(root, "logs", "backfill.csv"),
        register = file.path(root, "register", "hydrometric_data_register.csv"))
 }

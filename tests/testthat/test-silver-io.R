@@ -6,8 +6,9 @@
 silver_input <- function() {
   ts <- format(as.POSIXct("2022-12-31 22:00:00", tz = "UTC") + (0:15) * 900,
                "%Y-%m-%d %H:%M:%S")                       # crosses new year
-  a <- bronze_rows("S1", ts, value = 5 + (0:15) / 10)
-  b <- bronze_rows("S2", ts, value = 8 + (0:15) / 10)
+  # bronze_rows() lives in helper-bronze.R, which lintr cannot see
+  a <- bronze_rows("S1", ts, value = 5 + (0:15) / 10)  # nolint: object_usage_linter
+  b <- bronze_rows("S2", ts, value = 8 + (0:15) / 10)  # nolint: object_usage_linter
   data.table::rbindlist(list(a, b))
 }
 
@@ -18,7 +19,8 @@ promote_quietly <- function(x, root) {
 }
 
 test_that("silver_path uses the received year by default and an explicit year when given", {
-  expect_match(silver_path("r", "hydrometric", "Q", "EA_S1_Q_20260115"), "/Q/2026/EA_S1_Q_20260115.parquet")
+  expect_match(silver_path("r", "hydrometric", "Q", "EA_S1_Q_20260115"),
+               "/Q/2026/EA_S1_Q_20260115.parquet")
   expect_match(silver_path("r", "hydrometric", "Q", "EA_S1_Q_20260115", year = 2020),
                "/Q/2020/EA_S1_Q_20260115.parquet")
 })
@@ -55,5 +57,6 @@ test_that("read_silver finds data by observation year", {
   only_2023 <- read_silver(root, "S1", "Q", start = "2023-01-01", end = "2023-12-31",
                            min_quality = NULL)
   expect_true(all(format(only_2023@readings$dateTime, "%Y") == "2023"))
-  expect_equal(nrow(only_2023@readings), 8L)                # 22:00-23:45 is 2022 (8 rows); 00:00-01:45 is 2023 (8)
+  # 22:00-23:45 is 2022 (8 rows); 00:00-01:45 is 2023 (8)
+  expect_equal(nrow(only_2023@readings), 8L)
 })

@@ -58,13 +58,13 @@
 #'
 #' @noRd
 handle_output <- function(dt, output, out_dir, parameter, measure_id,
-                           append = FALSE, site_id = NA_character_,
-                           period = NA_character_,
-                           supplier_code = "EA",
-                           category = "hydrometric",
-                           register_path = NULL,
-                           method_of_receipt = "API pull",
-                           trace = NULL) {
+                          append = FALSE, site_id = NA_character_,
+                          period = NA_character_,
+                          supplier_code = "EA",
+                          category = "hydrometric",
+                          register_path = NULL,
+                          method_of_receipt = "API pull",
+                          trace = NULL) {
 
   # Memory mode is a pass-through: no schema is applied, so the caller keeps the
   # raw API columns (dateTime, value, quality, ...) rather than Bronze names
@@ -352,7 +352,7 @@ format_for_fmp <- function(flows,
 
   for (i in seq_len(n)) {
     if (!S7::S7_inherits(flows[[i]], FlodeFlow_Daily) &&
-        !S7::S7_inherits(flows[[i]], FlodeFlow_15min)) {
+          !S7::S7_inherits(flows[[i]], FlodeFlow_15min)) {
       stop(sprintf(
         "`flows[[%d]]` is not a FlodeFlow_Daily or FlodeFlow_15min object.", i
       ))
@@ -492,4 +492,3 @@ format_for_fmp <- function(flows,
 
   invisible(lines)
 }
-

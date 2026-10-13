@@ -5,7 +5,7 @@
 #              evapotranspiration (PE) time series.
 #              Standard form: PE(t) = B + A * sin(2pi/365.25 * (doy - phi))
 #              B   = annual mean (mm/day)
-#              A   = amplitude (mm/day)
+#              A   = amplitude, in mm/day
 #              phi = phase offset (days). As coded, PE rises through B at
 #                    doy = phi and peaks at doy = phi + 365.25/4 (about 91
 #                    days later). Older wording called phi the day of the
@@ -140,15 +140,16 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
   omega <- 2 * pi / 365.25
 
   # -- lm_fourier method ------------------------------------------------------
-  # Linearise: PE = B + C1*sin(omega*doy) + C2*cos(omega*doy)
+  # Linearise: fit PE as B plus C1 times sin(omega*doy) plus C2 times cos(omega*doy)
   # Recover:   A = sqrt(C1^2 + C2^2),  phi = atan2(-C2, C1) / omega
   # (Why atan2(-C2, C1): sin(omega*(doy - phi)) expands to
   #  sin(omega*doy)*cos(omega*phi) - cos(omega*doy)*sin(omega*phi), so
   #  C1 = A*cos(omega*phi) and C2 = -A*sin(omega*phi). A is a norm, hence >= 0.)
   .fit_lm_fourier <- function() {
-    sin_term <- sin(omega * doy)
-    cos_term <- cos(omega * doy)
-    fit      <- stats::lm(pe ~ sin_term + cos_term)
+    # The regressors go in a data frame so lm() names the coefficients below
+    terms_df <- data.frame(pe = pe, sin_term = sin(omega * doy),
+                           cos_term = cos(omega * doy))
+    fit      <- stats::lm(pe ~ sin_term + cos_term, data = terms_df)
     coefs    <- stats::coef(fit)
     B        <- unname(coefs["(Intercept)"])
     C1       <- unname(coefs["sin_term"])
@@ -421,13 +422,13 @@ regionalise_pe_sine <- function(params_list, weights = NULL) {
   }
 
   # Only B, A and phi are read; other fit_pe_sine() fields are ignored.
-  B_vec   <- vapply(valid, `[[`, numeric(1L), "B")
-  A_vec   <- vapply(valid, `[[`, numeric(1L), "A")
+  b_vec   <- vapply(valid, `[[`, numeric(1L), "B")
+  a_vec   <- vapply(valid, `[[`, numeric(1L), "A")
   phi_vec <- vapply(valid, `[[`, numeric(1L), "phi")
 
   # B and A: plain weighted means.
-  B_reg <- sum(weights * B_vec)
-  A_reg <- sum(weights * A_vec)
+  b_reg <- sum(weights * b_vec)
+  a_reg <- sum(weights * a_vec)
 
   # Phase-aware averaging on the unit circle
   # phi is an angle on a circle of 365.25 days, so average unit vectors rather
@@ -440,8 +441,8 @@ regionalise_pe_sine <- function(params_list, weights = NULL) {
   phi_reg      <- atan2(mean_sin_phi, mean_cos_phi) / omega
   phi_reg      <- phi_reg %% 365.25
 
-  list(B        = B_reg,
-       A        = A_reg,
+  list(B        = b_reg,
+       A        = a_reg,
        phi      = phi_reg,
        n_gauges = length(valid),
        gauge_ids = gauge_ids)

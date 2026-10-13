@@ -122,28 +122,28 @@
 #' )
 #' }
 setup_hydro_store <- function(
-    root,
-    categories = list(
-      hydrometric = list(
-        suppliers  = c("EA", "WISKI", "NRFA", "rating_curves"),
-        data_types = c("Q", "H", "P")
-      ),
-      radarH19 = list(
-        suppliers  = "MO",
-        data_types = "P"
-      ),
-      MOSES = list(
-        suppliers  = "MO",
-        data_types = c("SM", "PE")
-      )
+  root,
+  categories = list(
+    hydrometric = list(
+      suppliers  = c("EA", "WISKI", "NRFA", "rating_curves"),
+      data_types = c("Q", "H", "P")
     ),
-    gold_purposes = list(
-      hydrometric = list(
-        Q = c("FFA"),
-        P = c("catchment_average")
-      )
+    radarH19 = list(
+      suppliers  = "MO",
+      data_types = "P"
     ),
-    verbose = TRUE) {
+    MOSES = list(
+      suppliers  = "MO",
+      data_types = c("SM", "PE")
+    )
+  ),
+  gold_purposes = list(
+    hydrometric = list(
+      Q = c("FFA"),
+      P = c("catchment_average")
+    )
+  ),
+  verbose = TRUE) {
 
   # -- Collect the directories to create --------------------------------------
   # Paths are only collected here; nothing is created until the manifest
@@ -200,7 +200,7 @@ setup_hydro_store <- function(
   # hydrometric supplier, so minimal setups don't get unwanted folders. The
   # same rating_curves/ratings path is created in all three tiers.
   if ("hydrometric" %in% names(categories) &&
-      "rating_curves" %in% categories$hydrometric$suppliers) {
+        "rating_curves" %in% categories$hydrometric$suppliers) {
     for (tier in c("bronze", "silver", "gold")) {
       dirs <- c(dirs, file.path(root, tier, "hydrometric", "rating_curves", "ratings"))
     }

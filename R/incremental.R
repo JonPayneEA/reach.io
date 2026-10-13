@@ -374,8 +374,9 @@ run_incremental <- function(registry_path,
   # register, so they return their provenance rows instead.
   res <- future.apply::future_lapply(
     seq_len(n_gauges),
-    function(i) .incremental_one(registry_dt[i], output_dir, end_date,
-                                 default_start, run_at),
+    function(i) {
+      .incremental_one(registry_dt[i], output_dir, end_date, default_start, run_at)
+    },
     future.seed = TRUE
   )
 

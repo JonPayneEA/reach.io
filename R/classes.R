@@ -222,6 +222,7 @@ FlodeHydroData <- S7::new_class(
 #'
 #' @returns A `FlodeRainfall_Daily` S7 object.
 #' @export
+# nolint next: object_name_linter
 FlodeRainfall_Daily <- .new_hydro_class("FlodeRainfall_Daily", "rainfall", "daily")
 
 #' S7 class for 15-minute rainfall readings
@@ -246,6 +247,7 @@ FlodeRainfall_Daily <- .new_hydro_class("FlodeRainfall_Daily", "rainfall", "dail
 #'
 #' @returns A `FlodeRainfall_15min` S7 object.
 #' @export
+# nolint next: object_name_linter
 FlodeRainfall_15min <- .new_hydro_class("FlodeRainfall_15min", "rainfall", "15min")
 
 #' S7 class for daily river flow readings
@@ -271,6 +273,7 @@ FlodeRainfall_15min <- .new_hydro_class("FlodeRainfall_15min", "rainfall", "15mi
 #'
 #' @returns A `FlodeFlow_Daily` S7 object.
 #' @export
+# nolint next: object_name_linter
 FlodeFlow_Daily <- .new_hydro_class("FlodeFlow_Daily", "flow", "daily")
 
 #' S7 class for 15-minute river flow readings
@@ -295,6 +298,7 @@ FlodeFlow_Daily <- .new_hydro_class("FlodeFlow_Daily", "flow", "daily")
 #'
 #' @returns A `FlodeFlow_15min` S7 object.
 #' @export
+# nolint next: object_name_linter
 FlodeFlow_15min <- .new_hydro_class("FlodeFlow_15min", "flow", "15min")
 
 #' S7 class for daily water level readings
@@ -321,6 +325,7 @@ FlodeFlow_15min <- .new_hydro_class("FlodeFlow_15min", "flow", "15min")
 #'
 #' @returns A `FlodeLevel_Daily` S7 object.
 #' @export
+# nolint next: object_name_linter
 FlodeLevel_Daily <- .new_hydro_class("FlodeLevel_Daily", "level", "daily")
 
 #' S7 class for 15-minute water level readings
@@ -345,6 +350,7 @@ FlodeLevel_Daily <- .new_hydro_class("FlodeLevel_Daily", "level", "daily")
 #'
 #' @returns A `FlodeLevel_15min` S7 object.
 #' @export
+# nolint next: object_name_linter
 FlodeLevel_15min <- .new_hydro_class("FlodeLevel_15min", "level", "15min")
 
 
@@ -450,7 +456,7 @@ S7::method(as_long, FlodeHydroData) <- function(x) {
 # printed explicitly so users can see what is available with @ without
 # relying on IDE autocomplete (which has limited S7 support).
 
-.print_HydroData <- function(x, ...) {
+.print_hydro_data <- function(x, ...) {
   dt        <- x@readings
   col_types <- vapply(dt, function(col) class(col)[1L], character(1L))
   col_lines <- paste(
@@ -479,9 +485,9 @@ S7::method(as_long, FlodeHydroData) <- function(x) {
 
 # NB: S7's print.S7_object calls str() and does not consult this method table,
 # so this assignment alone does not change auto-printing. .onLoad() (package.R)
-# also registers .print_HydroData as an S3 method for "reach.io::FlodeHydroData",
+# also registers .print_hydro_data as an S3 method for "reach.io::FlodeHydroData",
 # which is the registration that takes effect.
-S7::method(print, FlodeHydroData) <- .print_HydroData
+S7::method(print, FlodeHydroData) <- .print_hydro_data
 
 
 # =============================================================================
@@ -548,7 +554,7 @@ FlodePotEvapData <- S7::new_class(
     # The concrete constructors fix period_name, so this guards later
     # assignment. source_name is free text; NA is accepted but it must be length 1.
     if (length(self@period_name) != 1L ||
-        !self@period_name %in% c("daily", "hourly", "15min")) {
+          !self@period_name %in% c("daily", "hourly", "15min")) {
       return('`period_name` must be one of "daily", "hourly", "15min".')
     }
     if (length(self@source_name) != 1L) {
@@ -619,6 +625,7 @@ FlodePotEvapData <- S7::new_class(
 #'
 #' @returns A `FlodePotEvap_Daily` S7 object.
 #' @export
+# nolint next: object_name_linter
 FlodePotEvap_Daily <- .new_pe_class("FlodePotEvap_Daily", "daily")
 
 #' S7 class for hourly potential evaporation readings
@@ -642,6 +649,7 @@ FlodePotEvap_Daily <- .new_pe_class("FlodePotEvap_Daily", "daily")
 #'
 #' @returns A `FlodePotEvap_Hourly` S7 object.
 #' @export
+# nolint next: object_name_linter
 FlodePotEvap_Hourly <- .new_pe_class("FlodePotEvap_Hourly", "hourly")
 
 #' S7 class for 15-minute potential evaporation (calculated)
@@ -672,6 +680,7 @@ FlodePotEvap_Hourly <- .new_pe_class("FlodePotEvap_Hourly", "hourly")
 #'
 #' @returns A `FlodePotEvap_15min` S7 object.
 #' @export
+# nolint next: object_name_linter
 FlodePotEvap_15min <- S7::new_class(
   "FlodePotEvap_15min",
   package    = "reach.io",
@@ -711,7 +720,7 @@ FlodePotEvap_15min <- S7::new_class(
     }
     valid_methods <- c("uniform_hourly", "uniform_daily")
     if (!self@disagg_method %in% valid_methods) {
-      return(sprintf('`disagg_method` must be one of: %s.',
+      return(sprintf("`disagg_method` must be one of: %s.",
                      paste(valid_methods, collapse = ", ")))
     }
     NULL
@@ -764,6 +773,7 @@ FlodePotEvap_15min <- S7::new_class(
 #' }
 disagg_to_15min <- S7::new_generic("disagg_to_15min", "x")
 
+# nolint next: object_name_linter
 S7::method(disagg_to_15min, FlodePotEvap_Hourly) <- function(x) {
   dt <- data.table::copy(x@readings)
 
@@ -787,6 +797,7 @@ S7::method(disagg_to_15min, FlodePotEvap_Hourly) <- function(x) {
   )
 }
 
+# nolint next: object_name_linter
 S7::method(disagg_to_15min, FlodePotEvap_Daily) <- function(x) {
   dt  <- data.table::copy(x@readings)
   # Time zone of the input dateTime; UTC when none is recorded.
@@ -823,7 +834,7 @@ S7::method(as_data_table, FlodePotEvapData) <- function(x) x@readings
 
 # -- Print method -------------------------------------------------------------
 
-.print_PotEvapData <- function(x, ...) {
+.print_pe_data <- function(x, ...) {
   dt        <- x@readings
   col_types <- vapply(dt, function(col) class(col)[1L], character(1L))
   col_lines <- paste(
@@ -856,5 +867,5 @@ S7::method(as_data_table, FlodePotEvapData) <- function(x) x@readings
 }
 
 # NB: as for FlodeHydroData above, .onLoad() (package.R) registers
-# .print_PotEvapData as the S3 print method that actually takes effect.
-S7::method(print, FlodePotEvapData) <- .print_PotEvapData
+# .print_pe_data as the S3 print method that actually takes effect.
+S7::method(print, FlodePotEvapData) <- .print_pe_data

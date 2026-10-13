@@ -275,7 +275,8 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
         # not set to FALSE.
         if (nrow(dt) >= API_HARD_LIMIT) {
           warning(sprintf(
-            "Chunk %d/%d for '%s' hit the API row limit (%d). Data may be truncated - consider method = 'batch'.",
+            paste0("Chunk %d/%d for '%s' hit the API row limit (%d). ",
+                   "Data may be truncated - consider method = 'batch'."),
             j, nrow(chunks), mid, API_HARD_LIMIT
           ))
         }

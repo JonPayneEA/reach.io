@@ -8,7 +8,8 @@
 # Register one Bronze series (files + provenance) in a store
 register_series <- function(root, id, type, supplier, ts, resolution = "15min") {
   reg <- file.path(root, "register", "hydrometric_data_register.csv")
-  dt  <- bronze_rows(id, ts, type = type, supplier = supplier)
+  # bronze_rows() lives in helper-bronze.R, which lintr cannot see
+  dt  <- bronze_rows(id, ts, type = type, supplier = supplier)  # nolint: object_usage_linter
   files <- .write_bronze_by_year(dt, root, "hydrometric", supplier, type,
                                  dt$dataset_id[1L])
   .write_provenance_rows(
@@ -131,13 +132,15 @@ test_that("rating versions and lookups are scoped to the requested site and tier
     n_saved <<- n_saved + 1L           # distinct validity start per version
     suppressMessages(save_rating(
       FlodeRatingCurve(limbs = rating_limbs(), station_id = site,
-                  valid_from = as.Date("2015-01-01") + 365L * n_saved,
-                  valid_to   = as.Date("2015-01-01") + 365L * n_saved + 364L),
+                       valid_from = as.Date("2015-01-01") + 365L * n_saved,
+                       valid_to   = as.Date("2015-01-01") + 365L * n_saved + 364L),
       root = root, tier = tier, saved_by = "tester",
       method_of_receipt = "test", derivation_method = "spot gaugings"
     ))
   }
-  save_for("A"); save_for("A"); save_for("A")
+  save_for("A")
+  save_for("A")
+  save_for("A")
   save_for("B")                                   # first version for site B
   save_for("B", tier = "silver")
 
@@ -237,11 +240,11 @@ three_gap_times <- function() {
 }
 
 expect_three_gaps <- function(g, ts_all) {
-  expect_equal(nrow(g), 3L)
-  expect_equal(g$n_missing, c(3L, 1L, 2L))
+  testthat::expect_equal(nrow(g), 3L)
+  testthat::expect_equal(g$n_missing, c(3L, 1L, 2L))
   step <- function(i) as.POSIXct("2023-01-01", tz = "UTC") + (i - 1) * 900
-  expect_equal(g$gap_start, step(c(11, 40, 70)))
-  expect_equal(g$gap_end,   step(c(13, 40, 71)))
+  testthat::expect_equal(g$gap_start, step(c(11, 40, 70)))
+  testthat::expect_equal(g$gap_end,   step(c(13, 40, 71)))
 }
 
 test_that("check_gaps reports separate gap periods separately", {
@@ -317,9 +320,13 @@ test_that("read_bronze_catchment works with a registry built by build_gauge_regi
   # A gauge with both flow and level appears twice in the registry
   csv <- tempfile(fileext = ".csv")
   data.table::fwrite(data.table::data.table(
-    gauge_id = c("UP1", "UP1", "LOW1"), source_system = "HDE",
-    data_type = c("flow", "level", "flow"), category = "hydrometric",
-    catchment = c("Upper", "Upper", "Lower"), ea_site_ref = "X"), csv)
+    gauge_id = c("UP1", "UP1", "LOW1"),
+    source_system = "HDE",
+    data_type = c("flow", "level", "flow"),
+    category = "hydrometric",
+    catchment = c("Upper", "Upper", "Lower"),
+    ea_site_ref = "X"
+  ), csv)
   reg <- build_gauge_registry(csv, tempfile())          # columns: gauge_id, catchment, ...
 
   objs <- read_bronze_catchment(root, "Upper", "Q", registry = reg)

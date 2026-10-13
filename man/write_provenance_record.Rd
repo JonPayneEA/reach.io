@@ -106,7 +106,8 @@ write_provenance_record(
   time_period_end     = "2024-12-31",
   temporal_resolution = "15min",
   method_of_receipt   = "API pull",
-  file_path           = "data/hydrometric/bronze/hydrometric/EA/Q/2024/EA_39001_Q_20260115.parquet"
+  file_path           = file.path("data/hydrometric/bronze/hydrometric/EA/Q/2024",
+                                  "EA_39001_Q_20260115.parquet")
 )
 }
 }

@@ -26,7 +26,8 @@ test_that("rating_curves gets ratings folders only, not data_type folders", {
     hydrometric = list(suppliers = c("EA", "rating_curves"), data_types = c("Q", "H", "P"))
   ), gold_purposes = NULL, verbose = FALSE))
   d <- store_dirs(root)
-  expect_true(all(sprintf("%s/hydrometric/rating_curves/ratings", c("bronze", "silver", "gold")) %in% d))
+  rating_dirs <- sprintf("%s/hydrometric/rating_curves/ratings", c("bronze", "silver", "gold"))
+  expect_true(all(rating_dirs %in% d))
   # regression: these empty folders used to be created too
   expect_false(any(grepl("rating_curves/(Q|H|P)$", d)))
 })

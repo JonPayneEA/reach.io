@@ -173,8 +173,8 @@ test_that("regionalise_pe_sine() weighted average gives correct B", {
   # 75% weight on f1, 25% on f2
   reg <- regionalise_pe_sine(list(a = f1, b = f2), weights = c(3, 1))
 
-  expected_B <- 0.75 * f1$B + 0.25 * f2$B
-  expect_equal(reg$B, expected_B, tolerance = 1e-6)
+  expected_b <- 0.75 * f1$B + 0.25 * f2$B
+  expect_equal(reg$B, expected_b, tolerance = 1e-6)
 })
 
 test_that("regionalise_pe_sine() silently drops NULL entries", {

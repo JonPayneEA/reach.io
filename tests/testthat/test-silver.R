@@ -124,21 +124,21 @@ test_that("qc_truncation_low flags long runs at low flow", {
   # 10 identical low-flow values at the 5th percentile of the series
   v    <- c(rep(0.1, 10), seq(1, 90))
   flag <- qc_truncation_low(v, truncation_min_run = 4L,
-                             truncation_low_quantile = 0.1)
+                            truncation_low_quantile = 0.1)
   expect_true(any(flag[1:10]))
 })
 
 test_that("qc_truncation_low does not flag short runs", {
   v    <- c(0.1, 0.1, 0.1, seq(1, 97))
   flag <- qc_truncation_low(v, truncation_min_run = 4L,
-                             truncation_low_quantile = 0.1)
+                            truncation_low_quantile = 0.1)
   expect_true(all(!flag[1:3]))
 })
 
 test_that("qc_truncation_low does not flag identical values at mid range", {
   v    <- c(seq(1, 40), rep(50, 10), seq(60, 99))
   flag <- qc_truncation_low(v, truncation_min_run = 4L,
-                             truncation_low_quantile = 0.1)
+                            truncation_low_quantile = 0.1)
   expect_true(all(!flag[41:50]))
 })
 
@@ -147,14 +147,14 @@ test_that("qc_truncation_low does not flag identical values at mid range", {
 test_that("qc_truncation_high flags long runs at high flow", {
   v    <- c(seq(1, 90), rep(100, 10))
   flag <- qc_truncation_high(v, truncation_min_run = 4L,
-                              truncation_high_quantile = 0.9)
+                             truncation_high_quantile = 0.9)
   expect_true(any(flag[91:100]))
 })
 
 test_that("qc_truncation_high does not flag short runs", {
   v    <- c(seq(1, 97), 100, 100, 100)
   flag <- qc_truncation_high(v, truncation_min_run = 4L,
-                              truncation_high_quantile = 0.9)
+                             truncation_high_quantile = 0.9)
   expect_true(all(!flag[98:100]))
 })
 
@@ -184,7 +184,7 @@ test_that("apply_y_digit assigns code 8 when relative and absolute spike coincid
   # A large single-step jump should trigger both relative and absolute spike
   v <- c(rep(2, 50), 500, rep(2, 49))
   y <- apply_y_digit(v, relative_spike_ratio = 10, min_baseline = 0.1,
-                      absolute_spike_k = 5, min_spike_flow = 1.0)
+                     absolute_spike_k = 5, min_spike_flow = 1.0)
   expect_equal(y[51L], 8L)
 })
 
@@ -223,7 +223,7 @@ test_that("y_to_qc_flag never returns 2 (Estimated is manual-only)", {
 test_that("silver_path builds correct path", {
   p <- silver_path("data/hydro", "hydrometric", "Q", "EA_39001_Q_20260115")
   expect_equal(p,
-    "data/hydro/silver/hydrometric/Q/2026/EA_39001_Q_20260115.parquet")
+               "data/hydro/silver/hydrometric/Q/2026/EA_39001_Q_20260115.parquet")
 })
 
 # ---- promote_to_silver ------------------------------------------------------
@@ -274,7 +274,7 @@ test_that("promote_to_silver flags negative flow as Rejected when allow_negative
   dt          <- make_bronze_dt()
   dt$value[5] <- -1.0
   out <- promote_to_silver(dt, output_dir = tempdir(), write_output = FALSE,
-                            allow_negative = FALSE)
+                           allow_negative = FALSE)
   expect_equal(out$qc_flag[5L], 4L)
 })
 
@@ -283,7 +283,7 @@ test_that("promote_to_silver accepts negative flow when allow_negative = TRUE", 
   dt          <- make_bronze_dt()
   dt$value[5] <- -1.0
   out <- promote_to_silver(dt, output_dir = tempdir(), write_output = FALSE,
-                            allow_negative = TRUE)
+                           allow_negative = TRUE)
   expect_false(out$qc_flag[5L] == 4L)
 })
 
@@ -340,7 +340,7 @@ test_that("promote_to_silver removes duplicate (site_id, timestamp) rows", {
   dt_duped <- rbind(dt, dt[1:10])
   expect_warning(
     out <- promote_to_silver(dt_duped, output_dir = tempdir(),
-                              write_output = FALSE, dedup = TRUE),
+                             write_output = FALSE, dedup = TRUE),
     "duplicate"
   )
   expect_equal(nrow(out), nrow(dt))
@@ -673,8 +673,8 @@ test_that("qc_p_temporal_consistency flags rain when all neighbours show zero", 
   v    <- c(rep(0.0, 20L), rep(2.0, 10L), rep(0.0, 20L))
   nbrs <- matrix(0.0, nrow = n, ncol = 3L)
   flag <- qc_p_temporal_consistency(v, neighbours = nbrs,
-                                     isolation_threshold = 0.1,
-                                     isolation_fraction  = 0.8)
+                                    isolation_threshold = 0.1,
+                                    isolation_fraction  = 0.8)
   expect_true(all(flag[21:30]))
   expect_true(all(!flag[1:20]))
 })
@@ -684,8 +684,8 @@ test_that("qc_p_temporal_consistency does not flag rain when neighbours also sho
   v    <- rep(2.0, n)
   nbrs <- matrix(1.5, nrow = n, ncol = 3L)
   expect_true(all(!qc_p_temporal_consistency(v, neighbours = nbrs,
-                                              isolation_threshold = 0.1,
-                                              isolation_fraction  = 0.8)))
+                                             isolation_threshold = 0.1,
+                                             isolation_fraction  = 0.8)))
 })
 
 test_that("qc_p_temporal_consistency errors when neighbour rows differ from value length", {

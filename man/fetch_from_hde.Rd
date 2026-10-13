@@ -54,7 +54,8 @@ stores the result.
 \item \strong{Missing data.} An unknown gauge, or a gauge with no matching measure,
 gives a warning (the latter lists the resolutions that do exist) and an
 empty \code{data.table} with \code{on_error = "warn"}; with \code{"stop"} it is an error,
-so an orchestrator records the gauge as \code{FAILED} rather than \code{EMPTY}. A chunk whose request fails is handled
+so an orchestrator records the gauge as \code{FAILED} rather than \code{EMPTY}. A
+chunk whose request fails is handled
 according to \code{on_error}: with \code{"warn"} (the default) each failure is a
 warning, the remaining chunks are still fetched and the data returned is
 incomplete; with \code{"stop"} all chunks are still attempted and then an error

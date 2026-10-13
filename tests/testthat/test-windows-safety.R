@@ -15,7 +15,8 @@ test_that(".relative_path strips a base given with forward slashes from backslas
 })
 
 test_that(".relative_path handles a backslash base and mixed separators", {
-  p <- "C:\\Users\\jp\\Temp/store/bronze/hydrometric/EA/Q/2023/x.parquet"   # mixed, as file.path() gives
+  # mixed separators, as file.path() gives
+  p <- "C:\\Users\\jp\\Temp/store/bronze/hydrometric/EA/Q/2023/x.parquet"
   expect_equal(.relative_path(p, "C:\\Users\\jp\\Temp\\store\\bronze", ignore_case = TRUE),
                "hydrometric/EA/Q/2023/x.parquet")
   # trailing separator on the base makes no difference

@@ -24,7 +24,7 @@
 # Flode Module: flode.io
 # Author:      [Hydrometric Data Lead]
 # Created:     2026-05-07
-# Tier:        1 (Bronze / Read-only)
+# Tier:        1 - Bronze, read-only
 # Dependencies: data.table, arrow, S7
 # ============================================================
 
@@ -171,8 +171,8 @@
 # the message says which level of the layout is missing.
 #' @noRd
 .locate_bronze_files <- function(root, gauge_id, data_type,
-                                  supplier_code, category,
-                                  start = NULL, end = NULL) {
+                                 supplier_code, category,
+                                 start = NULL, end = NULL) {
 
   if (!dir.exists(file.path(root, "bronze")))
     stop(sprintf("No Bronze store found at: %s", file.path(root, "bronze")))
@@ -200,7 +200,7 @@
 
 
 # =============================================================================
-# read_bronze()
+# -- read_bronze() --
 # =============================================================================
 
 #' Read raw data for a single gauge from the Bronze store
@@ -404,7 +404,7 @@ read_bronze <- function(root, gauge_id, data_type,
 
 
 # =============================================================================
-# read_bronze_multi()
+# -- read_bronze_multi() --
 # =============================================================================
 
 #' Read Bronze data for multiple gauges
@@ -466,7 +466,7 @@ read_bronze_multi <- function(root, gauge_ids, data_type, ...) {
 
 
 # =============================================================================
-# read_bronze_catchment()
+# -- read_bronze_catchment() --
 # =============================================================================
 
 #' Read Bronze data for all gauges in a catchment
@@ -512,9 +512,9 @@ read_bronze_multi <- function(root, gauge_ids, data_type, ...) {
 #'                               registry = reg)
 #' }
 read_bronze_catchment <- function(root, catchment_id, data_type,
-                                   registry,
-                                   catchment_col = "catchment_id",
-                                   ...) {
+                                  registry,
+                                  catchment_col = "catchment_id",
+                                  ...) {
   # Registry shape checks and the catchment match live in one shared helper
   # (see .gauges_in_catchment() in package.R)
   gauge_ids <- .gauges_in_catchment(registry, catchment_id, catchment_col)

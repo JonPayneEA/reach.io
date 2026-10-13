@@ -57,7 +57,7 @@
 #'
 #' @noRd
 .parse_all_blocks <- function(path, tmp_dir, chunk_size = 50000L,
-                               encoding = "latin1", tz = "UTC") {
+                              encoding = "latin1", tz = "UTC") {
 
   # Start from an empty tmp_dir. Pass 2 merges EVERY block file it finds there,
   # so leftovers (from an earlier keep_tmp = TRUE run, or an interrupted one)
@@ -66,30 +66,32 @@
   dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
   # Running count of blocks written; it numbers the intermediate files, which
   # fixes their order for the "last block wins" dedupe in pass 2.
-  block_n <- 0L
+  # (an environment, so the writer closure below can update it).
+  counter <- new.env(parent = emptyenv())
+  counter$block_n <- 0L
 
   con <- file(path, open = "r", encoding = encoding)
   on.exit(close(con))
-  
+
   # Lines of a block that may not be complete yet (see the read loop below)
   carried <- character(0)
-  
+
   # Parse one station block and write raw Parquet to tmp_dir. Columns are
   # kept as-is from the .all file at this stage — normalisation happens in
   # pass 2 so the merge step has full metadata available.
   # Blocks that cannot be used (no "Time stamp," header, no data rows, no
   # Station Number) return without writing a file and without a message.
   write_block <- function(block) {
-    
+
     # Metadata lines look like "Key:<TAB>Value" and become a named list.
     meta_lines <- block[grepl(":\t", block) & !startsWith(block, "Time stamp")]
     meta <- do.call(c, lapply(strsplit(meta_lines, ":\t"), function(x) {
       stats::setNames(list(trimws(x[2L])), trimws(x[1L]))
     }))
-    
+
     header_i <- which(startsWith(block, "Time stamp,"))
     if (!length(header_i)) return(invisible(NULL))
-    
+
     data_rows <- block[(header_i + 1L):length(block)]
     data_rows <- data_rows[nzchar(data_rows)]
     if (!length(data_rows)) return(invisible(NULL))
@@ -117,7 +119,7 @@
     )
 
     data.table::setnames(dt, make.names(names(dt), unique = TRUE))
-    
+
     station_num <- meta[["Station Number"]]
     if (is.null(station_num) || is.na(station_num)) return(invisible(NULL))
 
@@ -166,13 +168,14 @@
     # One intermediate file per block. "__" separates station, parameter and
     # block number; station numbers and (sanitised) parameter codes never
     # contain it. Pass 2 groups blocks of the same series and concatenates them.
-    block_n <<- block_n + 1L
+    counter$block_n <- counter$block_n + 1L
     out_path <- file.path(tmp_dir, sprintf("%s__%s__%06d.parquet",
-                                           station_num, param_code, block_n))
+                                           station_num, param_code,
+                                           counter$block_n))
     arrow::write_parquet(dt, out_path)
     invisible(NULL)
   }
-  
+
   # -- Read the file in line chunks, splitting into station blocks -------------
   # A block begins at a "Station Site:" line and runs to the line before the
   # next one. A chunk boundary can fall inside a block, so only blocks followed
@@ -181,15 +184,15 @@
   # carried block is the final one and is written.
   repeat {
     raw <- readLines(con, n = chunk_size, warn = FALSE)
-    
+
     if (!length(raw)) {
       if (length(carried)) write_block(carried)
       break
     }
-    
+
     lines  <- c(carried, raw)
     starts <- which(startsWith(lines, "Station Site:"))
-    
+
     # No block start in this chunk: everything read so far belongs to the
     # current block, so keep accumulating. This is why memory is bounded by
     # the largest block rather than by chunk_size. (Lines before the first
@@ -198,11 +201,11 @@
       carried <- lines
       next
     }
-    
+
     for (i in seq_along(starts)) {
       block_end <- if (i < length(starts)) starts[i + 1L] - 1L else length(lines)
       block     <- lines[starts[i]:block_end]
-      
+
       if (i < length(starts)) {
         write_block(block)
       } else {
@@ -210,7 +213,7 @@
       }
     }
   }
-  
+
   invisible(NULL)
 }
 
@@ -368,18 +371,20 @@
     raw_param <- if ("parameter" %in% names(dt)) dt$parameter[1L] else NA_character_
     data_type <- .wiski_param_to_type(raw_param)
     if (is.na(data_type)) {
-      warning(sprintf(
-        "[%s] Unrecognised parameter '%s' - series skipped (supported: flow/discharge, level/stage, rainfall).",
-        station, raw_param), call. = FALSE)
+      msg <- paste0("[%s] Unrecognised parameter '%s' - series skipped ",
+                    "(supported: flow/discharge, level/stage, rainfall).")
+      warning(sprintf(msg, station, raw_param), call. = FALSE)
       skipped[[length(skipped) + 1L]] <- data.table::data.table(
-        station = station, parameter = raw_param, reason = "unrecognised parameter")
+        station = station, parameter = raw_param, reason = "unrecognised parameter"
+      )
       next
     }
     if (is.na(value_col)) {
       warning(sprintf("[%s] No usable value column - series skipped.", station),
               call. = FALSE)
       skipped[[length(skipped) + 1L]] <- data.table::data.table(
-        station = station, parameter = raw_param, reason = "no value column")
+        station = station, parameter = raw_param, reason = "no value column"
+      )
       next
     }
 
@@ -446,7 +451,8 @@
     # warning (recorded in `skipped`; the message above gives the count).
     if (nrow(pre_dt) == 0L) {
       skipped[[length(skipped) + 1L]] <- data.table::data.table(
-        station = station, parameter = raw_param, reason = "no values")
+        station = station, parameter = raw_param, reason = "no values"
+      )
       next
     }
 
@@ -463,7 +469,8 @@
         )
         warning(
           sprintf(
-            "[%s] %d off-grid timestamp(s) in 15-min series (not :00/:15/:30/:45); written to Bronze unchanged. Sample: %s",
+            paste0("[%s] %d off-grid timestamp(s) in 15-min series ",
+                   "(not :00/:15/:30/:45); written to Bronze unchanged. Sample: %s"),
             station, length(off_mins), paste(sample_ts, collapse = ", ")
           ),
           call. = FALSE
@@ -803,7 +810,7 @@ ingest_all_file <- function(path,
     # Matching is on the full key: an existing row for the same gauge with a
     # different data_type, or with NA data_type, does not count as present.
     is_new   <- !.registry_key(new_rows$gauge_id, new_rows$data_type) %in%
-                .registry_key(existing$gauge_id, existing$data_type)
+      .registry_key(existing$gauge_id, existing$data_type)
     to_add   <- new_rows[is_new]
     registry <- data.table::rbindlist(
       list(existing, to_add),

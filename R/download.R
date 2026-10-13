@@ -234,22 +234,22 @@
 #' )
 #' }
 download_hydrology <- function(
-    parameters       = c("rainfall", "flow", "level"),
-    from_date        = "2020-01-01",
-    to_date          = "2023-12-31",
-    method           = c("sync", "batch"),
-    output           = c("memory", "disk"),
-    out_dir          = NULL,
-    category         = "hydrometric",
-    register_path    = NULL,
-    period_name      = NULL,
-    value_type       = NULL,
-    observation_type = NULL,
-    wiski_ids        = NULL,
-    rloi_ids         = NULL,
-    notations        = NULL,
-    chunk_by_year    = TRUE,
-    max_wait_s       = 600
+  parameters       = c("rainfall", "flow", "level"),
+  from_date        = "2020-01-01",
+  to_date          = "2023-12-31",
+  method           = c("sync", "batch"),
+  output           = c("memory", "disk"),
+  out_dir          = NULL,
+  category         = "hydrometric",
+  register_path    = NULL,
+  period_name      = NULL,
+  value_type       = NULL,
+  observation_type = NULL,
+  wiski_ids        = NULL,
+  rloi_ids         = NULL,
+  notations        = NULL,
+  chunk_by_year    = TRUE,
+  max_wait_s       = 600
 ) {
 
   # -- Validate arguments and defaults ----------------------------------------
@@ -301,8 +301,8 @@ download_hydrology <- function(
   # single measure stays under the API row limit (run_sync() warns if hit).
   if (method == "sync") {
     chunks <- if (chunk_by_year) make_date_chunks(from_date, to_date)
-              else data.table::data.table(chunk_from = from_date,
-                                         chunk_to   = to_date)
+    else data.table::data.table(chunk_from = from_date,
+                                chunk_to   = to_date)
     message(sprintf("Method: sync | Output: %s | %d chunk(s).",
                     output, nrow(chunks)))
   } else {
@@ -375,8 +375,8 @@ download_hydrology <- function(
       # must be computed first. After this, `notation` means "measure ID" in
       # both branches, which is what the per-measure loop relies on.
       # (`measures` is a filtered copy, so these := do not touch stns_dt.)
-      measures[, site_id  := data.table::fifelse(
-        !is.na(wiskiID) & nzchar(wiskiID), wiskiID, notation)]
+      use_wiski <- !is.na(measures$wiskiID) & nzchar(measures$wiskiID)
+      measures[, site_id  := data.table::fifelse(use_wiski, wiskiID, notation)]
       measures[, notation := measure_notation]
 
     } else {
@@ -398,9 +398,8 @@ download_hydrology <- function(
       }
       # get_measures() returns station.wiskiID; use it as the site identifier
       if ("station.wiskiID" %in% names(measures)) {
-        measures[, site_id := data.table::fifelse(
-          !is.na(station.wiskiID) & nzchar(station.wiskiID),
-          station.wiskiID, notation)]
+        use_station <- !is.na(measures$station.wiskiID) & nzchar(measures$station.wiskiID)
+        measures[, site_id := data.table::fifelse(use_station, station.wiskiID, notation)]
       } else {
         measures[, site_id := notation]
       }
@@ -468,8 +467,8 @@ download_hydrology <- function(
       }
 
       if (output == "memory" &&
-          !is.null(result$data) &&
-          nrow(result$data) > 0) {
+            !is.null(result$data) &&
+            nrow(result$data) > 0) {
         measure_dts[[mid]] <- result$data
       }
 

@@ -207,7 +207,8 @@ test_that("fetch_from_wiski_all returns Bronze-schema rows for the requested typ
   expect_equal(unique(dt$data_type), "Q")
 
   expect_equal(nrow(suppressMessages(
-    fetch_from_wiski_all("2723TH", "rainfall", "2022-01-01", "2022-02-01"))), 0L)
+    fetch_from_wiski_all("2723TH", "rainfall", "2022-01-01", "2022-02-01")
+  )), 0L)
 })
 
 test_that("fetch_from_wiski_all handles a missing file and unset root", {
@@ -274,7 +275,8 @@ test_that("fetch_from_wiski_all(on_error = 'stop') fails for a missing file or s
   )
   # default still warns / returns empty
   expect_equal(nrow(suppressMessages(
-    fetch_from_wiski_all("2723TH", "level", "2022-01-01", "2022-02-01"))), 0L)
+    fetch_from_wiski_all("2723TH", "level", "2022-01-01", "2022-02-01")
+  )), 0L)
 })
 
 test_that("route_gauge(on_error = 'stop') makes a missing .all file a failure", {

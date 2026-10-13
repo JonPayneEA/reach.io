@@ -24,7 +24,7 @@
 # Flode Module: flode.io
 # Author:      JP
 # Created:     2026-03-20
-# Tier:        1 (Bronze / Read-only)
+# Tier:        1 - Bronze, read-only
 # Dependencies: data.table, arrow
 # ============================================================
 
@@ -105,9 +105,15 @@
 # every value is NA (min() of an all-NA character vector is an error, and a
 # register can lack period dates).
 #' @noRd
-.min_chr <- function(x) { x <- x[!is.na(x)]; if (length(x)) min(x) else NA_character_ }
+.min_chr <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x)) min(x) else NA_character_
+}
 #' @noRd
-.max_chr <- function(x) { x <- x[!is.na(x)]; if (length(x)) max(x) else NA_character_ }
+.max_chr <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x)) max(x) else NA_character_
+}
 
 # Infer the expected observation interval in seconds from a character label.
 #' @noRd
@@ -127,7 +133,7 @@
 
 
 # =============================================================================
-# list_available_gauges()
+# -- list_available_gauges() --
 # =============================================================================
 
 #' List all gauges available in the Bronze store
@@ -273,7 +279,7 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
 
 
 # =============================================================================
-# summarise_coverage()
+# -- summarise_coverage() --
 # =============================================================================
 
 #' Summarise date coverage for Bronze store gauges
@@ -353,9 +359,15 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
   # `site_id`, `category` and `data_type` are also column names: inside reg[...]
   # a bare symbol would resolve to the COLUMN and the filter would keep every
   # row, so .filter_rows() does the match outside the table scope.
-  if (!is.null(site_id)   && "site_id"   %in% names(reg)) reg <- .filter_rows(reg, "site_id", site_id)
-  if (!is.null(category)  && "category"  %in% names(reg)) reg <- .filter_rows(reg, "category", category)
-  if (!is.null(data_type) && "data_type" %in% names(reg)) reg <- .filter_rows(reg, "data_type", data_type)
+  if (!is.null(site_id) && "site_id" %in% names(reg)) {
+    reg <- .filter_rows(reg, "site_id", site_id)
+  }
+  if (!is.null(category) && "category" %in% names(reg)) {
+    reg <- .filter_rows(reg, "category", category)
+  }
+  if (!is.null(data_type) && "data_type" %in% names(reg)) {
+    reg <- .filter_rows(reg, "data_type", data_type)
+  }
 
   if (nrow(reg) == 0L) {
     message("No records match the specified filters.")
@@ -382,7 +394,9 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
       temporal_resolution[1L]
     } else if ("temporal_resolution" %in% names(.SD)) {
       temporal_resolution[1L]
-    } else NA_character_
+    } else {
+      NA_character_
+    }
 
     # Estimate expected observations from register metadata
     int_sec <- .interval_seconds(res)
@@ -397,7 +411,9 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
                                   as.POSIXct(start, tz = "UTC"),
                                   units = "secs")) + 86400
       as.integer(round(span / int_sec))
-    } else NA_integer_
+    } else {
+      NA_integer_
+    }
 
     list(
       start       = start,
@@ -421,7 +437,7 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
 
 
 # =============================================================================
-# check_gaps()
+# -- check_gaps() --
 # =============================================================================
 
 # Find all Silver Parquet files for one site_id + data_type combination.
@@ -555,7 +571,7 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
   # part in gap detection.
   ts_list <- lapply(pq_files, function(f) {
     dt <- data.table::as.data.table(.read_parquet(f,
-                                                         col_select = "timestamp"))
+                                                  col_select = "timestamp"))
     dt$timestamp
   })
   # Pool across files, suppliers, traces and years. unique() collapses the
@@ -573,10 +589,15 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
     # forced to seconds so the result is comparable with .interval_seconds().
     diffs    <- as.numeric(diff(all_ts), units = "secs")
     int_sec  <- as.integer(stats::median(diffs, na.rm = TRUE))
-    label    <- if (int_sec == 900L) "15min" else
-                if (int_sec == 3600L) "hourly" else
-                if (int_sec == 86400L) "daily" else
-                sprintf("%ds", int_sec)
+    label    <- if (int_sec == 900L) {
+      "15min"
+    } else if (int_sec == 3600L) {
+      "hourly"
+    } else if (int_sec == 86400L) {
+      "daily"
+    } else {
+      sprintf("%ds", int_sec)
+    }
     message(sprintf("  Inferred interval: %s (%d s).", label, int_sec))
   }
 
@@ -642,7 +663,7 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
 
 
 # =============================================================================
-# list_silver_gauges()
+# -- list_silver_gauges() --
 # =============================================================================
 
 #' List all gauges available in the Silver store
@@ -759,7 +780,7 @@ list_silver_gauges <- function(root, data_type = NULL) {
 
 
 # =============================================================================
-# summarise_silver_coverage()
+# -- summarise_silver_coverage() --
 # =============================================================================
 
 #' Summarise QC coverage for Silver store gauges
@@ -840,7 +861,7 @@ summarise_silver_coverage <- function(root, data_type = NULL, site_id = NULL) {
     tryCatch(
       data.table::as.data.table(
         .read_parquet(f,
-          col_select = c("timestamp", "site_id", "data_type", "qc_flag"))
+                      col_select = c("timestamp", "site_id", "data_type", "qc_flag"))
       ),
       error = function(e) NULL
     )
@@ -874,7 +895,7 @@ summarise_silver_coverage <- function(root, data_type = NULL, site_id = NULL) {
 
 
 # =============================================================================
-# check_silver_gaps()
+# -- check_silver_gaps() --
 # =============================================================================
 
 #' Identify missing timesteps for a Silver gauge series
@@ -957,8 +978,15 @@ check_silver_gaps <- function(root, site_id, data_type,
   } else {
     diffs <- as.numeric(diff(all_ts), units = "secs")
     s     <- as.integer(stats::median(diffs, na.rm = TRUE))
-    label <- if (s == 900L) "15min" else if (s == 3600L) "hourly" else
-             if (s == 86400L) "daily" else sprintf("%ds", s)
+    label <- if (s == 900L) {
+      "15min"
+    } else if (s == 3600L) {
+      "hourly"
+    } else if (s == 86400L) {
+      "daily"
+    } else {
+      sprintf("%ds", s)
+    }
     message(sprintf("  Inferred interval: %s (%d s).", label, s))
     s
   }

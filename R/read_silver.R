@@ -25,7 +25,7 @@
 # Flode Module: flode.io
 # Author:      [Hydrometric Data Lead]
 # Created:     2026-04-13
-# Tier:        2 (Silver / Read-only)
+# Tier:        2 - Silver, read-only
 # Dependencies: data.table, arrow, S7
 # ============================================================
 
@@ -91,9 +91,9 @@
   )
   # Attach qc_y_code if present (Flow/Q data) — NA for other data types
   readings[, qc_y_code := if ("qc_y_code" %in% names(dt))
-    dt$qc_y_code
-  else
-    NA_integer_]
+             dt$qc_y_code
+           else
+             NA_integer_]
   readings
 }
 
@@ -105,7 +105,7 @@
 # type are returned together, in directory-listing order.
 #' @noRd
 .locate_silver_files <- function(root, gauge_id, data_type,
-                                  start = NULL, end = NULL) {
+                                 start = NULL, end = NULL) {
   silver_root <- file.path(root, "silver")
   if (!dir.exists(silver_root))
     stop(sprintf("No Silver store found at: %s", silver_root))
@@ -172,7 +172,7 @@
 
 
 # =============================================================================
-# read_silver()
+# -- read_silver() --
 # =============================================================================
 
 #' Read QC-flagged data for a single gauge from the Silver store
@@ -351,7 +351,7 @@ read_silver <- function(root, gauge_id, data_type,
 
 
 # =============================================================================
-# read_silver_multi()
+# -- read_silver_multi() --
 # =============================================================================
 
 #' Read Silver data for multiple gauges
@@ -414,7 +414,7 @@ read_silver_multi <- function(root, gauge_ids, data_type, ...) {
 
 
 # =============================================================================
-# read_silver_catchment()
+# -- read_silver_catchment() --
 # =============================================================================
 
 #' Read Silver data for all gauges in a catchment
@@ -429,9 +429,10 @@ read_silver_multi <- function(root, gauge_ids, data_type, ...) {
 #' [build_gauge_registry()]) and the catchment column named by `catchment_col`;
 #' with the default `"catchment_id"`, a registry that has `catchment` instead
 #' (again as [build_gauge_registry()] writes it) is accepted. A gauge appears
-#' once per data type in the registry, so ids are de-duplicated. Gauges are matched on exact equality with
-#' `catchment_id`; the registry's `data_type` and `category` are not consulted,
-#' so the single `data_type` you pass is requested for every gauge. A catchment
+#' once per data type in the registry, so ids are de-duplicated. Gauges are
+#' matched on exact equality with `catchment_id`; the registry's `data_type`
+#' and `category` are not consulted, so the single `data_type` you pass is
+#' requested for every gauge. A catchment
 #' with no gauges in the registry is an error, whereas gauges that have no
 #' Silver data are skipped with a warning (see [read_silver_multi()]).
 #'
@@ -458,9 +459,9 @@ read_silver_multi <- function(root, gauge_ids, data_type, ...) {
 #'                               registry = reg)
 #' }
 read_silver_catchment <- function(root, catchment_id, data_type,
-                                   registry,
-                                   catchment_col = "catchment_id",
-                                   ...) {
+                                  registry,
+                                  catchment_col = "catchment_id",
+                                  ...) {
   # Registry shape checks and the catchment match live in one shared helper
   # (see .gauges_in_catchment() in package.R)
   gauge_ids <- .gauges_in_catchment(registry, catchment_id, catchment_col)

@@ -145,7 +145,8 @@ Adjusting spike sensitivity (e.g., for a naturally flashy catchment):
 
 ```{r promote-flashy}
 promote_to_silver(
-  bronze_data          = "data/hydrometric/bronze/hydrometric/EA/Q/2023/EA_39001_Q_20260115.parquet",
+  bronze_data          = file.path("data/hydrometric/bronze/hydrometric/EA/Q/2023",
+                                   "EA_39001_Q_20260115.parquet"),
   output_dir           = "data/hydrometric",
   relative_spike_ratio = 20,   # require 20× increase before flagging
   absolute_spike_k     = 8     # 8 MADs rather than 5
@@ -245,7 +246,9 @@ recording rain, suggesting a blocked or frozen tipping bucket:
 
 ```{r dry-run}
 # Build a wet-period mask from a reference (neighbouring) gauge
-silver_ref <- arrow::read_parquet("data/hydrometric/silver/hydrometric/P/2023/EA_REF_P_20260115.parquet")
+silver_ref <- arrow::read_parquet(
+  "data/hydrometric/silver/hydrometric/P/2023/EA_REF_P_20260115.parquet"
+)
 wet_mask   <- silver_ref$qc_value > 0.2  # reference records > 0.2 mm = "wet"
 
 flagged <- qc_p_dry_run(
@@ -432,7 +435,7 @@ objs <- read_silver_catchment(
   registry     = reg,
   start        = "2023-01-01",
   end          = "2023-12-31",
-  min_quality  = 3L   # Good + Suspect
+  min_quality  = 3L   # keep Good and Suspect
 )
 
 # Row counts per gauge

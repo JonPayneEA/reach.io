@@ -304,7 +304,7 @@ apply_bronze_schema <- function(dt,
   # and character-typed, so files from sources with and without quality codes
   # still share one schema.
   supplier_flag <- if (!is.null(supplier_flag_col) &&
-                       supplier_flag_col %in% names(dt)) {
+                         supplier_flag_col %in% names(dt)) {
     as.character(dt[[supplier_flag_col]])
   } else {
     NA_character_
@@ -652,7 +652,8 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
 #'   time_period_end     = "2024-12-31",
 #'   temporal_resolution = "15min",
 #'   method_of_receipt   = "API pull",
-#'   file_path           = "data/hydrometric/bronze/hydrometric/EA/Q/2024/EA_39001_Q_20260115.parquet"
+#'   file_path           = file.path("data/hydrometric/bronze/hydrometric/EA/Q/2024",
+#'                                   "EA_39001_Q_20260115.parquet")
 #' )
 #' }
 write_provenance_record <- function(register_path,

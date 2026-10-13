@@ -108,8 +108,8 @@ qc_negative <- function(value) {
 #' @return Logical vector; `TRUE` where a relative spike is detected.
 #' @noRd
 qc_relative_spike <- function(value,
-                               relative_spike_ratio = 10,
-                               min_baseline         = 0.1) {
+                              relative_spike_ratio = 10,
+                              min_baseline         = 0.1) {
   n       <- length(value)
   flag    <- logical(n)
   if (n < 2L) return(flag)
@@ -142,8 +142,8 @@ qc_relative_spike <- function(value,
 #' @return Logical vector; `TRUE` where an absolute spike is detected.
 #' @noRd
 qc_absolute_spike <- function(value,
-                               absolute_spike_k = 5,
-                               min_spike_flow   = 1.0) {
+                              absolute_spike_k = 5,
+                              min_spike_flow   = 1.0) {
   n    <- length(value)
   flag <- logical(n)
   if (n < 2L) return(flag)
@@ -181,8 +181,8 @@ qc_absolute_spike <- function(value,
 #' @return Logical vector; `TRUE` where a sudden drop is detected.
 #' @noRd
 qc_drop <- function(value,
-                     drop_ratio        = 0.9,
-                     min_flow_for_drop = 1.0) {
+                    drop_ratio        = 0.9,
+                    min_flow_for_drop = 1.0) {
   n       <- length(value)
   flag    <- logical(n)
   if (n < 2L) return(flag)
@@ -214,8 +214,8 @@ qc_drop <- function(value,
 #' @return Logical vector; `TRUE` where fluctuation is detected.
 #' @noRd
 qc_fluctuation <- function(value,
-                            fluctuation_window        = 8L,
-                            fluctuation_min_reversals = 4L) {
+                           fluctuation_window        = 8L,
+                           fluctuation_min_reversals = 4L) {
   n <- length(value)
   flag <- logical(n)
   if (n < fluctuation_window + 1L) return(flag)
@@ -256,8 +256,8 @@ qc_fluctuation <- function(value,
 #' @return Logical vector; `TRUE` where low-flow truncation is detected.
 #' @noRd
 qc_truncation_low <- function(value,
-                               truncation_min_run      = 4L,
-                               truncation_low_quantile = 0.1) {
+                              truncation_min_run      = 4L,
+                              truncation_low_quantile = 0.1) {
   n    <- length(value)
   flag <- logical(n)
   if (n < truncation_min_run) return(flag)
@@ -269,8 +269,8 @@ qc_truncation_low <- function(value,
 
   for (i in seq_along(r$lengths)) {
     if (!is.na(r$values[i]) &&
-        r$lengths[i] >= truncation_min_run &&
-        r$values[i] <= threshold) {
+          r$lengths[i] >= truncation_min_run &&
+          r$values[i] <= threshold) {
       flag[starts[i]:ends[i]] <- TRUE
     }
   }
@@ -293,8 +293,8 @@ qc_truncation_low <- function(value,
 #' @return Logical vector; `TRUE` where high-flow truncation is detected.
 #' @noRd
 qc_truncation_high <- function(value,
-                                truncation_min_run       = 4L,
-                                truncation_high_quantile = 0.9) {
+                               truncation_min_run       = 4L,
+                               truncation_high_quantile = 0.9) {
   n    <- length(value)
   flag <- logical(n)
   if (n < truncation_min_run) return(flag)
@@ -306,8 +306,8 @@ qc_truncation_high <- function(value,
 
   for (i in seq_along(r$lengths)) {
     if (!is.na(r$values[i]) &&
-        r$lengths[i] >= truncation_min_run &&
-        r$values[i] >= threshold) {
+          r$lengths[i] >= truncation_min_run &&
+          r$values[i] >= threshold) {
       flag[starts[i]:ends[i]] <- TRUE
     }
   }
@@ -369,8 +369,8 @@ qc_h_range <- function(value, min_datum = -Inf, max_credible = Inf) {
 #' @return Logical vector; \code{TRUE} at spike and return positions.
 #' @noRd
 qc_h_spike <- function(value,
-                        spike_k             = 5,
-                        spike_return_window = 3L) {
+                       spike_k             = 5,
+                       spike_return_window = 3L) {
   n    <- length(value)
   flag <- logical(n)
   if (n < 3L) return(flag)
@@ -385,7 +385,7 @@ qc_h_spike <- function(value,
   for (s in up_spikes) {
     window_end <- min(s + as.integer(spike_return_window), n - 1L)
     if (window_end >= s + 1L &&
-        any(dv[(s + 1L):window_end] < -threshold * 0.5, na.rm = TRUE)) {
+          any(dv[(s + 1L):window_end] < -threshold * 0.5, na.rm = TRUE)) {
       flag[(s + 1L):(window_end + 1L)] <- TRUE
     }
   }
@@ -409,8 +409,8 @@ qc_h_spike <- function(value,
 #'   exceeded (the destination of the step, not the origin).
 #' @noRd
 qc_h_rate_of_change <- function(value,
-                                 max_rise_per_step = 0.5,
-                                 max_fall_per_step = 0.5) {
+                                max_rise_per_step = 0.5,
+                                max_fall_per_step = 0.5) {
   n    <- length(value)
   flag <- logical(n)
   if (n < 2L) return(flag)
@@ -472,7 +472,7 @@ qc_h_flatline <- function(value, flatline_min_run = 4L) {
 #'
 #' @export
 qc_h_stage_flow_consistency <- function(stage, flow,
-                                         consistency_window = 4L) {
+                                        consistency_window = 4L) {
   n <- length(stage)
   flag <- logical(n)
   if (length(flow) != n)
@@ -484,8 +484,8 @@ qc_h_stage_flow_consistency <- function(stage, flow,
 
   nonzero <- !is.na(d_stage) & !is.na(d_flow)
   incon   <- nonzero &
-             sign(d_stage) != 0L & sign(d_flow) != 0L &
-             sign(d_stage) != sign(d_flow)
+    sign(d_stage) != 0L & sign(d_flow) != 0L &
+    sign(d_stage) != sign(d_flow)
 
   w <- as.integer(consistency_window)
   for (i in seq(w, n - 1L)) {
@@ -514,8 +514,8 @@ qc_h_stage_flow_consistency <- function(stage, flow,
 #'   datum shift is detected.
 #' @noRd
 qc_h_datum_shift <- function(value,
-                              shift_window    = 24L,
-                              shift_threshold = 0.1) {
+                             shift_window    = 24L,
+                             shift_threshold = 0.1) {
   n    <- length(value)
   flag <- logical(n)
   w    <- as.integer(shift_window)
@@ -556,15 +556,15 @@ qc_h_datum_shift <- function(value,
 #' @return Integer vector of H-digit codes (0–5), one per observation.
 #' @noRd
 apply_h_code <- function(value,
-                          min_datum           = -Inf,
-                          max_credible        =  Inf,
-                          spike_k             = 5,
-                          spike_return_window = 3L,
-                          max_rise_per_step   = 0.5,
-                          max_fall_per_step   = 0.5,
-                          flatline_min_run    = 4L,
-                          shift_window        = 24L,
-                          shift_threshold     = 0.1) {
+                         min_datum           = -Inf,
+                         max_credible        =  Inf,
+                         spike_k             = 5,
+                         spike_return_window = 3L,
+                         max_rise_per_step   = 0.5,
+                         max_fall_per_step   = 0.5,
+                         flatline_min_run    = 4L,
+                         shift_window        = 24L,
+                         shift_threshold     = 0.1) {
   rng <- qc_h_range(value, min_datum, max_credible)
   spk <- qc_h_spike(value, spike_k, spike_return_window)
   roc <- qc_h_rate_of_change(value, max_rise_per_step, max_fall_per_step)
@@ -666,8 +666,8 @@ qc_p_intensity <- function(value, max_intensity_15min = 50) {
 #'   that exceed the daily cap.
 #' @noRd
 qc_p_daily_cap <- function(value,
-                            max_daily_mm  = 300,
-                            steps_per_day = 96L) {
+                           max_daily_mm  = 300,
+                           steps_per_day = 96L) {
   n    <- length(value)
   flag <- logical(n)
   s    <- as.integer(steps_per_day)
@@ -744,8 +744,8 @@ qc_p_dry_run <- function(value, wet_period_mask, dry_run_min_steps = 12L) {
 #' @return Logical vector; \code{TRUE} at the overflow timestep.
 #' @noRd
 qc_p_reset <- function(value,
-                        reset_spike_k       = 10,
-                        reset_return_window = 2L) {
+                       reset_spike_k       = 10,
+                       reset_return_window = 2L) {
   n    <- length(value)
   flag <- logical(n)
   if (n < 3L) return(flag)
@@ -760,7 +760,7 @@ qc_p_reset <- function(value,
   for (s in spikes) {
     idx_end <- min(s + as.integer(reset_return_window), n)
     if (idx_end > s &&
-        any(value[(s + 1L):idx_end] <= dv_med + dv_mad, na.rm = TRUE)) {
+          any(value[(s + 1L):idx_end] <= dv_med + dv_mad, na.rm = TRUE)) {
       flag[s] <- TRUE
     }
   }
@@ -789,8 +789,8 @@ qc_p_reset <- function(value,
 #'
 #' @export
 qc_p_temporal_consistency <- function(value, neighbours,
-                                       isolation_threshold = 0.2,
-                                       isolation_fraction  = 0.8) {
+                                      isolation_threshold = 0.2,
+                                      isolation_fraction  = 0.8) {
   n <- length(value)
   flag <- logical(n)
 
@@ -808,7 +808,7 @@ qc_p_temporal_consistency <- function(value, neighbours,
   })
 
   flag <- !is.na(value) & value > isolation_threshold &
-          !is.na(nbr_zero_frac) & nbr_zero_frac >= isolation_fraction
+    !is.na(nbr_zero_frac) & nbr_zero_frac >= isolation_fraction
   flag
 }
 
@@ -835,11 +835,11 @@ qc_p_temporal_consistency <- function(value, neighbours,
 #' @return Integer vector of P-digit codes (0–5), one per observation.
 #' @noRd
 apply_p_code <- function(value,
-                          max_intensity_15min = 50,
-                          max_daily_mm        = 300,
-                          steps_per_day       = 96L,
-                          reset_spike_k       = 10,
-                          reset_return_window = 2L) {
+                         max_intensity_15min = 50,
+                         max_daily_mm        = 300,
+                         steps_per_day       = 96L,
+                         reset_spike_k       = 10,
+                         reset_return_window = 2L) {
   neg <- qc_p_negative(value)
   int <- qc_p_intensity(value, max_intensity_15min)
   cap <- qc_p_daily_cap(value, max_daily_mm, steps_per_day)
@@ -910,18 +910,18 @@ p_to_qc_flag <- function(p) {
 #' @return Integer vector of Y-digit codes (0–9), one per observation.
 #' @noRd
 apply_y_digit <- function(value,
-                           allow_negative            = FALSE,
-                           relative_spike_ratio      = 10,
-                           min_baseline              = 0.1,
-                           absolute_spike_k          = 5,
-                           min_spike_flow            = 1.0,
-                           drop_ratio                = 0.9,
-                           min_flow_for_drop         = 1.0,
-                           fluctuation_window        = 8L,
-                           fluctuation_min_reversals = 4L,
-                           truncation_min_run        = 4L,
-                           truncation_low_quantile   = 0.1,
-                           truncation_high_quantile  = 0.9) {
+                          allow_negative            = FALSE,
+                          relative_spike_ratio      = 10,
+                          min_baseline              = 0.1,
+                          absolute_spike_k          = 5,
+                          min_spike_flow            = 1.0,
+                          drop_ratio                = 0.9,
+                          min_flow_for_drop         = 1.0,
+                          fluctuation_window        = 8L,
+                          fluctuation_min_reversals = 4L,
+                          truncation_min_run        = 4L,
+                          truncation_low_quantile   = 0.1,
+                          truncation_high_quantile  = 0.9) {
 
   neg <- qc_negative(value)
   rsp <- qc_relative_spike(value, relative_spike_ratio, min_baseline)
@@ -1065,7 +1065,7 @@ snap_offgrid_timestamps <- function(dt) {
   }
 
   on_grid  <- dt[!off_grid_mask]
-  off_grid <- dt[ off_grid_mask]
+  off_grid <- dt[off_grid_mask]
 
   # -- Nearest 15-min boundary for each off-grid row --------------------------
   off_grid[, snap_ts := as.POSIXct(
@@ -1334,41 +1334,41 @@ silver_path <- function(output_dir, category, data_type, dataset_id,
 #' )
 #' }
 promote_to_silver <- function(bronze_data,
-                               output_dir,
-                               category                  = "hydrometric",
-                               # --- Flow (Q) parameters ---
-                               allow_negative            = FALSE,
-                               relative_spike_ratio      = 10,
-                               min_baseline              = 0.1,
-                               absolute_spike_k          = 5,
-                               min_spike_flow            = 1.0,
-                               drop_ratio                = 0.9,
-                               min_flow_for_drop         = 1.0,
-                               fluctuation_window        = 8L,
-                               fluctuation_min_reversals = 4L,
-                               truncation_min_run        = 4L,
-                               truncation_low_quantile   = 0.1,
-                               truncation_high_quantile  = 0.9,
-                               # --- Stage / Level (H) parameters ---
-                               min_datum                 = -Inf,
-                               max_credible              =  Inf,
-                               spike_k                   = 5,
-                               spike_return_window       = 3L,
-                               max_rise_per_step         = 0.5,
-                               max_fall_per_step         = 0.5,
-                               flatline_min_run          = 4L,
-                               shift_window              = 24L,
-                               shift_threshold           = 0.1,
-                               # --- Rainfall (P) parameters ---
-                               max_intensity_15min       = 50,
-                               max_daily_mm              = 300,
-                               steps_per_day             = 96L,
-                               reset_spike_k             = 10,
-                               reset_return_window       = 2L,
-                               # --- Pipeline options ---
-                               write_output              = TRUE,
-                               dedup                     = TRUE,
-                               annotate_gaps             = TRUE) {
+                              output_dir,
+                              category                  = "hydrometric",
+                              # --- Flow (Q) parameters ---
+                              allow_negative            = FALSE,
+                              relative_spike_ratio      = 10,
+                              min_baseline              = 0.1,
+                              absolute_spike_k          = 5,
+                              min_spike_flow            = 1.0,
+                              drop_ratio                = 0.9,
+                              min_flow_for_drop         = 1.0,
+                              fluctuation_window        = 8L,
+                              fluctuation_min_reversals = 4L,
+                              truncation_min_run        = 4L,
+                              truncation_low_quantile   = 0.1,
+                              truncation_high_quantile  = 0.9,
+                              # --- Stage / Level (H) parameters ---
+                              min_datum                 = -Inf,
+                              max_credible              =  Inf,
+                              spike_k                   = 5,
+                              spike_return_window       = 3L,
+                              max_rise_per_step         = 0.5,
+                              max_fall_per_step         = 0.5,
+                              flatline_min_run          = 4L,
+                              shift_window              = 24L,
+                              shift_threshold           = 0.1,
+                              # --- Rainfall (P) parameters ---
+                              max_intensity_15min       = 50,
+                              max_daily_mm              = 300,
+                              steps_per_day             = 96L,
+                              reset_spike_k             = 10,
+                              reset_return_window       = 2L,
+                              # --- Pipeline options ---
+                              write_output              = TRUE,
+                              dedup                     = TRUE,
+                              annotate_gaps             = TRUE) {
 
   # -- Trial warning -----------------------------------------------------------
   warning(

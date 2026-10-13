@@ -38,7 +38,8 @@
 #' - **Missing data.** An unknown gauge, or a gauge with no matching measure,
 #'   gives a warning (the latter lists the resolutions that do exist) and an
 #'   empty `data.table` with `on_error = "warn"`; with `"stop"` it is an error,
-#'   so an orchestrator records the gauge as `FAILED` rather than `EMPTY`. A chunk whose request fails is handled
+#'   so an orchestrator records the gauge as `FAILED` rather than `EMPTY`. A
+#'   chunk whose request fails is handled
 #'   according to `on_error`: with `"warn"` (the default) each failure is a
 #'   warning, the remaining chunks are still fetched and the data returned is
 #'   incomplete; with `"stop"` all chunks are still attempted and then an error
@@ -104,7 +105,7 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date,
   config <- PARAMETER_CONFIG[[data_type]]
 
   measures_dt <- stn[parameter == data_type &
-                     period    == config$default_period]
+                       period    == config$default_period]
   # rainfall has no value_type in its config (a single "total" type exists),
   # so the value_type filter is applied only where one is configured.
   if (!is.null(config$value_type)) {
@@ -183,8 +184,10 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date,
   # and no time-of-occurrence (e.g. time of peak flow) is available from
   # the HDE readings endpoint — derive it from the 15-min series if needed.
   has_datetime <- "dateTime" %in% names(dt) &&
-                  any(!is.na(dt[["dateTime"]]))
-  ts_col <- if (has_datetime) "dateTime" else {
+    any(!is.na(dt[["dateTime"]]))
+  ts_col <- if (has_datetime) {
+    "dateTime"
+  } else {
     warning(sprintf(
       "[HDE] No valid dateTime in response for %s - falling back to date-only timestamps.",
       gauge_id
@@ -423,14 +426,14 @@ route_gauge <- function(gauge_row, start_date, end_date,
     switch(
       gauge_row$source_system,
       "HDE"       = fetch_from_hde(
-                      gauge_row$gauge_id, gauge_row$data_type,
-                      start_date, end_date, on_error = on_error),
+                                   gauge_row$gauge_id, gauge_row$data_type,
+                                   start_date, end_date, on_error = on_error),
       "WISKI"     = fetch_from_wiski(
-                      gauge_row$gauge_id, gauge_row$data_type,
-                      start_date, end_date),
+                                     gauge_row$gauge_id, gauge_row$data_type,
+                                     start_date, end_date),
       "WISKI_ALL" = fetch_from_wiski_all(
-                      gauge_row$gauge_id, gauge_row$data_type,
-                      start_date, end_date, on_error = on_error),
+                                         gauge_row$gauge_id, gauge_row$data_type,
+                                         start_date, end_date, on_error = on_error),
       stop("No client for source_system: ", gauge_row$source_system)
     )
   }, error = function(e) {

@@ -52,9 +52,9 @@ range of the aligned data.}
 parameter types and \code{output_units} when \code{NULL}.}
 }
 \value{
-A \code{ggplot} object (requires the suggested package 'ggplot2'). The aligned, cumulative \code{data.table} used
-to build the plot is attached as \code{attr(p, "data")} for inspection or
-further processing.
+A \code{ggplot} object (requires the suggested package 'ggplot2'). The
+aligned, cumulative \code{data.table} used to build the plot is attached as
+\code{attr(p, "data")} for inspection or further processing.
 }
 \description{
 Builds two cumulative volume series — one for each axis — from any

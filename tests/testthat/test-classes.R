@@ -186,7 +186,7 @@ test_that("FlodeHydroData prints formatted output", {
 test_that("FlodePotEvapData prints formatted output", {
   dt  <- make_pe_dt()
   obj <- FlodePotEvap_Daily(readings = dt, source_name = "CHESS-PE",
-                       from_date = "2022-01-01", to_date = "2022-01-10")
+                            from_date = "2022-01-01", to_date = "2022-01-10")
   out <- capture.output(print(obj))
   expect_true(any(grepl("FlodePotEvap_Daily", out)))
   expect_true(any(grepl("CHESS-PE", out)))

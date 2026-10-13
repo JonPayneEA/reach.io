@@ -36,9 +36,10 @@
   # Warn once for the whole vector (not per element) and carry on with NA for
   # the offending entries; callers filter on parameter, so NA rows drop out.
   if (any(!ok)) {
-    warning(sprintf(
-      "%d measure notation(s) did not match the expected '<uuid>-<parameter>-<type>-<period>-...' form; parameter/value_type/period set to NA.",
-      sum(!ok)), call. = FALSE)
+    msg <- paste0("%d measure notation(s) did not match the expected ",
+                  "'<uuid>-<parameter>-<type>-<period>-...' form; ",
+                  "parameter/value_type/period set to NA.")
+    warning(sprintf(msg, sum(!ok)), call. = FALSE)
   }
   rest  <- sub(uuid, "", x)
   parts <- strsplit(rest, "-", fixed = TRUE)
@@ -298,8 +299,8 @@ find_stations <- function(names     = NULL,
     m[, "@id", with = FALSE]
   }
   dt <- dt[, first_id(measures),
-             by = .(label, notation, wiskiID, RLOIid,
-                    lat, long, easting, northing, riverName)]
+           by = .(label, notation, wiskiID, RLOIid,
+                  lat, long, easting, northing, riverName)]
   if (nrow(dt) == 0L) return(data.table::data.table())
   # "@id" is a full URI ending in the notation, so basename() strips the path.
   data.table::setnames(dt, "@id", "measure_notation")
@@ -316,7 +317,7 @@ find_stations <- function(names     = NULL,
   # Restrict to the three parameters the package handles (those with a Bronze
   # data type); any other measure a station lists is dropped. NA parameters
   # from unparseable notations are dropped here too.
-  return(dt[parameter %in% c("rainfall", "flow", "level")])
+  dt[parameter %in% c("rainfall", "flow", "level")]
 }
 
 
@@ -419,5 +420,5 @@ get_measures <- function(parameter   = c("rainfall", "flow", "level"),
   # resolved the right-hand side to a response column of that name if the API
   # ever returned one (see .filter_rows() in package.R for the scoping rule).
   data.table::set(dt, j = "parameter", value = parameter)
-  return(dt[])
+  dt[]
 }

@@ -12,7 +12,7 @@ make_limbs <- function() {
     upper    = c(0.095, 2.000,   Inf),
     C        = c(12.2495, 23.252, 23.252),
     a        = c(-0.003, -0.098, -0.098),
-    b        = c( 1.641,  2.706,  2.706),
+    b        = c(1.641,  2.706,  2.706),
     doubtful = c(FALSE,   FALSE,  TRUE)
   )
 }
@@ -128,9 +128,9 @@ test_that("FlodeRatingSet wraps a single FlodeRatingCurve", {
 test_that("FlodeRatingSet wraps a list of RatingCurves", {
   limbs <- make_limbs()
   rc1 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2019-01-01"),
-                     valid_to = as.Date("2020-12-31"), station_id = "X")
+                          valid_to = as.Date("2020-12-31"), station_id = "X")
   rc2 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2021-01-01"),
-                     station_id = "X")
+                          station_id = "X")
   rs <- FlodeRatingSet(curves = list(rc1, rc2), station_id = "X")
   expect_equal(length(rs@curves), 2L)
 })
@@ -138,9 +138,9 @@ test_that("FlodeRatingSet wraps a list of RatingCurves", {
 test_that("FlodeRatingSet rejects overlapping validity periods", {
   limbs <- make_limbs()
   rc1 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2019-01-01"),
-                     valid_to = as.Date("2021-12-31"), station_id = "X")
+                          valid_to = as.Date("2021-12-31"), station_id = "X")
   rc2 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2021-01-01"),
-                     station_id = "X")
+                          station_id = "X")
   expect_error(FlodeRatingSet(curves = list(rc1, rc2)), "overlapping")
 })
 
@@ -224,9 +224,9 @@ test_that("apply_rating with FlodeLevel_15min returns FlodeFlow_15min", {
 test_that("apply_rating with FlodeRatingSet dispatches correctly", {
   limbs <- make_limbs()
   rc1 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2019-01-01"),
-                     valid_to = as.Date("2020-06-30"), station_id = "X")
+                          valid_to = as.Date("2020-06-30"), station_id = "X")
   rc2 <- FlodeRatingCurve(limbs = limbs, valid_from = as.Date("2020-07-01"),
-                     station_id = "X")
+                          station_id = "X")
   rs    <- FlodeRatingSet(curves = list(rc1, rc2), station_id = "X")
   level <- make_level_daily(c(0.5, 1.0, 1.5))
   flow  <- apply_rating(level, rs)

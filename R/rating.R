@@ -119,7 +119,7 @@ NULL
 # (equal to lower[i+1] within the 1e-9 the validator allows), with (h - a)
 # floored at 0 as in .rate_stage().
 #' @noRd
-.junction_Q <- function(limbs, i) {
+.junction_q <- function(limbs, i) {
   h <- limbs$upper[i]  # == limbs$lower[i + 1]
   list(
     Q_lower = limbs$C[i]     * max(h - limbs$a[i],     0)^limbs$b[i],
@@ -380,8 +380,10 @@ FlodeRatingSet <- S7::new_class(
     n <- length(self@curves)
     for (i in seq_len(n - 1L)) {
       for (j in seq(i + 1L, n)) {
-        fi <- froms[i]; ti <- if (is.na(tos[i])) Inf else tos[i]
-        fj <- froms[j]; tj <- if (is.na(tos[j])) Inf else tos[j]
+        fi <- froms[i]
+        ti <- if (is.na(tos[i])) Inf else tos[i]
+        fj <- froms[j]
+        tj <- if (is.na(tos[j])) Inf else tos[j]
         if (!is.na(fi) && !is.na(fj)) {
           if (fi <= tj && fj <= ti) {
             return(sprintf(
@@ -398,7 +400,7 @@ FlodeRatingSet <- S7::new_class(
 
 
 # =============================================================================
-# apply_rating()
+# -- apply_rating() --
 # =============================================================================
 
 #' Convert stage readings to rated discharge using a rating curve
@@ -483,7 +485,7 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
 #' @noRd
 .apply_rating_curve <- function(level, rating, measure_notation = "rated_flow") {
   if (!S7::S7_inherits(level, FlodeLevel_Daily) &&
-      !S7::S7_inherits(level, FlodeLevel_15min)) {
+        !S7::S7_inherits(level, FlodeLevel_15min)) {
     stop("`level` must be a FlodeLevel_Daily or FlodeLevel_15min object.")
   }
 
@@ -514,19 +516,19 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
 
   if (S7::S7_inherits(level, FlodeLevel_Daily)) {
     FlodeFlow_Daily(readings  = dt,
-               from_date = level@from_date,
-               to_date   = level@to_date)
+                    from_date = level@from_date,
+                    to_date   = level@to_date)
   } else {
     FlodeFlow_15min(readings  = dt,
-               from_date = level@from_date,
-               to_date   = level@to_date)
+                    from_date = level@from_date,
+                    to_date   = level@to_date)
   }
 }
 
 #' @noRd
 .apply_rating_set <- function(level, rating, measure_notation = "rated_flow") {
   if (!S7::S7_inherits(level, FlodeLevel_Daily) &&
-      !S7::S7_inherits(level, FlodeLevel_15min)) {
+        !S7::S7_inherits(level, FlodeLevel_15min)) {
     stop("`level` must be a FlodeLevel_Daily or FlodeLevel_15min object.")
   }
 
@@ -569,7 +571,8 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
   n_below <- sum(is.na(q_out) & !is.na(stage) & !is.na(curve_idx))
   if (n_below > 0L) {
     warning(sprintf(
-      "%d observation(s) had stage below the lowest limb boundary of their applicable curve and were rated as NA.",
+      paste0("%d observation(s) had stage below the lowest limb boundary of ",
+             "their applicable curve and were rated as NA."),
       n_below
     ))
   }
@@ -581,18 +584,18 @@ apply_rating <- function(level, rating, measure_notation = "rated_flow") {
 
   if (S7::S7_inherits(level, FlodeLevel_Daily)) {
     FlodeFlow_Daily(readings  = dt,
-               from_date = level@from_date,
-               to_date   = level@to_date)
+                    from_date = level@from_date,
+                    to_date   = level@to_date)
   } else {
     FlodeFlow_15min(readings  = dt,
-               from_date = level@from_date,
-               to_date   = level@to_date)
+                    from_date = level@from_date,
+                    to_date   = level@to_date)
   }
 }
 
 
 # =============================================================================
-# check_limb_continuity()
+# -- check_limb_continuity() --
 # =============================================================================
 
 #' Check that rating limbs connect at their shared boundaries
@@ -655,9 +658,9 @@ S7::method(check_limb_continuity, FlodeRatingCurve) <- function(x, tol_pct = 1) 
     return(invisible(data.table::data.table()))
   }
 
-  # One row per junction (limb i / i + 1); .junction_Q() evaluates both sides.
+  # One row per junction (limb i / i + 1); .junction_q() evaluates both sides.
   rows <- lapply(seq_len(n - 1L), function(i) {
-    jq      <- .junction_Q(limbs, i)
+    jq      <- .junction_q(limbs, i)
     gap     <- jq$Q_upper - jq$Q_lower
     # Unsigned and relative to the LOWER limb's Q. Undefined when that Q is 0;
     # the NA then fails the `connected` test below, so it counts as not connected.
@@ -696,7 +699,7 @@ S7::method(check_limb_continuity, FlodeRatingCurve) <- function(x, tol_pct = 1) 
 
 
 # =============================================================================
-# fix_limb_continuity()
+# -- fix_limb_continuity() --
 # =============================================================================
 
 #' Adjust rating limb C parameters to enforce continuity at junctions
@@ -761,12 +764,12 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
   message("Adjusting C parameters (anchor = limb 1, propagating upward):")
 
   # Walk the junctions from the bottom. `limbs` is updated inside the loop, so
-  # .junction_Q() at junction i sees limb i's C as already corrected at the
+  # .junction_q() at junction i sees limb i's C as already corrected at the
   # previous step - this is how a change propagates upward from the anchor.
   for (i in seq_len(n - 1L)) {
-    jq    <- .junction_Q(limbs, i)   # uses current (possibly already adjusted) C[i]
+    jq    <- .junction_q(limbs, i)   # uses current (possibly already adjusted) C[i]
     # Limb i + 1 must give Q_lower at the junction stage h:
-    #   C_new * (h - a)^b = Q_lower   =>   C_new = Q_lower / (h - a)^b
+    #   c_new * (h - a)^b = Q_lower   =>   c_new = Q_lower / (h - a)^b
     # denom is that power term.
     denom <- max(jq$h - limbs$a[i + 1L], 0)^limbs$b[i + 1L]
 
@@ -781,7 +784,7 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
       next
     }
 
-    # A zero (or negative) lower-limb Q would force C_new to 0, which
+    # A zero (or negative) lower-limb Q would force c_new to 0, which
     # FlodeRatingCurve rejects (C must be > 0).
     if (jq$Q_lower <= 0) {
       warning(sprintf(
@@ -791,14 +794,14 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
       next
     }
 
-    C_old <- limbs$C[i + 1L]
-    C_new <- jq$Q_lower / denom
-    limbs$C[i + 1L] <- C_new
+    c_old <- limbs$C[i + 1L]
+    c_new <- jq$Q_lower / denom
+    limbs$C[i + 1L] <- c_new
 
-    pct_change <- (C_new - C_old) / C_old * 100
+    pct_change <- (c_new - c_old) / c_old * 100
     message(sprintf(
       "  Limb %d -> %d  h = %.4g m:  C  %.6g  ->  %.6g  (%+.3f%%)",
-      i, i + 1L, jq$h, C_old, C_new, pct_change
+      i, i + 1L, jq$h, c_old, c_new, pct_change
     ))
   }
 
@@ -821,7 +824,7 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
 # Registered as the S3 print method for "reach.io::FlodeRatingCurve" in
 # .onLoad() (package.R): S7's print.S7_object calls str() directly and ignores
 # S7::method(print, ...) assignments.
-.print_RatingCurve <- function(x, ...) {
+.print_rating_curve <- function(x, ...) {
   vf <- if (inherits(x@valid_from, "Date")) format(x@valid_from) else "-"
   vt <- if (inherits(x@valid_to,   "Date")) format(x@valid_to)   else "open"
 
@@ -858,7 +861,7 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
 }
 
 # =============================================================================
-# apply_inverse_rating()
+# -- apply_inverse_rating() --
 # =============================================================================
 
 # Vectorised inverse rating: given a numeric vector of flow values q and a
@@ -920,7 +923,7 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
 .apply_inverse_rating_curve <- function(flow, rating,
                                         measure_notation = "rated_level") {
   if (!S7::S7_inherits(flow, FlodeFlow_Daily) &&
-      !S7::S7_inherits(flow, FlodeFlow_15min)) {
+        !S7::S7_inherits(flow, FlodeFlow_15min)) {
     stop("`flow` must be a FlodeFlow_Daily or FlodeFlow_15min object.")
   }
 
@@ -936,12 +939,12 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
 
   if (S7::S7_inherits(flow, FlodeFlow_Daily)) {
     FlodeLevel_Daily(readings  = dt,
-                from_date = flow@from_date,
-                to_date   = flow@to_date)
+                     from_date = flow@from_date,
+                     to_date   = flow@to_date)
   } else {
     FlodeLevel_15min(readings  = dt,
-                from_date = flow@from_date,
-                to_date   = flow@to_date)
+                     from_date = flow@from_date,
+                     to_date   = flow@to_date)
   }
 }
 
@@ -949,7 +952,7 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
 .apply_inverse_rating_set <- function(flow, rating,
                                       measure_notation = "rated_level") {
   if (!S7::S7_inherits(flow, FlodeFlow_Daily) &&
-      !S7::S7_inherits(flow, FlodeFlow_15min)) {
+        !S7::S7_inherits(flow, FlodeFlow_15min)) {
     stop("`flow` must be a FlodeFlow_Daily or FlodeFlow_15min object.")
   }
 
@@ -965,7 +968,8 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
   n_unmatched <- sum(is.na(curve_idx))
   if (n_unmatched > 0L) {
     warning(sprintf(
-      "%d observation(s) fall outside all FlodeRatingCurve validity windows and were inverted as NA.",
+      paste0("%d observation(s) fall outside all FlodeRatingCurve validity ",
+             "windows and were inverted as NA."),
       n_unmatched
     ))
   }
@@ -985,12 +989,12 @@ S7::method(fix_limb_continuity, FlodeRatingCurve) <- function(x) {
 
   if (S7::S7_inherits(flow, FlodeFlow_Daily)) {
     FlodeLevel_Daily(readings  = dt,
-                from_date = flow@from_date,
-                to_date   = flow@to_date)
+                     from_date = flow@from_date,
+                     to_date   = flow@to_date)
   } else {
     FlodeLevel_15min(readings  = dt,
-                from_date = flow@from_date,
-                to_date   = flow@to_date)
+                     from_date = flow@from_date,
+                     to_date   = flow@to_date)
   }
 }
 
@@ -1083,8 +1087,8 @@ apply_inverse_rating <- function(flow, rating,
 # =============================================================================
 
 # Registered as the S3 print method for "reach.io::FlodeRatingSet" in .onLoad()
-# (package.R), for the same reason as .print_RatingCurve().
-.print_RatingSet <- function(x, ...) {
+# (package.R), for the same reason as .print_rating_curve().
+.print_rating_set <- function(x, ...) {
   fmt_date <- function(d) if (inherits(d, "Date")) format(d) else "-"
 
   cat(sprintf(

@@ -39,7 +39,7 @@
 # Flode Module: flode.io
 # Author:      JP
 # Created:     2026-03-19
-# Tier:        3 (Gold / Register)
+# Tier:        3 - Gold, register
 # Dependencies: S7, data.table, arrow
 # ============================================================
 
@@ -132,7 +132,7 @@ NULL
 
 
 # =============================================================================
-# save_rating()
+# -- save_rating() --
 # =============================================================================
 
 #' Save a rating curve to the hydrometric ratings store
@@ -285,13 +285,13 @@ save_rating <- S7::new_generic("save_rating", "x")
 }
 
 S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
-                                                  tier               = "gold",
-                                                  saved_by           = Sys.info()[["user"]],
-                                                  method_of_receipt  = NA_character_,
-                                                  derivation_method  = NA_character_,
-                                                  model_or_project   = NA_character_,
-                                                  notes              = NA_character_,
-                                                  .supersede         = TRUE) {
+                                                      tier               = "gold",
+                                                      saved_by           = Sys.info()[["user"]],
+                                                      method_of_receipt  = NA_character_,
+                                                      derivation_method  = NA_character_,
+                                                      model_or_project   = NA_character_,
+                                                      notes              = NA_character_,
+                                                      .supersede         = TRUE) {
   # `.supersede` is internal: the FlodeRatingSet method turns it off for the
   # members of a set, which are all current together
   # -- Validate and resolve paths --------------------------------------------
@@ -380,12 +380,12 @@ S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
 }
 
 S7::method(save_rating, FlodeRatingSet) <- function(x, root,
-                                                tier              = "gold",
-                                                saved_by          = Sys.info()[["user"]],
-                                                method_of_receipt = NA_character_,
-                                                derivation_method = NA_character_,
-                                                model_or_project  = NA_character_,
-                                                notes             = NA_character_) {
+                                                    tier              = "gold",
+                                                    saved_by          = Sys.info()[["user"]],
+                                                    method_of_receipt = NA_character_,
+                                                    derivation_method = NA_character_,
+                                                    model_or_project  = NA_character_,
+                                                    notes             = NA_character_) {
   # The members of a set are the rating for different periods, so they are all
   # current together. Supersede the previous Active versions ONCE (per distinct
   # site and tier), then save every member without superseding the others.
@@ -412,7 +412,7 @@ S7::method(save_rating, FlodeRatingSet) <- function(x, root,
 
 
 # =============================================================================
-# load_rating()
+# -- load_rating() --
 # =============================================================================
 
 #' Load rating curve(s) from the Gold calibration store
@@ -509,7 +509,7 @@ load_rating <- function(site_id, root, tier = "gold", version = NULL) {
 
 
 # =============================================================================
-# list_ratings()
+# -- list_ratings() --
 # =============================================================================
 
 #' List saved rating curve versions from the governance register
@@ -584,8 +584,8 @@ list_ratings <- function(root, site_id = NULL, tier = NULL) {
                     "method_of_receipt", "derivation_method", "model_or_project",
                     "saved_by", "saved_at", "notes")
   present_cols <- intersect(core_cols, names(reg))
-  # `..` looks present_cols up in the calling scope, not as a column.
-  display      <- reg[, ..present_cols]
+  # `with = FALSE` takes the column names from the calling scope.
+  display      <- reg[, present_cols, with = FALSE]
 
   cat(sprintf("<Rating register>  %d version(s)\n\n", nrow(display)))
   print(display)
