@@ -190,6 +190,11 @@ devtools::build_vignettes()
 - Build `POSIXct` for Parquet as doubles — `seq(<POSIXct>, by = ...)` can be
   integer-backed and arrow mis-writes it (the writers normalise, but fixtures
   that call `arrow::write_parquet()` directly must too).
+- **Windows**: read Parquet through `.read_parquet()` (it sets `mmap = FALSE`; a
+  memory-mapped file cannot be rewritten on Windows, error 1224) and write through
+  `.write_parquet_atomic()`. Never build path prefixes with `.Platform$file.sep`
+  (it is `/` on Windows too): use `.relative_path()`. `test-windows-safety.R`
+  guards both with source checks, since Windows cannot be run on the dev boxes.
 - Tests: `expect_message(x <- f(), "...")` (edition 3 returns the condition, not the value).
 - Tests never sleep: the EA fair-use pause goes through `.pace()` (mocked in `setup-pace.R`).
   Every bug fix gets a regression test that was checked to fail on the old code.

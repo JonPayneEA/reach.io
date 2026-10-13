@@ -185,7 +185,13 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
       stats::nls(
         pe ~ B + A * sin(omega * (doy - phi)),
         data  = list(pe = pe, doy = doy, omega = omega),
-        start = list(B = lin$B, A = lin$A, phi = lin$phi)
+        start = list(B = lin$B, A = lin$A, phi = lin$phi),
+        # Starting at the exact linear solution, a noiseless (zero-residual)
+        # series makes nls()'s relative-offset convergence test fail with
+        # "number of iterations exceeded maximum". scaleOffset adds a constant to
+        # the denominator of that test (the remedy documented in ?nls for
+        # artificial zero-residual data); it does not change the fitted values.
+        control = stats::nls.control(scaleOffset = 1)
       ),
       # Any nls() failure (non-convergence, singular gradient, ...) becomes a
       # warning; the NULL it returns triggers the lm_fourier fallback below.

@@ -370,6 +370,25 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
 
 # -- Bronze writers -----------------------------------------------------------
 
+#' Read a Parquet file without memory-mapping it
+#'
+#' All Parquet reads in the package go through this wrapper. arrow memory-maps
+#' files by default (`mmap = TRUE`); on Windows a mapped file stays locked until
+#' the mapping is garbage collected, so a file that has just been read cannot be
+#' rewritten (error 1224, "user-mapped section open"). Several functions read a
+#' file and then replace it (the registry, the rating store, the Bronze
+#' merge-on-write), so every read is made with `mmap = FALSE`. The cost is a copy
+#' into memory, which these callers do anyway.
+#'
+#' @param path Character. File to read.
+#' @param ... Passed to [arrow::read_parquet()] (e.g. `col_select`).
+#' @return What `arrow::read_parquet()` returns (a data frame by default).
+#' @noRd
+.read_parquet <- function(path, ...) {
+  arrow::read_parquet(path, mmap = FALSE, ...)
+}
+
+
 #' Write a Parquet file atomically
 #'
 #' Writes to `<path>.tmp` then renames over `path`. On Windows `file.rename()`
@@ -482,7 +501,7 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
     # kept, and where a timestamp appears in both the NEW row wins.
     merged <- part
     if (file.exists(path)) {
-      existing <- data.table::as.data.table(arrow::read_parquet(path))
+      existing <- data.table::as.data.table(.read_parquet(path))
       merged   <- data.table::rbindlist(list(existing, part),
                                         use.names = TRUE, fill = TRUE)
       merged   <- unique(merged, by = "timestamp", fromLast = TRUE)

@@ -33,23 +33,43 @@
 # Internal helpers
 # =============================================================================
 
+# Path of `paths` relative to the directory `base`, using "/" throughout.
+#
+# Both sides are converted to forward slashes (normalizePath(winslash = "/") and
+# an explicit backslash replacement) so a Windows path such as
+# "C:\\data\\store\\bronze\\x.parquet" compares equal to "C:/data/store/bronze".
+# Do NOT build this prefix with .Platform$file.sep: that is "/" on every
+# platform, including Windows, so it never matched Windows' backslash paths. The
+# comparison is a plain string-prefix test (no regex), so dots, brackets or
+# backslashes in the base need no escaping. Drive letters and folders can differ
+# in case on Windows, so the prefix is compared case-insensitively there.
+# A path that is not under `base` is returned unchanged (as forward-slash text).
+#' @noRd
+.relative_path <- function(paths, base,
+                           ignore_case = .Platform$OS.type == "windows") {
+  to_fwd <- function(x) {
+    gsub("\\\\", "/", normalizePath(x, winslash = "/", mustWork = FALSE))
+  }
+  p      <- to_fwd(paths)
+  prefix <- paste0(sub("/+$", "", to_fwd(base)), "/")
+  hit <- if (ignore_case) {
+    startsWith(tolower(p), tolower(prefix))
+  } else {
+    startsWith(p, prefix)
+  }
+  ifelse(hit, substring(p, nchar(prefix) + 1L), p)
+}
+
 # Parse the data category from a Bronze file path.
 # Path pattern: <root>/bronze/<category>/...
 #' @noRd
 .category_from_path <- function(paths, root) {
-  # Both sides go through normalizePath() so relative roots, ".." and mixed
-  # separators compare equal, and the prefix is regex-escaped so dots or
-  # brackets in the root are matched literally. The register's file_path values
-  # must sit under <root>/bronze; otherwise the prefix is not stripped and the
-  # result is not a real category.
-  bronze_prefix <- paste0(normalizePath(file.path(root, "bronze"),
-                                        mustWork = FALSE), .Platform$file.sep)
-  rel <- sub(paste0("^", gsub("([.+?^${}()|\\[\\]\\\\])", "\\\\\\1",
-                               bronze_prefix)),
-             "", normalizePath(paths, mustWork = FALSE))
-  # Split on either separator (backslashes after normalizePath on Windows) and
-  # keep the first directory, i.e. the category; NA for an empty path.
-  first <- vapply(strsplit(rel, "/|\\\\"), function(x) {
+  # The register's file_path values must sit under <root>/bronze; otherwise the
+  # prefix is not stripped and the result is not a real category. See
+  # .relative_path() for how separators and case are handled.
+  rel <- .relative_path(paths, file.path(root, "bronze"))
+  # Keep the first directory, i.e. the category; NA for an empty path.
+  first <- vapply(strsplit(rel, "/", fixed = TRUE), function(x) {
     if (length(x)) x[[1L]] else NA_character_
   }, character(1L))
   first
@@ -534,7 +554,7 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
   # Only the timestamp column is read (column projection); values play no
   # part in gap detection.
   ts_list <- lapply(pq_files, function(f) {
-    dt <- data.table::as.data.table(arrow::read_parquet(f,
+    dt <- data.table::as.data.table(.read_parquet(f,
                                                          col_select = "timestamp"))
     dt$timestamp
   })
@@ -680,18 +700,14 @@ list_silver_gauges <- function(root, data_type = NULL) {
     return(invisible(data.table::data.table()))
   }
 
-  # (The root is regex-escaped below so dots or brackets in it match literally.)
-  # Normalise paths for cross-platform splitting
-  norm_root <- normalizePath(silver_root, mustWork = FALSE)
-  rel <- sub(
-    paste0("^", gsub("([.+?^${}()|\\[\\]\\\\])", "\\\\\\1", norm_root),
-           .Platform$file.sep),
-    "",
-    normalizePath(files, mustWork = FALSE)
-  )
-  # No supplier level in Silver (see silver_path()); <year> is the received year.
+  # Path of each file relative to the Silver root, with "/" separators on every
+  # platform (see .relative_path(): .Platform$file.sep is "/" even on Windows,
+  # which used to leave Windows paths unparsed).
+  rel <- .relative_path(files, silver_root)
+  # No supplier level in Silver (see silver_path()); <year> is the observation
+  # year the file was filed under.
   # Expected: <category>/<data_type>/<year>/<dataset_id>.parquet
-  parts <- strsplit(rel, "/|\\\\")
+  parts <- strsplit(rel, "/", fixed = TRUE)
 
   # site_id is the 2nd underscore-separated field of the dataset_id
   # (<SUPPLIER>_<site>_<type>_<date>); shallower or oddly named paths are
@@ -823,7 +839,7 @@ summarise_silver_coverage <- function(root, data_type = NULL, site_id = NULL) {
   records <- lapply(files, function(f) {
     tryCatch(
       data.table::as.data.table(
-        arrow::read_parquet(f,
+        .read_parquet(f,
           col_select = c("timestamp", "site_id", "data_type", "qc_flag"))
       ),
       error = function(e) NULL
@@ -918,7 +934,7 @@ check_silver_gaps <- function(root, site_id, data_type,
   ts_list <- lapply(pq_files, function(f) {
     tryCatch(
       data.table::as.data.table(
-        arrow::read_parquet(f, col_select = "timestamp")
+        .read_parquet(f, col_select = "timestamp")
       )$timestamp,
       error = function(e) NULL
     )

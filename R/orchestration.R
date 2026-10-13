@@ -83,7 +83,7 @@
 .update_registry_flags <- function(registry_path, keys, col, value) {
   # Nothing to flag: skip the read and rewrite entirely
   if (length(keys) == 0L) return(invisible(NULL))
-  reg <- data.table::as.data.table(arrow::read_parquet(registry_path))
+  reg <- data.table::as.data.table(.read_parquet(registry_path))
   # If the flag column is not in the registry yet it is added here; rows not
   # updated below keep NA
   if (!col %in% names(reg)) reg[, (col) := NA]

@@ -315,7 +315,7 @@
     # fill = TRUE: blocks of one series need not have identical columns
     dt <- data.table::rbindlist(
       lapply(files, function(f) {
-        data.table::as.data.table(arrow::read_parquet(f))
+        data.table::as.data.table(.read_parquet(f))
       }),
       use.names = TRUE, fill = TRUE
     )
@@ -794,7 +794,7 @@ ingest_all_file <- function(path,
 
   # -- Merge with an existing registry, or create one ---------------------------
   if (file.exists(registry_path)) {
-    existing <- data.table::as.data.table(arrow::read_parquet(registry_path))
+    existing <- data.table::as.data.table(.read_parquet(registry_path))
 
     # Ensure backward compatibility with registries built before `live` existed
     if (!"live" %in% names(existing)) existing[, live := TRUE]
@@ -949,7 +949,7 @@ fetch_from_wiski_all <- function(gauge_id, data_type, start_date, end_date,
   }
 
   dt <- data.table::rbindlist(lapply(files, function(f) {
-    data.table::as.data.table(arrow::read_parquet(f))
+    data.table::as.data.table(.read_parquet(f))
   }))
   if (nrow(dt) == 0L) return(dt)
 

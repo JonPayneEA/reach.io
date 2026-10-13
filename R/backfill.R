@@ -217,7 +217,7 @@ run_backfill <- function(registry_path,
   # `active` is the only filter: `live` is deliberately not checked here, so
   # non-live (historical WISKI_ALL) rows are backfilled too.
   registry_dt <- data.table::as.data.table(
-    arrow::read_parquet(registry_path)
+    .read_parquet(registry_path)
   )
   registry_dt <- registry_dt[active == TRUE]
   # Treat a missing data_type column as all-NA so keys and log rows keep one

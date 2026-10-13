@@ -168,8 +168,10 @@ NULL
 #' register, not the Parquet, is
 #' the source of version numbers, and numbers are never reused.
 #'
-#' The two writes are not atomic. If the process stops after the Parquet is
-#' rewritten but before the register is, the Parquet holds a version the
+#' Each file is replaced atomically (written to a temporary file, then moved
+#' into place, and read without memory-mapping so the replace also works on
+#' Windows), but the two writes together are not atomic. If the process stops
+#' after the Parquet is rewritten but before the register is, the Parquet holds a version the
 #' register does not know about, and the next save for that site and tier takes
 #' the same number again. Writers are also not safe to run concurrently against
 #' one store, since each does a read-modify-write of the whole Parquet and
@@ -310,16 +312,18 @@ S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
 
   # -- Append limbs to Parquet -----------------------------------------------
   # Read-modify-write of the whole shared file. fill = TRUE tolerates an
-  # existing file that lacks columns added later. Plain arrow::write_parquet(),
-  # not the temp-file-and-rename writer used for Bronze, so the write is not
-  # atomic.
+  # existing file that lacks columns added later. The read is not memory-mapped
+  # and the write goes through the temp-file-and-rename writer used for Bronze
+  # (see .read_parquet() / .write_parquet_atomic()), so replacing a file that was
+  # just read works on Windows too. The Parquet write is atomic, but it is
+  # separate from the register write below.
   if (file.exists(paths$pq_file)) {
-    existing <- data.table::as.data.table(arrow::read_parquet(paths$pq_file))
+    existing <- data.table::as.data.table(.read_parquet(paths$pq_file))
     combined <- data.table::rbindlist(list(existing, limbs_flat), fill = TRUE)
   } else {
     combined <- limbs_flat
   }
-  arrow::write_parquet(combined, paths$pq_file)
+  .write_parquet_atomic(combined, paths$pq_file)
 
   # -- Register --------------------------------------------------------------
   # New versions start "Active". derivation_method and model_or_project live
@@ -473,7 +477,7 @@ load_rating <- function(site_id, root, tier = "gold", version = NULL) {
 
   # The whole shared Parquet is read, then filtered. `site_id` is also a column
   # name, hence which() on dt$site_id rather than dt[site_id == site_id].
-  dt <- data.table::as.data.table(arrow::read_parquet(paths$pq_file))
+  dt <- data.table::as.data.table(.read_parquet(paths$pq_file))
   idx <- which(dt$site_id == site_id)
   dt  <- dt[idx]
 

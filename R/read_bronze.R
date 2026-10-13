@@ -330,7 +330,7 @@ read_bronze <- function(root, gauge_id, data_type,
   # One unreadable file warns and is skipped rather than failing the whole read
   dt_list <- lapply(files, function(f) {
     tryCatch(
-      data.table::as.data.table(arrow::read_parquet(f)),
+      data.table::as.data.table(.read_parquet(f)),
       error = function(e) {
         warning(sprintf("Could not read Bronze file: %s\n  %s",
                         f, conditionMessage(e)), call. = FALSE)
