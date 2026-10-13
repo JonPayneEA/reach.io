@@ -1,0 +1,86 @@
+url: https://jonpaynea.github.io/reach.io/
+
+template:
+  bootstrap: 5
+
+reference:
+  - title: Set up and discover
+    contents:
+      - setup_hydro_store
+      - find_stations
+      - get_measures
+  - title: Download
+    contents:
+      - download_hydrology
+      - fetch_readings
+      - make_date_chunks
+  - title: Read from the store
+    contents:
+      - read_bronze
+      - read_bronze_multi
+      - read_bronze_catchment
+      - read_silver
+      - read_silver_multi
+      - read_silver_catchment
+  - title: Pipeline
+    contents:
+      - build_gauge_registry
+      - route_gauge
+      - fetch_from_hde
+      - fetch_from_wiski
+      - fetch_from_wiski_all
+      - ingest_all_file
+      - run_backfill
+      - run_incremental
+  - title: Catalogue
+    contents:
+      - list_available_gauges
+      - summarise_coverage
+      - check_gaps
+      - list_silver_gauges
+      - summarise_silver_coverage
+      - check_silver_gaps
+  - title: Data classes
+    contents:
+      - starts_with("Flode")
+      - as_data_table
+      - as_long
+      - disagg_to_15min
+  - title: Rating curves
+    contents:
+      - apply_rating
+      - apply_inverse_rating
+      - check_limb_continuity
+      - fix_limb_continuity
+      - save_rating
+      - load_rating
+      - list_ratings
+  - title: Potential evaporation
+    contents:
+      - fit_pe_sine
+      - generate_pe_sine
+      - compare_pe_sine
+      - regionalise_pe_sine
+  - title: Output formats
+    contents:
+      - format_for_pdm
+      - format_for_fmp
+  - title: Store paths, schema and provenance
+    contents:
+      - apply_bronze_schema
+      - bronze_path
+      - silver_path
+      - make_dataset_id
+      - param_to_data_type
+      - source_to_supplier
+      - write_provenance_record
+  - title: Utilities
+    contents:
+      - add_hydro_year
+      - cumsum_na
+      - snap_offgrid_timestamps
+      - double_mass_plot
+  - title: Silver QC (moving to reach.validate)
+    contents:
+      - promote_to_silver
+      - starts_with("qc_")

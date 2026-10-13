@@ -9,3 +9,5 @@
 ^README\.html$
 ^UPCOMING_FEATURES\.md$
 ^pkgdown$
+^_pkgdown\.yml$
+^docs$
