@@ -47,7 +47,7 @@ stns <- find_stations(wiski_ids = "SS92F014")
 stns
 #>    label    notation     wiskiID RLOIid     lat    long easting northing
 #> 1: ...      <uuid>       SS92F014  5022   51.47  -0.31  ...     ...
-#>    riverName   station.notation               parameter value_type period
+#>    riverName   measure_notation               parameter value_type period
 #> 1: Thames      <uuid>-flow-i-900-m3s-...      flow      instantaneous  15min
 #> 2: Thames      <uuid>-flow-m-86400-m3s-...    flow      mean           daily
 #> 3: Thames      <uuid>-level-i-900-mASD-...    level     instantaneous  15min
@@ -60,7 +60,7 @@ The key columns are:
 |---|---|
 | `notation` | Station UUID — use this to filter `@readings` after download |
 | `wiskiID` | WISKI identifier |
-| `station.notation` | Full measure notation passed to the readings endpoint |
+| `measure_notation` | Full measure notation passed to the readings endpoint (`station.notation` is a deprecated alias) |
 | `parameter` | `"flow"`, `"level"`, or `"rainfall"` |
 | `value_type` | `"mean"`, `"instantaneous"`, `"total"`, etc. |
 | `period` | `"daily"` or `"15min"` |
@@ -162,7 +162,9 @@ result_h <- download_hydrology(
 
 ### 2.3 Saving to disk
 
-For large date ranges or routine extracts, write directly to CSV files:
+For large date ranges or routine extracts, write directly to the Bronze tier
+as Parquet (one file per measure per calendar year) with a provenance record in
+the data register. Create the store first with `setup_hydro_store()`:
 
 ```{r download-disk}
 download_hydrology(
@@ -174,8 +176,11 @@ download_hydrology(
   observation_type = "Qualified",
   wiski_ids        = "SS92F014"
 )
-# Writes: hydrology_data/flow/*.csv, hydrology_data/level/*.csv
+# Writes: hydrology_data/bronze/hydrometric/EA/Q/<year>/EA_<site>_Q_<date>.parquet
+#         hydrology_data/bronze/hydrometric/EA/H/<year>/...
+#         hydrology_data/register/hydrometric_data_register.csv
 #         hydrology_data/download_summary.csv
+# Read it back with read_bronze("hydrology_data", "SS92F014", "Q")
 ```
 
 ---

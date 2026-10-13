@@ -13,9 +13,13 @@
 #                3. check_gaps() — exactly which timesteps are
 #                   missing for a given gauge and data type?
 #
-#              Primary data source: the governance register CSV.
-#              Fallback (check_gaps only): reads Parquet files
-#              directly where a fine-grained gap list is needed.
+#              Data sources: list_available_gauges() and summarise_coverage()
+#              read only the governance register CSV. check_gaps() always
+#              scans the Bronze Parquet files for timestamps and uses the
+#              register only to look up the expected interval. The Silver
+#              functions at the end of the file (list_silver_gauges(),
+#              summarise_silver_coverage(), check_silver_gaps()) scan
+#              <root>/silver directly and do not use the register.
 #
 # Flode Module: flode.io
 # Author:      JP
@@ -33,11 +37,18 @@
 # Path pattern: <root>/bronze/<category>/...
 #' @noRd
 .category_from_path <- function(paths, root) {
+  # Both sides go through normalizePath() so relative roots, ".." and mixed
+  # separators compare equal, and the prefix is regex-escaped so dots or
+  # brackets in the root are matched literally. The register's file_path values
+  # must sit under <root>/bronze; otherwise the prefix is not stripped and the
+  # result is not a real category.
   bronze_prefix <- paste0(normalizePath(file.path(root, "bronze"),
                                         mustWork = FALSE), .Platform$file.sep)
   rel <- sub(paste0("^", gsub("([.+?^${}()|\\[\\]\\\\])", "\\\\\\1",
                                bronze_prefix)),
              "", normalizePath(paths, mustWork = FALSE))
+  # Split on either separator (backslashes after normalizePath on Windows) and
+  # keep the first directory, i.e. the category; NA for an empty path.
   first <- vapply(strsplit(rel, "/|\\\\"), function(x) {
     if (length(x)) x[[1L]] else NA_character_
   }, character(1L))
@@ -54,10 +65,16 @@
   if (!dir.exists(search_root)) return(character(0))
 
   # Files are stored at bronze/<cat>/<supplier>/<data_type>/<year>/<id>.parquet
-  # Glob by data_type subdir then filter filenames by site_id fragment.
+  # List every Parquet under the category, then filter on path fragments (there
+  # is no directory-level globbing).
   candidates <- list.files(search_root, pattern = "\\.parquet$",
                            recursive = TRUE, full.names = TRUE)
   # Keep only files under the correct data_type subdirectory
+  # "/<data_type>/" must match a whole directory name (so "Q" does not match
+  # "QC"); "_<site_id>_" matches the site segment of the dataset_id
+  # (EA_39001_Q_..., WISKI_3401TH_H_sg_ds_...). Matching is fixed-string, so
+  # characters such as "." in an id are literal. Every supplier and WISKI trace
+  # held for that site + type is returned, i.e. callers see them pooled.
   dt_pat   <- paste0("/", data_type, "/")
   site_pat <- paste0("_", site_id, "_")
   candidates[grepl(dt_pat, candidates, fixed = TRUE) &
@@ -67,6 +84,10 @@
 # Infer the expected observation interval in seconds from a character label.
 #' @noRd
 .interval_seconds <- function(label) {
+  # Labels are the register's temporal_resolution values; case and surrounding
+  # blanks are ignored. Anything else, including the "unknown" the Bronze
+  # writers record when no resolution is given, yields NA, which check_gaps()
+  # treats as "infer the interval from the data".
   label <- tolower(trimws(label))
   switch(label,
     "15min"  = 15L  * 60L,
@@ -90,6 +111,33 @@
 #'
 #' The register is the primary source of truth. If it does not yet exist, a
 #' message is printed and an empty table is returned.
+#'
+#' @details
+#' Only the register is consulted; the file system is not scanned. Files that
+#' exist on disk but were never registered do not appear, and registered files
+#' that have since been deleted still do. Use [check_gaps()] when the Parquet
+#' files themselves matter.
+#'
+#' Only Bronze rows are kept (where the register has a `tier` column). The
+#' register written by this package has no category column, so `category` is
+#' derived from each `file_path` as the first directory below
+#' `<root>/bronze/`; that works only if the recorded paths sit under `root`.
+#' Filters are exact matches (any-of when a vector is given) and are applied
+#' before summarising. A filter whose column is absent from the register is
+#' ignored rather than raising an error.
+#'
+#' Rows are grouped by site, category, supplier, data type and temporal
+#' resolution, so one site can appear several times (for example when two
+#' suppliers hold it). `start` and `end` are the earliest and latest period
+#' dates recorded (`"YYYY-MM-DD"` text). `n_datasets` counts register rows: the
+#' Bronze writers record one row per year file and every ingest appends more
+#' (a same-day re-ingest overwrites the file but still adds a row), so it counts
+#' registered files rather than distinct series.
+#'
+#' A header line and the table are printed to the console. When the register is
+#' missing or nothing matches, a message (not an error) is issued and an empty
+#' table is returned. Related: [summarise_coverage()], [check_gaps()],
+#' [read_bronze()], [setup_hydro_store()].
 #'
 #' @param root Character. Root of the data store (the directory containing
 #'   `bronze/`, `register/`, etc.).
@@ -122,6 +170,8 @@
 #' }
 list_available_gauges <- function(root, category = NULL, supplier = NULL,
                                   data_type = NULL) {
+  # -- Load register ---------------------------------------------------------
+  # The register is the only source here; the file system is not scanned.
   reg_path <- file.path(root, "register", "hydrometric_data_register.csv")
 
   if (!file.exists(reg_path)) {
@@ -144,20 +194,27 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
     reg[, category := .category_from_path(file_path, root)]
   }
 
-  # Apply caller filters
+  # -- Filter ----------------------------------------------------------------
+  # `category` and `data_type` are also column names. Inside reg[...] a bare
+  # symbol resolves to the COLUMN, so reg[category %in% category] would compare
+  # the column with itself and keep every row. .filter_rows() (package.R)
+  # evaluates the match outside the table scope. A filter whose column is
+  # absent from the register is skipped.
   if (!is.null(category)  && "category"       %in% names(reg))
-    reg <- reg[reg$category       %in% category ]
+    reg <- .filter_rows(reg, "category", category)
   if (!is.null(supplier)  && "supplier_code"   %in% names(reg))
-    reg <- reg[reg$supplier_code  %in% supplier ]
+    reg <- .filter_rows(reg, "supplier_code", supplier)
   if (!is.null(data_type) && "data_type"       %in% names(reg))
-    reg <- reg[reg$data_type      %in% data_type]
+    reg <- .filter_rows(reg, "data_type", data_type)
 
   if (nrow(reg) == 0L) {
     message("No Bronze records match the specified filters.")
     return(invisible(data.table::data.table()))
   }
 
-  # Summarise: one row per site + data_type
+  # -- Summarise -------------------------------------------------------------
+  # One row per site x category x supplier x data_type x resolution (not just
+  # site + data_type), so a site with several suppliers or resolutions repeats.
   by_cols <- intersect(
     c("site_id", "category", "supplier_code", "data_type",
       "temporal_resolution"),
@@ -165,6 +222,8 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
   )
   date_cols <- intersect(c("time_period_start", "time_period_end"), names(reg))
 
+  # start/end are the min/max of ISO "YYYY-MM-DD" strings, which order
+  # correctly as text. n_datasets counts register ROWS, one per year file.
   out <- reg[, {
     start_vals <- if ("time_period_start" %in% names(reg)) time_period_start else NA_character_
     end_vals   <- if ("time_period_end"   %in% names(reg)) time_period_end   else NA_character_
@@ -201,6 +260,29 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
 #' To inspect actual record counts or detect individual missing timesteps, use
 #' `check_gaps()`.
 #'
+#' @details
+#' Like [list_available_gauges()], this reads only the register (Bronze rows;
+#' `category` derived from `file_path`) and opens no Parquet files, so it cannot
+#' report actual record counts or a completeness percentage; use
+#' [check_gaps()] for that. Rows are grouped by site, category, supplier, data
+#' type and temporal resolution, and the table adds:
+#'
+#' - `start`, `end`: earliest and latest period dates recorded, as
+#'   `"YYYY-MM-DD"` text.
+#' - `n_datasets`: number of register rows (one per year file; every ingest
+#'   appends more).
+#' - `days_held`: whole days between `start` and `end`. Gaps inside the span
+#'   are not subtracted.
+#' - `expected_obs`: the number of steps of the register's resolution between
+#'   `start` and `end`, inclusive. The register dates have day precision, so
+#'   the final day contributes a single step; treat the figure as indicative.
+#'   It is `NA` where no step length can be derived.
+#'
+#' Filters are exact any-of matches applied before summarising, and one whose
+#' column is absent from the register is ignored. A message (not an error) is
+#' issued, with an empty table returned, when the register is missing or
+#' nothing matches. Related: [list_available_gauges()], [check_gaps()].
+#'
 #' @param root Character. Root of the data store.
 #' @param site_id Character vector or `NULL`. Filter to one or more sites.
 #'   `NULL` (default) shows all sites.
@@ -224,6 +306,8 @@ list_available_gauges <- function(root, category = NULL, supplier = NULL,
 #' }
 summarise_coverage <- function(root, site_id = NULL, category = NULL,
                                data_type = NULL) {
+  # -- Load register ---------------------------------------------------------
+  # Register only (Bronze rows); no Parquet files are opened here.
   reg_path <- file.path(root, "register", "hydrometric_data_register.csv")
 
   if (!file.exists(reg_path)) {
@@ -237,29 +321,40 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
   if ("file_path" %in% names(reg) && !"category" %in% names(reg))
     reg[, category := .category_from_path(file_path, root)]
 
-  # Filters
-  if (!is.null(site_id)   && "site_id"   %in% names(reg)) reg <- reg[reg$site_id   %in% site_id  ]
-  if (!is.null(category)  && "category"  %in% names(reg)) reg <- reg[reg$category  %in% category ]
-  if (!is.null(data_type) && "data_type" %in% names(reg)) reg <- reg[reg$data_type %in% data_type]
+  # -- Filter ----------------------------------------------------------------
+  # `site_id`, `category` and `data_type` are also column names: inside reg[...]
+  # a bare symbol would resolve to the COLUMN and the filter would keep every
+  # row, so .filter_rows() does the match outside the table scope.
+  if (!is.null(site_id)   && "site_id"   %in% names(reg)) reg <- .filter_rows(reg, "site_id", site_id)
+  if (!is.null(category)  && "category"  %in% names(reg)) reg <- .filter_rows(reg, "category", category)
+  if (!is.null(data_type) && "data_type" %in% names(reg)) reg <- .filter_rows(reg, "data_type", data_type)
 
   if (nrow(reg) == 0L) {
     message("No records match the specified filters.")
     return(invisible(data.table::data.table()))
   }
 
+  # -- Summarise -------------------------------------------------------------
   by_cols <- intersect(
     c("site_id", "category", "supplier_code", "data_type",
       "temporal_resolution"),
     names(reg)
   )
 
+  # Per group: span from the earliest start to the latest end across all
+  # registered batches (overlapping re-ingests are not double counted in the
+  # span), plus the number of register rows.
   out <- reg[, {
     start <- if ("time_period_start" %in% names(.SD)) min(time_period_start, na.rm = TRUE) else NA_character_
     end   <- if ("time_period_end"   %in% names(.SD)) max(time_period_end,   na.rm = TRUE) else NA_character_
+    # NB: grouping columns are not part of .SD, so when temporal_resolution is
+    # one of by_cols (the normal case) this test is FALSE and `res` is NA.
     res   <- if ("temporal_resolution" %in% names(.SD)) temporal_resolution[1L] else NA_character_
 
     # Estimate expected observations from register metadata
     int_sec <- .interval_seconds(res)
+    # Steps between start and end, +1 because both endpoints are counted. The
+    # register dates are day-precision, so `end` is midnight of the last day.
     expected <- if (!is.na(int_sec) && !is.na(start) && !is.na(end)) {
       span <- as.numeric(difftime(as.POSIXct(end,   tz = "UTC"),
                                   as.POSIXct(start, tz = "UTC"),
@@ -292,6 +387,24 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
 # check_gaps()
 # =============================================================================
 
+# Find all Silver Parquet files for one site_id + data_type combination.
+#' @noRd
+.find_silver_parquets <- function(root, site_id, data_type) {
+  silver_root <- file.path(root, "silver")
+  if (!dir.exists(silver_root)) return(character(0))
+
+  # Same fragment matching as .find_site_parquets() ("/<data_type>/" directory,
+  # "_<site_id>_" in the dataset_id). Silver has no supplier level, and every
+  # category is searched.
+  candidates <- list.files(silver_root, pattern = "\\.parquet$",
+                           recursive = TRUE, full.names = TRUE)
+  dt_pat   <- paste0("/", data_type, "/")
+  site_pat <- paste0("_", site_id, "_")
+  candidates[grepl(dt_pat,   candidates, fixed = TRUE) &
+               grepl(site_pat, candidates, fixed = TRUE)]
+}
+
+
 #' Identify missing timesteps for a Bronze gauge series
 #'
 #' Reads all Bronze Parquet files for the specified `site_id` and `data_type`,
@@ -301,6 +414,37 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
 #' Gaps are reported as a `data.table` of contiguous missing periods, each
 #' described by its `gap_start`, `gap_end`, and `n_missing` (number of missing
 #' timesteps within that period).
+#'
+#' @details
+#' Order of work: the interval is resolved first (the `expected_interval`
+#' argument, else the register's `temporal_resolution` for this site and data
+#' type, else the median spacing of the timestamps found); the `timestamp`
+#' column of every matching file is then read and pooled; and a regular grid
+#' from the first to the last timestamp is compared with what was found. Each
+#' grid step with no observation is a missing timestep, and runs of consecutive
+#' missing steps are reported as one period.
+#'
+#' Files are found by scanning `<root>/bronze/<category>/` for paths containing
+#' `/<data_type>/` and `_<site_id>_`, not through the register. All suppliers
+#' and WISKI traces held for the site and type are therefore pooled, and
+#' duplicate timestamps (Bronze is append-only, so re-ingests overlap) are
+#' counted once. A gap in one supplier's record is hidden if another supplier
+#' covers it.
+#'
+#' A grid step is present only if a timestamp equals it exactly. Off-grid
+#' timestamps (for example 09:14:00 in a 15-minute series) do not fill any
+#' step, so the steps around them are reported as missing; resolve them first
+#' (see [snap_offgrid_timestamps()] for 15-minute data). Steps are fixed
+#' lengths in seconds, which assumes timestamps stored in UTC. `gap_start` and
+#' `gap_end` are the first and last missing steps of a period, not the
+#' neighbouring observations.
+#'
+#' A message (not an error) is issued, with an empty table returned, when no
+#' files match or fewer than two distinct timestamps are found; an
+#' unrecognised `expected_interval` is an error. When the interval is inferred,
+#' a message reports it. A summary and the gap table are printed to the console.
+#' Related: [list_available_gauges()], [summarise_coverage()],
+#' [check_silver_gaps()].
 #'
 #' @param root Character. Root of the data store.
 #' @param site_id Character. Site identifier.
@@ -329,24 +473,11 @@ summarise_coverage <- function(root, site_id = NULL, category = NULL,
 #' check_gaps("data/hydro", site_id = "2723TH", data_type = "H",
 #'            expected_interval = "daily")
 #' }
-# Find all Silver Parquet files for one site_id + data_type combination.
-#' @noRd
-.find_silver_parquets <- function(root, site_id, data_type) {
-  silver_root <- file.path(root, "silver")
-  if (!dir.exists(silver_root)) return(character(0))
-
-  candidates <- list.files(silver_root, pattern = "\\.parquet$",
-                           recursive = TRUE, full.names = TRUE)
-  dt_pat   <- paste0("/", data_type, "/")
-  site_pat <- paste0("_", site_id, "_")
-  candidates[grepl(dt_pat,   candidates, fixed = TRUE) &
-               grepl(site_pat, candidates, fixed = TRUE)]
-}
-
-
 check_gaps <- function(root, site_id, data_type, category = "hydrometric",
                        expected_interval = NULL) {
   # --- Resolve interval ---
+  # Precedence: explicit argument, then the register, then (further down) the
+  # median spacing of the observed timestamps.
   int_sec <- if (!is.null(expected_interval)) {
     s <- .interval_seconds(expected_interval)
     if (is.na(s)) stop("Unrecognised expected_interval: ", expected_interval,
@@ -359,7 +490,12 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
     if (file.exists(reg_path)) {
       reg <- data.table::fread(reg_path, showProgress = FALSE)
       if ("tier" %in% names(reg)) reg <- reg[reg$tier == "Bronze"]
-      rows <- reg[reg$site_id == site_id & reg$data_type == data_type]
+      # which() on explicit reg$ vectors: reg[site_id == site_id & ...] would
+      # compare the column with itself (the column shadows the argument) and
+      # match every row.
+      # The register is not category-aware, and the first matching row wins.
+      idx  <- which(reg$site_id == site_id & reg$data_type == data_type)
+      rows <- reg[idx]
       if (nrow(rows) > 0L && "temporal_resolution" %in% names(rows)) {
         s <- .interval_seconds(rows$temporal_resolution[1L])
       }
@@ -368,6 +504,8 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
   }
 
   # --- Read Parquet files ---
+  # Scans the file system rather than the register, so files added outside
+  # the normal ingest pipeline are found too.
   pq_files <- .find_site_parquets(root, site_id, data_type, category)
 
   if (length(pq_files) == 0L) {
@@ -376,11 +514,15 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
     return(invisible(data.table::data.table()))
   }
 
+  # Only the timestamp column is read (column projection); values play no
+  # part in gap detection.
   ts_list <- lapply(pq_files, function(f) {
     dt <- data.table::as.data.table(arrow::read_parquet(f,
                                                          col_select = "timestamp"))
     dt$timestamp
   })
+  # Pool across files, suppliers, traces and years. unique() collapses the
+  # duplicates that append-only re-ingests create, before gaps are assessed.
   all_ts <- sort(unique(do.call(c, ts_list)))
 
   if (length(all_ts) < 2L) {
@@ -390,6 +532,8 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
 
   # --- Infer interval from data if still unknown ---
   if (is.na(int_sec)) {
+    # Median successive spacing is robust to occasional gaps; diff() units are
+    # forced to seconds so the result is comparable with .interval_seconds().
     diffs    <- as.numeric(diff(all_ts), units = "secs")
     int_sec  <- as.integer(stats::median(diffs, na.rm = TRUE))
     label    <- if (int_sec == 900L) "15min" else
@@ -405,6 +549,8 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
   n_obs    <- length(all_ts)
 
   # All expected timesteps
+  # Regular grid from the first to the last observation. A grid step counts as
+  # present only on an exact timestamp match.
   expected <- seq(t_start, t_end, by = int_sec)
   missing  <- expected[!expected %in% all_ts]
 
@@ -419,6 +565,10 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
   }
 
   # Collapse contiguous missing timestamps into gap periods
+  # Intent: start a new period wherever consecutive missing steps are more than
+  # one interval apart. `breaks` holds the index of the last missing step of
+  # each period, bracketed by 0 and length(missing); gap_start/gap_end are the
+  # first and last MISSING steps of a period.
   gaps   <- as.integer(diff(missing) / int_sec)
   breaks <- c(0L, which(gaps > 1L), length(missing))
 
@@ -460,6 +610,22 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
 #' gauge (unique `site_id` + `data_type` combination) for which Silver data
 #' has been promoted from Bronze.
 #'
+#' @details
+#' Only file names and directories are inspected: no Parquet file is opened and
+#' the register is not used. Silver files are expected at
+#' `<root>/silver/<category>/<data_type>/<YYYY>/<dataset_id>.parquet`, and the
+#' year folder is the year the Bronze data was *received* (the end of the
+#' `dataset_id`), not an observation year, so `year_min` and `year_max` are
+#' ingest years. `site_id` is taken as the second underscore-separated field of
+#' the file name (`EA_39001_Q_20240101` gives `39001`), so site ids that
+#' themselves contain an underscore are mis-parsed. Paths of the wrong depth or
+#' with too few name fields are skipped without comment.
+#'
+#' `file_count` is the number of Parquet files, not rows. Messages (not errors)
+#' are issued, with an empty table returned, when there is no Silver store, no
+#' files, or nothing matches. Related: [promote_to_silver()],
+#' [summarise_silver_coverage()], [check_silver_gaps()], [read_silver()].
+#'
 #' @param root Character. Root of the data store.
 #' @param data_type Character vector or `NULL`. Filter to one or more
 #'   framework data type codes, e.g. `"Q"`, `"H"`, `"P"`. `NULL` (default)
@@ -493,6 +659,7 @@ list_silver_gauges <- function(root, data_type = NULL) {
     return(invisible(data.table::data.table()))
   }
 
+  # (The root is regex-escaped below so dots or brackets in it match literally.)
   # Normalise paths for cross-platform splitting
   norm_root <- normalizePath(silver_root, mustWork = FALSE)
   rel <- sub(
@@ -501,9 +668,13 @@ list_silver_gauges <- function(root, data_type = NULL) {
     "",
     normalizePath(files, mustWork = FALSE)
   )
+  # No supplier level in Silver (see silver_path()); <year> is the received year.
   # Expected: <category>/<data_type>/<year>/<dataset_id>.parquet
   parts <- strsplit(rel, "/|\\\\")
 
+  # site_id is the 2nd underscore-separated field of the dataset_id
+  # (<SUPPLIER>_<site>_<type>_<date>); shallower or oddly named paths are
+  # dropped here and NULL results disappear in rbindlist().
   parsed <- data.table::rbindlist(lapply(seq_along(parts), function(i) {
     p <- parts[[i]]
     if (length(p) < 4L) return(NULL)
@@ -524,14 +695,17 @@ list_silver_gauges <- function(root, data_type = NULL) {
     return(invisible(data.table::data.table()))
   }
 
+  # `data_type` is also a column of `parsed`: .filter_rows() avoids the bare
+  # symbol resolving to the column inside parsed[...] (package.R).
   if (!is.null(data_type))
-    parsed <- parsed[parsed$data_type %in% data_type]
+    parsed <- .filter_rows(parsed, "data_type", data_type)
 
   if (nrow(parsed) == 0L) {
     message("No Silver files match the specified data_type filter.")
     return(invisible(data.table::data.table()))
   }
 
+  # year is the directory name (text); 4-digit years order correctly as text.
   out <- parsed[, .(
     year_min   = min(year),
     year_max   = max(year),
@@ -556,6 +730,22 @@ list_silver_gauges <- function(root, data_type = NULL) {
 #' Reads a subset of columns from every Silver Parquet file and returns
 #' per-gauge statistics: date range, total row count, and the distribution
 #' of QC flags (counts and percentage Good).
+#'
+#' @details
+#' Files are selected by path fragment (`/<data_type>/` directory and
+#' `_<site_id>_` in the file name; several values are OR-ed) before anything is
+#' read, then only `timestamp`, `site_id`, `data_type` and `qc_flag` are loaded.
+#' A file that cannot be read is skipped silently, so a corrupt file simply
+#' drops out of the totals.
+#'
+#' Counts are over the rows of every matching file. If the same observations
+#' were promoted more than once (Silver files are per received dataset) they
+#' are counted each time. `pct_good` is the share of all rows with `qc_flag == 1`
+#' (rows with a missing flag stay in the denominator), rounded to one decimal.
+#' `start` and `end` are the first and last dates as `"YYYY-MM-DD"` text.
+#' Messages (not errors) are issued, with an empty table returned, when the
+#' store, files or matches are missing. Related: [list_silver_gauges()],
+#' [check_silver_gaps()], [promote_to_silver()].
 #'
 #' @param root Character. Root of the data store.
 #' @param data_type Character vector or `NULL`. Filter to one or more data
@@ -590,6 +780,8 @@ summarise_silver_coverage <- function(root, data_type = NULL, site_id = NULL) {
   }
 
   # Apply path-level filters before reading
+  # Filtering is on path fragments, not on a column, so the data_type and
+  # site_id arguments never meet a same-named column in a [...] expression.
   if (!is.null(data_type)) {
     pats  <- paste0("/", data_type, "/")
     keep  <- Reduce(`|`, lapply(pats, function(p) grepl(p, files, fixed = TRUE)))
@@ -606,6 +798,7 @@ summarise_silver_coverage <- function(root, data_type = NULL, site_id = NULL) {
     return(invisible(data.table::data.table()))
   }
 
+  # Unreadable files become NULL and are dropped by Filter() below.
   records <- lapply(files, function(f) {
     tryCatch(
       data.table::as.data.table(
@@ -622,6 +815,8 @@ summarise_silver_coverage <- function(root, data_type = NULL, site_id = NULL) {
     return(invisible(data.table::data.table()))
   }
 
+  # n_good + n_estimated + n_suspect + n_rejected can be less than n_rows when
+  # qc_flag is missing; pct_good uses all rows (.N) as the denominator.
   out <- combined[, .(
     start       = as.character(as.Date(min(timestamp))),
     end         = as.character(as.Date(max(timestamp))),
@@ -651,6 +846,25 @@ summarise_silver_coverage <- function(root, data_type = NULL, site_id = NULL) {
 #' and `data_type`, infers the expected observation interval, and reports any
 #' contiguous periods of missing data.
 #'
+#' @details
+#' Same method as [check_gaps()] but for the Silver tier: timestamps are pooled
+#' from every file found under `<root>/silver` whose path contains
+#' `/<data_type>/` and `_<site_id>_` (any category), duplicates are removed, and
+#' a regular grid from the first to the last timestamp is compared with what
+#' was found. Differences from the Bronze version: the register is never
+#' consulted, so the interval comes from `expected_interval` or, failing that,
+#' the median observed spacing (reported in a message); and files that cannot
+#' be read are skipped silently.
+#'
+#' A grid step is present only on an exact timestamp match, so off-grid
+#' timestamps leave the steps around them reported as missing
+#' (see [snap_offgrid_timestamps()]). `gap_start` and `gap_end` are the first
+#' and last missing steps of a period. Messages (not errors) are issued, with an
+#' empty table returned, when no files match or fewer than two timestamps are
+#' found; an unrecognised `expected_interval` is an error. A summary and the
+#' gap table are printed. Related: [list_silver_gauges()],
+#' [summarise_silver_coverage()].
+#'
 #' @param root Character. Root of the data store.
 #' @param site_id Character. Site identifier.
 #' @param data_type Character. Framework data type code (`"Q"`, `"H"`,
@@ -679,6 +893,7 @@ check_silver_gaps <- function(root, site_id, data_type,
     return(invisible(data.table::data.table()))
   }
 
+  # Unreadable files are skipped silently (error -> NULL -> Filter()).
   ts_list <- lapply(pq_files, function(f) {
     tryCatch(
       data.table::as.data.table(
@@ -694,6 +909,8 @@ check_silver_gaps <- function(root, site_id, data_type,
     return(invisible(data.table::data.table()))
   }
 
+  # Unlike check_gaps() there is no register lookup: explicit argument, else
+  # the median spacing of the pooled timestamps.
   int_sec <- if (!is.null(expected_interval)) {
     s <- .interval_seconds(expected_interval)
     if (is.na(s))
@@ -709,6 +926,7 @@ check_silver_gaps <- function(root, site_id, data_type,
     s
   }
 
+  # Regular grid from first to last observation; present only on an exact match.
   expected <- seq(min(all_ts), max(all_ts), by = int_sec)
   missing  <- expected[!expected %in% all_ts]
   n_obs    <- length(all_ts)
@@ -722,6 +940,8 @@ check_silver_gaps <- function(root, site_id, data_type,
     return(invisible(data.table::data.table()))
   }
 
+  # Intent as in check_gaps(): a new period starts wherever consecutive missing
+  # steps are more than one interval apart.
   gaps   <- as.integer(diff(missing) / int_sec)
   breaks <- c(0L, which(gaps > 1L), length(missing))
 

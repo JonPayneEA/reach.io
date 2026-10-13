@@ -40,7 +40,7 @@ test_that("download_hydrology errors when no stations resolved", {
   # Stub find_stations to return empty table
   local_mocked_bindings(
     find_stations = function(...) data.table::data.table(),
-    .package = "eahydrologyr"
+    .package = "reach.io"
   )
   expect_error(
     download_hydrology(wiski_ids = "DOESNOTEXIST"),

@@ -249,7 +249,8 @@ test_that("apply_rating warns about below-limb stages", {
 
 test_that("check_limb_continuity reports discontinuous junctions", {
   rc  <- make_rc()
-  out <- expect_message(check_limb_continuity(rc), "exceed")
+  # make_rc() is continuous to within ~0.1%, so use a tight tolerance
+  expect_message(out <- check_limb_continuity(rc, tol_pct = 0.01), "exceed")
   expect_true(data.table::is.data.table(out))
   expect_equal(nrow(out), 2L)
 })
@@ -262,7 +263,7 @@ test_that("check_limb_continuity reports all connected for perfect limbs", {
     doubtful = c(FALSE, FALSE)
   )
   rc  <- FlodeRatingCurve(limbs = limbs)
-  out <- expect_message(check_limb_continuity(rc), "All.*connect")
+  expect_message(out <- check_limb_continuity(rc), "All.*connect")
   expect_true(all(out$connected))
 })
 
@@ -272,7 +273,7 @@ test_that("check_limb_continuity handles single limb", {
     C = 10, a = 0, b = 2, doubtful = FALSE
   )
   rc  <- FlodeRatingCurve(limbs = limbs)
-  out <- expect_message(check_limb_continuity(rc), "Only one limb")
+  expect_message(out <- check_limb_continuity(rc), "Only one limb")
   expect_equal(nrow(out), 0L)
 })
 
@@ -282,22 +283,22 @@ test_that("check_limb_continuity handles single limb", {
 
 test_that("fix_limb_continuity produces continuous junctions", {
   rc      <- make_rc()
-  rc_fix  <- expect_message(fix_limb_continuity(rc), "Adjusting")
-  cont    <- expect_message(check_limb_continuity(rc_fix, tol_pct = 0.01),
-                            "All.*connect")
+  expect_message(rc_fix <- fix_limb_continuity(rc), "Adjusting")
+  expect_message(cont <- check_limb_continuity(rc_fix, tol_pct = 0.01),
+                 "All.*connect")
   expect_true(all(cont$connected))
 })
 
 test_that("fix_limb_continuity preserves a and b parameters", {
   rc     <- make_rc()
-  rc_fix <- expect_message(fix_limb_continuity(rc), "Adjusting")
+  expect_message(rc_fix <- fix_limb_continuity(rc), "Adjusting")
   expect_equal(rc_fix@limbs$a, rc@limbs$a)
   expect_equal(rc_fix@limbs$b, rc@limbs$b)
 })
 
 test_that("fix_limb_continuity preserves anchor limb C", {
   rc     <- make_rc()
-  rc_fix <- expect_message(fix_limb_continuity(rc), "Adjusting")
+  expect_message(rc_fix <- fix_limb_continuity(rc), "Adjusting")
   expect_equal(rc_fix@limbs$C[1L], rc@limbs$C[1L])
 })
 

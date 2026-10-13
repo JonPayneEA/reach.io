@@ -14,19 +14,25 @@ Description: A hydrometric data pipeline toolkit for the Environment Agency
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
+Depends:
+    R (>= 4.1.0)
 Imports:
     httr,
     data.table,
     arrow,
     future,
     future.apply,
-    ggplot2,
     parallel,
     reach.utils,
-    S7
+    S7,
+    stats,
+    tools,
+    utils
 Suggests:
+    ggplot2,
     knitr,
     rmarkdown,
+    withr,
     testthat (>= 3.0.0)
 Remotes:
     JonPayneEA/reach.utils

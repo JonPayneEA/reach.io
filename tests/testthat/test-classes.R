@@ -179,7 +179,8 @@ test_that("FlodeHydroData prints formatted output", {
   obj <- FlodeFlow_Daily(readings = dt, from_date = "2022-01-01", to_date = "2022-01-10")
   out <- capture.output(print(obj))
   expect_true(any(grepl("FlodeFlow_Daily", out)))
-  expect_true(any(grepl("Date range", out)))
+  expect_true(any(grepl("@from_date +2022-01-01", out)))
+  expect_true(any(grepl("@to_date +2022-01-10", out)))
 })
 
 test_that("FlodePotEvapData prints formatted output", {
@@ -196,6 +197,6 @@ test_that("FlodePotEvap_15min print includes disagg method", {
   pe  <- FlodePotEvap_Hourly(readings = dt, source_name = "test")
   out <- disagg_to_15min(pe)
   printed <- capture.output(print(out))
-  expect_true(any(grepl("Disagg method", printed)))
+  expect_true(any(grepl("@disagg_method", printed)))
   expect_true(any(grepl("uniform_hourly", printed)))
 })

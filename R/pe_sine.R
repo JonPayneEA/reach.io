@@ -6,7 +6,10 @@
 #              Standard form: PE(t) = B + A * sin(2pi/365.25 * (doy - phi))
 #              B   = annual mean (mm/day)
 #              A   = amplitude (mm/day)
-#              phi = phase offset (day of year of peak; ~172 for UK)
+#              phi = phase offset (days). As coded, PE rises through B at
+#                    doy = phi and peaks at doy = phi + 365.25/4 (about 91
+#                    days later). Older wording called phi the day of the
+#                    peak (~172 for UK); the formula does not behave that way.
 # Flode Module: flode.io
 # Author:      [Hydrometric Data Lead]
 # Created:     2026-03-25
@@ -39,6 +42,42 @@
 #' coastal sites where PE timing is shifted by elevation or sea surface
 #' temperature, inspect `r_squared` before using the fitted curve
 #' operationally.
+#'
+#' @details
+#' **Day of year.** `doy` is the day of year (1 to 366) of each date and is the
+#' only time variable: all years supplied are pooled into one mean annual
+#' cycle. The period is fixed at 365.25 days, so day 366 of a leap year lies
+#' just past one full cycle rather than wrapping to day 1.
+#'
+#' **Meaning of `phi`.** As coded, the curve rises through `B` at
+#' `doy = phi` and reaches its maximum about 91 days later, at
+#' `phi + 365.25 / 4`. `phi` is therefore the day the curve crosses the annual
+#' mean going upward, which differs from the "day of peak" wording above.
+#' Parameters from this function are consistent with [generate_pe_sine()] and
+#' [compare_pe_sine()], which use the same formula, but the date of maximum PE
+#' is `phi + 91.3` (wrapped at 365.25), not `phi`.
+#'
+#' **Methods.** `"lm_fourier"` expands the sine into
+#' `B + C1 sin(w doy) + C2 cos(w doy)` (with `w = 2 pi / 365.25`), fits it by
+#' ordinary least squares, and recovers `A = sqrt(C1^2 + C2^2)` and
+#' `phi = atan2(-C2, C1) / w`, wrapped into `[0, 365.25)`. `A` is a norm, so it
+#' is never negative. `"nls"` fits `B`, `A` and `phi` directly, starting from
+#' `B = mean(pe)`, `A = (max - min) / 2` and `phi = 172`, without bounds, so
+#' `A` can come back negative (equivalent to shifting `phi` by half a year);
+#' `phi` is wrapped but the sign of `A` is not normalised. If NLS fails, a
+#' warning is issued and the `"lm_fourier"` result is returned instead; check
+#' the `method` element to see which was used.
+#'
+#' **Fit statistics.** `r_squared` and `rmse` are computed on the fitted sine
+#' without the zero floor that [generate_pe_sine()] and [compare_pe_sine()]
+#' apply, so they can differ slightly from `compare_pe_sine()` where the curve
+#' dips below zero. `r_squared` is `NA` for a constant series.
+#'
+#' **Data requirements.** At least 14 non-missing observations are required,
+#' but that is only a guard on the count: nothing checks that the data span a
+#' full year, and a short window leaves `A` and `phi` poorly determined.
+#' Observations need not be sorted. Apart from the NLS warning the function
+#' has no side effects.
 #'
 #' @param pe Numeric vector. Daily PE values (mm day\eqn{^{-1}}).
 #'   Must not contain NA.
@@ -92,12 +131,17 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
   if (anyNA(dates))
     stop("`dates` contains NA values.")
 
+  # Day of year (1-366) is the only time variable: all years are pooled into
+  # one mean annual cycle, and omega fixes the period at 365.25 days.
   doy   <- as.integer(format(dates, "%j"))
   omega <- 2 * pi / 365.25
 
   # -- lm_fourier method ------------------------------------------------------
   # Linearise: PE = B + C1*sin(omega*doy) + C2*cos(omega*doy)
   # Recover:   A = sqrt(C1^2 + C2^2),  phi = atan2(-C2, C1) / omega
+  # (Why atan2(-C2, C1): sin(omega*(doy - phi)) expands to
+  #  sin(omega*doy)*cos(omega*phi) - cos(omega*doy)*sin(omega*phi), so
+  #  C1 = A*cos(omega*phi) and C2 = -A*sin(omega*phi). A is a norm, hence >= 0.)
   .fit_lm_fourier <- function() {
     sin_term <- sin(omega * doy)
     cos_term <- cos(omega * doy)
@@ -110,10 +154,13 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
     phi      <- atan2(-C2, C1) / omega
     # Normalise phi into [0, 365.25)
     phi      <- phi %% 365.25
+    # Fit statistics use the unclamped sine that was regressed; compare_pe_sine()
+    # and generate_pe_sine() floor the curve at zero, so numbers can differ.
     fitted   <- B + A * sin(omega * (doy - phi))
     resid    <- pe - fitted
     ss_res   <- sum(resid^2)
     ss_tot   <- sum((pe - mean(pe))^2)
+    # R^2 is undefined for a constant series (zero total variance).
     r_sq     <- if (ss_tot > 0) 1 - ss_res / ss_tot else NA_real_
     rmse     <- sqrt(mean(resid^2))
     list(B = B, A = A, phi = phi, r_squared = r_sq, rmse = rmse,
@@ -121,6 +168,10 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
   }
 
   # -- nls method -------------------------------------------------------------
+  # Direct fit of the three parameters from the starting values below. There
+  # are no bounds, so unlike lm_fourier the optimiser can return a negative A
+  # (the same curve as a positive A with phi shifted by half a year): phi is
+  # wrapped into [0, 365.25) but the sign of A is left as found.
   .fit_nls <- function() {
     amp_guess <- (max(pe) - min(pe)) / 2
     result <- tryCatch(
@@ -129,6 +180,8 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
         data  = list(pe = pe, doy = doy, omega = omega),
         start = list(B = mean(pe), A = amp_guess, phi = 172)
       ),
+      # Any nls() failure (non-convergence, singular gradient, ...) becomes a
+      # warning; the NULL it returns triggers the lm_fourier fallback below.
       error = function(e) {
         warning(sprintf(
           "[fit_pe_sine] NLS failed to converge (%s). Falling back to lm_fourier.",
@@ -137,6 +190,8 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
         NULL
       }
     )
+    # The fallback result reports method = "lm_fourier", which is how callers
+    # can tell the NLS fit was not used.
     if (is.null(result)) return(.fit_lm_fourier())
     B      <- unname(stats::coef(result)["B"])
     A      <- unname(stats::coef(result)["A"])
@@ -164,6 +219,19 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
 #' \deqn{PE(t) = \max\bigl(0,\; B + A \sin\!\left(\frac{2\pi}{365.25}(doy - \phi)\right)\bigr)}
 #' Values are clamped to zero so physically impossible negative PE is never
 #' returned.
+#'
+#' @details
+#' The series is daily from `start` to `end` inclusive, using the same
+#' day-of-year (1 to 366) and 365.25-day period as [fit_pe_sine()], so
+#' parameters fitted there reproduce the same curve here. Because negative
+#' values are clamped to zero, a series with `A > B` has a mean above `B` and
+#' does not round-trip exactly through `fit_pe_sine()`.
+#'
+#' With `as_s7 = TRUE` the readings table has columns `dateTime` (midnight UTC
+#' of each date), `date` and `value`; with `as_s7 = FALSE` the same numbers
+#' come back as `date` and `pe`. `from_date` / `to_date` on the S7 object are
+#' the requested range. Nothing is written to disk. Use [disagg_to_15min()] on
+#' the S7 result for a finer timestep.
 #'
 #' @param B Numeric. Annual mean PE (mm day\eqn{^{-1}}).
 #' @param A Numeric. Amplitude (mm day\eqn{^{-1}}).
@@ -208,10 +276,17 @@ generate_pe_sine <- function(B, A, phi, start, end, as_s7 = TRUE) {
   if (end < start)
     stop("`end` must be on or after `start`.")
 
+  # Inclusive daily sequence. Day of year (1-366) and the 365.25-day period
+  # match fit_pe_sine(), so a fitted curve is reproduced here.
   dates     <- seq(start, end, by = "day")
   doy       <- as.integer(format(dates, "%j"))
+  # Floor at zero: with A > B the winter trough would be negative, which PE
+  # cannot be. This lifts the series mean above B in that case.
   pe_values <- pmax(0, B + A * sin(2 * pi / 365.25 * (doy - phi)))
 
+  # The plain table names the column `pe`; the S7 object uses the schema name
+  # `value` and also needs `dateTime` (midnight UTC) and `date`, both required
+  # by the FlodePotEvapData validator.
   if (!as_s7) {
     return(data.table::data.table(date = dates, pe = pe_values))
   }
@@ -240,6 +315,25 @@ generate_pe_sine <- function(B, A, phi, start, end, as_s7 = TRUE) {
 #' Phase (\eqn{\phi}) averaging is performed on the unit circle to avoid
 #' wrap-around artefacts when gauges span the day 0/365 boundary (e.g.
 #' mixing gauges with \eqn{\phi = 5} and \eqn{\phi = 360}).
+#'
+#' @details
+#' Order of operations: `NULL` entries are dropped first. `weights`, if given,
+#' are checked against the length of the original `params_list` (so they line
+#' up with the `NULL` entries too), reduced to the kept fits, and rescaled to
+#' sum to 1. A weight attached to a failed fit is therefore discarded, and
+#' weights that sum to zero over the kept fits are an error.
+#'
+#' `B` and `A` are weighted arithmetic means. `phi` is treated as an angle on a
+#' circle of 365.25 days and averaged as a weighted mean of unit vectors, so
+#' phases either side of the year boundary combine sensibly. The length of the
+#' mean vector is discarded; if the phases cancel exactly (for example two
+#' equally weighted gauges half a year apart) the result is arbitrary.
+#'
+#' Only the `B`, `A` and `phi` elements of each entry are read, so any list
+#' with those elements works. A fit from `fit_pe_sine(method = "nls")` can carry
+#' a negative `A`; averaging it with positive amplitudes mixes sign
+#' conventions, so the default `"lm_fourier"` fits (always `A >= 0`) are the
+#' safer input. The result can be passed to [generate_pe_sine()].
 #'
 #' @param params_list Named list of `fit_pe_sine()` results, one per gauge.
 #'   `NULL` entries (failed fits) are silently dropped. Must contain at least
@@ -295,6 +389,9 @@ regionalise_pe_sine <- function(params_list, weights = NULL) {
     stop("All entries in `params_list` are NULL. No fits available to regionalise.")
 
   # Validate or build weights
+  # Weights are validated against the ORIGINAL list length (NULL entries
+  # included) so they line up positionally, then subset to the kept fits and
+  # renormalised: weight given to a failed fit is simply discarded.
   if (!is.null(weights)) {
     if (length(weights) != length(params_list))
       stop("`weights` must be the same length as `params_list`.")
@@ -308,14 +405,20 @@ regionalise_pe_sine <- function(params_list, weights = NULL) {
     weights <- rep(1 / length(valid), length(valid))
   }
 
+  # Only B, A and phi are read; other fit_pe_sine() fields are ignored.
   B_vec   <- vapply(valid, `[[`, numeric(1L), "B")
   A_vec   <- vapply(valid, `[[`, numeric(1L), "A")
   phi_vec <- vapply(valid, `[[`, numeric(1L), "phi")
 
+  # B and A: plain weighted means.
   B_reg <- sum(weights * B_vec)
   A_reg <- sum(weights * A_vec)
 
   # Phase-aware averaging on the unit circle
+  # phi is an angle on a circle of 365.25 days, so average unit vectors rather
+  # than the numbers (phases of 5 and 360 average to about day 0, not 182).
+  # The length of the mean vector is dropped; if the phases cancel exactly the
+  # result is arbitrary (atan2(0, 0) is 0).
   omega        <- 2 * pi / 365.25
   mean_sin_phi <- sum(weights * sin(omega * phi_vec))
   mean_cos_phi <- sum(weights * cos(omega * phi_vec))
@@ -338,6 +441,20 @@ regionalise_pe_sine <- function(params_list, weights = NULL) {
 #' `B`, `A`, `phi`) against an observed PE series. Returns RMSE, bias,
 #' and \eqn{R^2}, and optionally a `ggplot2` plot overlaying the observed
 #' and fitted series.
+#'
+#' @details
+#' The fitted series is `max(0, B + A sin(2 pi / 365.25 (doy - phi)))`: the
+#' same curve and zero floor as [generate_pe_sine()]. [fit_pe_sine()] does not
+#' apply the floor, so its own `rmse` and `r_squared` can differ slightly from
+#' the values here for series that dip below zero.
+#'
+#' `bias` is fitted minus observed, so a positive value means the model
+#' over-estimates. `r_squared` is `1 - SS_res / SS_tot` against the mean of
+#' `pe`: it is negative when the curve fits worse than a constant at the
+#' observed mean, and `NA` when `pe` is constant. Dates need not be contiguous
+#' or sorted, and `B`, `A` and `phi` are not validated beyond being used in the
+#' formula. The `fitted` element holds `date`, `observed` and the (floored)
+#' curve for every input row.
 #'
 #' @param pe Numeric vector. Observed daily PE (mm day\eqn{^{-1}}).
 #' @param dates Date vector. Dates corresponding to `pe`.
@@ -386,13 +503,17 @@ compare_pe_sine <- function(pe, dates, B, A, phi, plot = FALSE) {
     stop("`pe` and `dates` must be the same length.")
 
   doy    <- as.integer(format(dates, "%j"))
+  # Same curve, including the zero floor, as generate_pe_sine().
   fitted <- pmax(0, B + A * sin(2 * pi / 365.25 * (doy - phi)))
 
+  # Signed fitted - observed: bias > 0 means the model over-estimates.
   resid  <- fitted - pe
   rmse   <- sqrt(mean(resid^2))
   bias   <- mean(resid)
   ss_res <- sum((pe - fitted)^2)
   ss_tot <- sum((pe - mean(pe))^2)
+  # R^2 is relative to the observed mean, so it goes negative when the curve is
+  # worse than a constant; NA for a constant series.
   r_sq   <- if (ss_tot > 0) 1 - ss_res / ss_tot else NA_real_
 
   fitted_dt <- data.table::data.table(
@@ -404,6 +525,9 @@ compare_pe_sine <- function(pe, dates, B, A, phi, plot = FALSE) {
   out <- list(rmse = rmse, bias = bias, r_squared = r_sq, fitted = fitted_dt)
 
   if (plot) {
+    if (!requireNamespace("ggplot2", quietly = TRUE))
+      stop("`plot = TRUE` requires the 'ggplot2' package. ",
+           "Install it with install.packages(\"ggplot2\").", call. = FALSE)
     # Thin observed points to at most 1000 for readability on long series
     n    <- nrow(fitted_dt)
     idx  <- if (n > 1000L) seq(1L, n, length.out = 1000L) else seq_len(n)

@@ -40,13 +40,13 @@
 #' │   └── MOSES/SM/
 #' ├── bronze/
 #' │   └── hydrometric/
-#' │       └── ratings/
+#' │       └── rating_curves/ratings/
 #' ├── silver/
 #' │   └── hydrometric/
-#' │       └── ratings/
+#' │       └── rating_curves/ratings/
 #' ├── gold/
 #' │   ├── hydrometric/
-#' │   │   ├── ratings/
+#' │   │   ├── rating_curves/ratings/
 #' │   │   ├── Q/FFA/
 #' │   │   └── P/catchment_average/
 #' │   ├── radarH19/P/
@@ -55,6 +55,36 @@
 #' ```
 #'
 #' Safe to re-run on an existing store — existing directories are untouched.
+#'
+#' @details
+#' Only the tier, category, supplier and data-type folders are created. The
+#' `<YYYY>` observation-year folders under Bronze are not made here: the
+#' Bronze writers create them when data first lands (see [run_backfill()] and
+#' [ingest_all_file()]). The `register/` folder is created, but the register
+#' CSV itself is only created by the first provenance record.
+#'
+#' How `categories` is applied:
+#'
+#' - Bronze folders are made per supplier and data type, except that the
+#'   `NRFA` supplier only gets `Q` (it carries flow only), whatever
+#'   `data_types` says.
+#' - Silver and Gold folders are made per data type, not per supplier.
+#' - `gold_purposes` entries add `gold/<category>/<data_type>/<purpose>/`
+#'   folders, and only for data types listed in that category's `data_types`.
+#' - Rating folders (`<tier>/hydrometric/rating_curves/ratings/` in every
+#'   tier) are created only when `"rating_curves"` is listed as a
+#'   `hydrometric` supplier. Because that name also passes through the
+#'   ordinary supplier loop, `bronze/hydrometric/rating_curves/<data_type>/`
+#'   folders are made too.
+#'
+#' The returned manifest has one row per directory considered, with `created`
+#' `FALSE` for those that already existed, so it doubles as a check of what a
+#' re-run changed. `verbose = FALSE` silences the per-directory messages but
+#' not the closing summary.
+#'
+#' Run this before [run_backfill()], [run_incremental()] or
+#' [ingest_all_file()] if you want the full tree up front. Their writers
+#' create what they need on demand.
 #'
 #' @param root Character. Root directory for the data store,
 #'   e.g. `"data/hydrometric"`.
@@ -115,6 +145,9 @@ setup_hydro_store <- function(
     ),
     verbose = TRUE) {
 
+  # -- Collect the directories to create --------------------------------------
+  # Paths are only collected here; nothing is created until the manifest
+  # step below.
   dirs <- character(0)
 
   for (cat in names(categories)) {
@@ -124,7 +157,9 @@ setup_hydro_store <- function(
 
     # Bronze: <tier>/<category>/<supplier>/<data_type>/
     for (supplier in suppliers) {
-      # NRFA carries flow only; MO carries rainfall and soil moisture only
+      # NRFA carries flow only, so it is restricted to Q here. Other suppliers
+      # (MO included) get every data type listed for the category, so which
+      # types MO gets is decided by the `categories` argument, not here.
       supplier_types <- switch(supplier,
         NRFA = intersect(data_types, "Q"),
         data_types
@@ -134,6 +169,7 @@ setup_hydro_store <- function(
       }
     }
 
+    # Silver and Gold have no supplier level: one folder per data type.
     # Silver: <tier>/<category>/<data_type>/
     for (dt in data_types) {
       dirs <- c(dirs, file.path(root, "silver", cat, dt))
@@ -144,7 +180,9 @@ setup_hydro_store <- function(
       dirs <- c(dirs, file.path(root, "gold", cat, dt))
     }
 
-    # Gold purposes for this category
+    # Gold purposes for this category. A purpose for a data type that is not
+    # in this category's data_types is skipped, so a shared default
+    # gold_purposes cannot create folders for types the caller left out.
     if (!is.null(gold_purposes) && cat %in% names(gold_purposes)) {
       for (dt in names(gold_purposes[[cat]])) {
         if (!dt %in% data_types) next
@@ -156,7 +194,8 @@ setup_hydro_store <- function(
   }
 
   # Ratings — only created when "rating_curves" is explicitly listed as a
-  # hydrometric supplier, so minimal setups don't get unwanted folders.
+  # hydrometric supplier, so minimal setups don't get unwanted folders. The
+  # same rating_curves/ratings path is created in all three tiers.
   if ("hydrometric" %in% names(categories) &&
       "rating_curves" %in% categories$hydrometric$suppliers) {
     for (tier in c("bronze", "silver", "gold")) {
@@ -167,7 +206,10 @@ setup_hydro_store <- function(
   # Register — shared across all categories
   dirs <- c(dirs, file.path(root, "register"))
 
-  # Create directories and build manifest
+  # -- Create directories and build manifest -----------------------------------
+  # Existence is tested per directory just before creating it. Re-running is
+  # harmless: dir.create(recursive = TRUE) does not touch what is there, and
+  # `created` is FALSE for those paths.
   manifest <- data.table::rbindlist(lapply(dirs, function(d) {
     already_exists <- dir.exists(d)
     dir.create(d, recursive = TRUE, showWarnings = FALSE)

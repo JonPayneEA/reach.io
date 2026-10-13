@@ -35,6 +35,9 @@
 # =============================================================================
 
 # Map a framework data_type code to the parameter name used by HYDRO_CLASS.
+# A private copy of .data_type_to_param_b() in read_bronze.R, kept separate so
+# the two readers stay independent. Only types that have an S7 class are mapped;
+# other valid store codes (SM, SWE, PE) are rejected here, before any file I/O.
 #' @noRd
 .data_type_to_param <- function(data_type) {
   switch(data_type,
@@ -50,6 +53,11 @@
 
 # Infer a period label ("15min", "hourly", "daily") from the median timestep
 # gap in a POSIXct vector. Falls back to "15min" for single-row inputs.
+# Unlike read_bronze(), which prefers the stored `period` column, the Silver
+# reader always infers the period from the data it has returned (after the
+# date and quality filters), so a heavily filtered or sparse selection can in
+# principle be classed differently from the full series. The median gap, rather
+# than the mean, keeps isolated gaps from moving the result.
 #' @noRd
 .infer_period_silver <- function(timestamps) {
   if (length(timestamps) < 2L) return("15min")
@@ -70,7 +78,10 @@
   readings <- data.table::data.table(
     dateTime         = dt$timestamp,
     date             = as.Date(dt$timestamp),
+    # qc_value is NA where the flag is Rejected (4), so with min_quality = NULL
+    # a rejected row has NA `value` but still carries its observation in raw_value
     value            = dt$qc_value,      # QC-accepted value is the primary reading
+    # As in Bronze, the dataset_id stands in for the API measure notation
     measure_notation = dt$dataset_id,
     raw_value        = dt$value,         # original observed value preserved
     supplier_flag    = dt$supplier_flag,
@@ -88,6 +99,10 @@
 
 # Find all Silver Parquet files for a gauge + data_type, optionally filtering
 # to a year range derived from the start/end dates.
+# Silver paths are silver/<category>/<data_type>/<YYYY>/<dataset_id>.parquet
+# (no supplier level), so unlike .locate_bronze_files() there is no category,
+# supplier or trace argument: every category's files for this gauge and data
+# type are returned together, in directory-listing order.
 #' @noRd
 .locate_silver_files <- function(root, gauge_id, data_type,
                                   start = NULL, end = NULL) {
@@ -95,7 +110,10 @@
   if (!dir.exists(silver_root))
     stop(sprintf("No Silver store found at: %s", silver_root))
 
+  # -- Find data type directories ----------------------------------------------
   # Locate all data_type subdirectories (may be under multiple categories)
+  # Found by walking the tree and matching a directory named exactly e.g. "Q"
+  # (either path separator, for Windows), since the category level is unknown.
   all_dirs <- list.dirs(silver_root, recursive = TRUE, full.names = TRUE)
   dt_dirs  <- all_dirs[grepl(
     paste0("[/\\\\]", data_type, "$"), all_dirs
@@ -107,7 +125,12 @@
       data_type
     ))
 
+  # -- Narrow by year ----------------------------------------------------------
   # Narrow to year subdirectories matching the date range
+  # The year directory is whatever silver_path() chose: it parses the year from
+  # the dataset_id's trailing date, so this is a coarse pre-filter only; exact
+  # bounds are applied to the rows in read_silver(). Non-numeric directory names
+  # are dropped when a range is given.
   year_dirs <- unlist(lapply(dt_dirs, function(d) {
     yd <- list.dirs(d, recursive = FALSE, full.names = TRUE)
     if (!is.null(start) || !is.null(end)) {
@@ -125,7 +148,11 @@
       gauge_id, data_type
     ))
 
+  # -- Match the gauge ---------------------------------------------------------
   # Filter to files whose name contains _<gauge_id>_
+  # A fixed (non-regex) substring match, so IDs with regex characters are safe.
+  # It is looser than the anchored Bronze pattern: any file whose name contains
+  # the ID between underscores matches, and trace variants are not told apart.
   site_pat <- paste0("_", gauge_id, "_")
   files    <- list.files(year_dirs, pattern = "\\.parquet$",
                          full.names = TRUE, recursive = FALSE)
@@ -157,16 +184,46 @@
 #' `qc_flag` and `qc_y_code` are always present in `@readings` so callers
 #' can apply their own thresholds if needed.
 #'
+#' @details
+#' Processing order: the data type is validated, matching files are located
+#' (narrowed by the year directories implied by `start` and `end`), read and
+#' combined, trimmed to the exact `start`/`end` window, filtered on
+#' `qc_flag`, sorted by time, and wrapped in the S7 class. Files that cannot be
+#' read are skipped with a warning; an error is raised if no file can be read or
+#' if a filter leaves no rows. There is no fallback to Bronze: if Silver is
+#' absent the call stops, and the message points to [promote_to_silver()].
+#'
+#' `end` is inclusive (a bare date covers the whole day, in UTC), unlike the
+#' exclusive `to_date`/`end_date` arguments of [download_hydrology()],
+#' [run_backfill()] and [run_incremental()].
+#'
+#' The quality filter keeps rows with `qc_flag <= min_quality`, so rows with a
+#' missing flag are dropped whenever a threshold is set. `qc_value` is `NA` for
+#' Rejected rows, so with `min_quality = NULL` those rows have an `NA` `value`
+#' and the observation survives only in `raw_value`.
+#'
+#' Unlike [read_bronze()], no de-duplication is performed: if a gauge has been
+#' promoted more than once, repeated timestamps will appear in `@readings`.
+#' Files are matched on the gauge ID alone, across all categories, since the
+#' Silver layout has no supplier level and there is no `trace` argument. The S7
+#' class is chosen from the median timestep of the rows returned (15-minute or
+#' daily); for any other period a warning is issued and the plain `readings`
+#' `data.table` is returned instead of an S7 object. `cols` only chooses among
+#' the columns listed under Value; unknown names are ignored, and `dateTime`,
+#' `date`, `value` and `measure_notation` are always kept.
+#'
 #' @param root Character. Root of the data store (the directory containing
 #'   `silver/`).
 #' @param gauge_id Character. Site identifier (as used in `site_id` and
 #'   the `dataset_id` embedded in file names).
 #' @param data_type Character. Framework data type code: `"Q"` (flow),
 #'   `"H"` (stage/level), or `"P"` (rainfall).
-#' @param start Date or character (`"YYYY-MM-DD"`) or `NULL`. Earliest
-#'   timestamp to include. `NULL` reads from the beginning of the record.
-#' @param end Date or character (`"YYYY-MM-DD"`) or `NULL`. Latest
-#'   timestamp to include. `NULL` reads to the end of the record.
+#' @param start Date, POSIXct or character (`"YYYY-MM-DD"` or
+#'   `"YYYY-MM-DD HH:MM:SS"`) or `NULL`. Earliest timestamp to include (a bare
+#'   date means midnight UTC). `NULL` reads from the beginning of the record.
+#' @param end Date, POSIXct or character or `NULL`. Latest timestamp to include;
+#'   a bare date includes the whole of that day. `NULL` reads to the end of the
+#'   record.
 #' @param min_quality Integer or `NULL`. Maximum `qc_flag` value to include.
 #'   `1` = Good only; `2` = Good + Estimated; `3` = Good + Estimated +
 #'   Suspect; `NULL` = all flags including Rejected (4). Default `1L`.
@@ -201,9 +258,15 @@ read_silver <- function(root, gauge_id, data_type,
                         min_quality = 1L,
                         cols        = NULL) {
 
+  # -- Locate files ------------------------------------------------------------
+  # Validate the data type before touching the file system
+  param <- .data_type_to_param(data_type)
+
   files <- .locate_silver_files(root, gauge_id, data_type, start, end)
 
+  # -- Read and combine files --------------------------------------------------
   # Read and combine all relevant files
+  # A damaged file warns and is skipped; only if nothing is readable is it an error
   dt_list <- lapply(files, function(f) {
     tryCatch(
       data.table::as.data.table(arrow::read_parquet(f)),
@@ -220,13 +283,21 @@ read_silver <- function(root, gauge_id, data_type,
     stop(sprintf("No data could be read for gauge '%s' / '%s'.",
                  gauge_id, data_type))
 
+  # -- Date and quality filters ------------------------------------------------
   # Post-filter by exact timestamp bounds (year-level filtering was approximate)
-  if (!is.null(start))
-    dt <- dt[timestamp >= as.POSIXct(as.Date(start), tz = "UTC")]
-  if (!is.null(end))
-    dt <- dt[timestamp <= as.POSIXct(as.Date(end),   tz = "UTC") + 86399L]
+  # .bound_posixct() makes a bare-date `end` run to the end of that day (inclusive)
+  if (!is.null(start)) {
+    lo <- .bound_posixct(start, "start")
+    dt <- dt[dt$timestamp >= lo]
+  }
+  if (!is.null(end)) {
+    hi <- .bound_posixct(end, "end")
+    dt <- dt[dt$timestamp <= hi]
+  }
 
   # Quality filter
+  # `min_quality` is an argument, not a Silver column, so using it inside dt[...]
+  # is safe; the comparison also drops rows whose qc_flag is NA
   if (!is.null(min_quality))
     dt <- dt[qc_flag <= as.integer(min_quality)]
 
@@ -240,10 +311,14 @@ read_silver <- function(root, gauge_id, data_type,
 
   data.table::setorder(dt, site_id, timestamp)
 
+  # -- Build the S7 object -----------------------------------------------------
   # Build FlodeHydroData-compatible readings
   readings <- .build_silver_readings(dt)
 
   # Column subset (always keep the required FlodeHydroData columns)
+  # The subset is applied to `readings` (not the raw Silver table) and before the
+  # class is built, so the validator only ever sees the required columns plus
+  # the requested extras. intersect() silently ignores names that do not exist.
   if (!is.null(cols)) {
     required_cols <- c("dateTime", "date", "value", "measure_notation")
     keep          <- unique(c(required_cols, cols))
@@ -252,10 +327,11 @@ read_silver <- function(root, gauge_id, data_type,
   }
 
   # Resolve S7 class
-  param  <- .data_type_to_param(data_type)
   period <- .infer_period_silver(dt$timestamp)
   cls    <- HYDRO_CLASS[[param]][[period]]
 
+  # HYDRO_CLASS has no entry for some periods (e.g. "hourly"); return the bare
+  # readings with a warning instead of failing
   if (is.null(cls)) {
     warning(sprintf(
       "No S7 class for parameter '%s', period '%s'. Returning data.table.",
@@ -282,6 +358,15 @@ read_silver <- function(root, gauge_id, data_type,
 #' as a named list. Gauges that fail (e.g. no Silver data exists) are
 #' skipped with a warning rather than stopping the whole call.
 #'
+#' @details
+#' Gauges are read sequentially with identical arguments, so one `start`,
+#' `end` and `min_quality` applies to all of them. Every failure, including a
+#' gauge whose rows all fail the quality filter, becomes a warning, so compare
+#' `names(result)` with `gauge_ids` to see what was skipped. If every gauge
+#' fails the result is an empty list rather than an error; only an empty
+#' `gauge_ids` stops the call. For raw, un-flagged data use
+#' [read_bronze_multi()].
+#'
 #' @param root Character. Root of the data store.
 #' @param gauge_ids Character vector. One or more site identifiers.
 #' @param data_type Character. Framework data type code (`"Q"`, `"H"`,
@@ -304,9 +389,12 @@ read_silver_multi <- function(root, gauge_ids, data_type, ...) {
   if (length(gauge_ids) == 0L)
     stop("`gauge_ids` must contain at least one gauge identifier.")
 
+  # Pre-named list so each result is stored under its gauge ID; a failed gauge
+  # assigns NULL, which removes its entry
   results <- vector("list", length(gauge_ids))
   names(results) <- gauge_ids
 
+  # Sequential, so any skip warnings appear in gauge order
   for (gid in gauge_ids) {
     results[[gid]] <- tryCatch(
       read_silver(root, gid, data_type, ...),
@@ -333,6 +421,16 @@ read_silver_multi <- function(root, gauge_ids, data_type, ...) {
 #' registry, then delegates to [read_silver_multi()]. Requires the registry
 #' to contain a `catchment_id` column (or equivalent) mapping sites to
 #' catchments.
+#'
+#' @details
+#' The registry must contain columns literally named `site_id` and
+#' `catchment_col`. The registry written by [build_gauge_registry()] names its
+#' columns `gauge_id` and `catchment`, so it needs renaming (or a suitable
+#' `catchment_col`) before use here. Gauges are matched on exact equality with
+#' `catchment_id`; the registry's `data_type` and `category` are not consulted,
+#' so the single `data_type` you pass is requested for every gauge. A catchment
+#' with no gauges in the registry is an error, whereas gauges that have no
+#' Silver data are skipped with a warning (see [read_silver_multi()]).
 #'
 #' @param root Character. Root of the data store.
 #' @param catchment_id Character. Catchment identifier to filter the registry
@@ -362,6 +460,8 @@ read_silver_catchment <- function(root, catchment_id, data_type,
                                    ...) {
   registry <- data.table::as.data.table(registry)
 
+  # Validate the registry shape up front: `[[` on a missing column returns NULL,
+  # which would otherwise surface as a misleading "no gauges found" error below
   if (!catchment_col %in% names(registry))
     stop(sprintf(
       "Column '%s' not found in registry. Available: %s",
@@ -370,9 +470,10 @@ read_silver_catchment <- function(root, catchment_id, data_type,
   if (!"site_id" %in% names(registry))
     stop("Registry must contain a 'site_id' column.")
 
-  gauge_ids <- registry[
-    registry[[catchment_col]] == catchment_id, site_id
-  ]
+  # Plain vector indexing (no dt[...]) on purpose: the default catchment_col is
+  # "catchment_id", the same name as the argument, and inside dt[...] the column
+  # would win and match every row
+  gauge_ids <- registry[["site_id"]][registry[[catchment_col]] == catchment_id]
 
   if (length(gauge_ids) == 0L)
     stop(sprintf("No gauges found in registry for catchment '%s'.",

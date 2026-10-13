@@ -13,11 +13,9 @@ make_silver_store <- function(n_sites = 1L, n_rows = 100L) {
 
   for (i in seq_len(n_sites)) {
     site  <- sprintf("3900%d", i)
-    ts    <- seq(
-      as.POSIXct("2024-01-01", tz = "UTC"),
-      by = "15 min",
-      length.out = n_rows
-    )
+    # seq() on POSIXct returns integer-backed values in recent R, which arrow
+    # mis-writes; build the timestamps as doubles
+    ts    <- as.POSIXct("2024-01-01", tz = "UTC") + (seq_len(n_rows) - 1) * 900
     dt <- data.table::data.table(
       timestamp     = ts,
       value         = runif(n_rows, 1, 10),

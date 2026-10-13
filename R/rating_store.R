@@ -51,6 +51,9 @@ NULL
 # Internal helpers
 # =============================================================================
 
+# Layout: <root>/<tier>/hydrometric/ratings/ratings.parquet, one Parquet per
+# tier holding all sites and versions. The register is shared by all tiers. The
+# category directory is fixed at "hydrometric".
 #' @noRd
 .rating_paths <- function(root, tier = "gold") {
   tier        <- match.arg(tier, c("bronze", "silver", "gold"))
@@ -64,19 +67,30 @@ NULL
 
 # Return the next version integer for a site_id + tier given the register CSV.
 # Versions are scoped per tier so bronze/silver/gold each start at 1.
+# Numbers come from the REGISTER, not the Parquet, and are never reused
+# (Superseded rows still count), so the next version is max + 1. If the
+# register is lost while the Parquet remains, numbering restarts at 1 and would
+# duplicate (site_id, version) pairs in the Parquet.
 #' @noRd
 .next_rating_version <- function(site_id, reg_path, tier) {
   if (!file.exists(reg_path)) return(1L)
+  # Read as text so ids and version numbers keep their written form.
   reg <- data.table::fread(reg_path, colClasses = "character", showProgress = FALSE)
   if (nrow(reg) == 0L || !"site_id" %in% names(reg)) return(1L)
-  rows <- reg[reg$site_id == site_id & reg$tier == tier]
+  # which() on whole vectors: the arguments site_id and tier are also column
+  # names, so reg[site_id == site_id & ...] would match every row.
+  idx  <- which(reg$site_id == site_id & reg$tier == tier)
+  rows <- reg[idx]
   if (nrow(rows) == 0L) return(1L)
   max(as.integer(rows$version), na.rm = TRUE) + 1L
 }
 
 # Flatten one FlodeRatingCurve to a data.table row-per-limb ready for Parquet.
+# Dates are stored as ISO-8601 text with NA for open-ended; limb_no records the
+# limb order that .dt_to_curve() restores.
 #' @noRd
 .curve_to_dt <- function(x, version) {
+  # Copy: := must not add columns to the curve's own limbs.
   dt <- data.table::copy(x@limbs)
   dt[, `:=`(
     site_id    = x@station_id,
@@ -94,8 +108,13 @@ NULL
 }
 
 # Reconstruct one FlodeRatingCurve from a data.table slice (one version only).
+# Rebuilding through FlodeRatingCurve() re-runs coercion and validation, so a
+# damaged or hand-edited Parquet fails loudly on load. valid_from, valid_to and
+# source are repeated on every limb row of a version; row 1 is used.
 #' @noRd
 .dt_to_curve <- function(dt) {
+  # Restore limb order (the curve validator requires ascending `lower`). Sorts
+  # the slice by reference; callers pass a subset, not the full table.
   data.table::setorder(dt, limb_no)
   limbs <- dt[, .(lower, upper, C, a, b, doubtful)]
 
@@ -139,6 +158,35 @@ NULL
 #'
 #' The ratings directory and register are created automatically if they
 #' do not yet exist (no need to call [setup_hydro_store()] first).
+#'
+#' @details
+#' Order of work: the curve's `station_id` is checked (a missing or empty one is
+#' an error); the next version number is read from the register; the limbs are
+#' appended to the tier's Parquet (the whole file is read, the new rows stacked
+#' on, and the file rewritten); then the register row is appended and earlier
+#' `"Active"` rows are marked `"Superseded"`. The register, not the Parquet, is
+#' the source of version numbers, and numbers are never reused.
+#'
+#' The two writes are not atomic. If the process stops after the Parquet is
+#' rewritten but before the register is, the Parquet holds a version the
+#' register does not know about, and the next save for that site and tier takes
+#' the same number again. Writers are also not safe to run concurrently against
+#' one store, since each does a read-modify-write of the whole Parquet and
+#' register.
+#'
+#' Validity windows are stored as given and are not compared with those of
+#' existing versions at save time. Overlaps only surface when the versions are
+#' loaded together (see [load_rating()]).
+#'
+#' For a [FlodeRatingSet], each curve is saved in list order through the same
+#' method, using the curve's own `station_id` (the set's is ignored). Each gets
+#' its own version and register row, and because every save supersedes the
+#' site's previous `"Active"` version, only the last curve of the set is left
+#' `"Active"`. The return value is then one path per curve, all the same file.
+#'
+#' Directories are created as needed. A message reports any superseding and the
+#' file written. Related: [list_ratings()], [load_rating()],
+#' [check_limb_continuity()], [fix_limb_continuity()].
 #'
 #' @param x A [FlodeRatingCurve] or [FlodeRatingSet]. The curve's `station_id` slot
 #'   must be set to a non-empty string.
@@ -219,6 +267,7 @@ S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
                                                   derivation_method  = NA_character_,
                                                   model_or_project   = NA_character_,
                                                   notes              = NA_character_) {
+  # -- Validate and resolve paths --------------------------------------------
   if (is.na(x@station_id) || !nzchar(x@station_id)) {
     stop("`station_id` must be set on the FlodeRatingCurve before saving.")
   }
@@ -228,11 +277,18 @@ S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
   dir.create(paths$ratings_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(dirname(paths$register), recursive = TRUE, showWarnings = FALSE)
 
+  # -- Version and limbs -----------------------------------------------------
+  # Version comes from the register (see .next_rating_version()); the curve is
+  # flattened to one row per limb.
   version    <- .next_rating_version(x@station_id, paths$register, tier)
   rating_id  <- sprintf("%s_RATING_%s_v%d", x@station_id, tier, version)
   limbs_flat <- .curve_to_dt(x, version)
 
-  # Append to or create Parquet
+  # -- Append limbs to Parquet -----------------------------------------------
+  # Read-modify-write of the whole shared file. fill = TRUE tolerates an
+  # existing file that lacks columns added later. Plain arrow::write_parquet(),
+  # not the temp-file-and-rename writer used for Bronze, so the write is not
+  # atomic.
   if (file.exists(paths$pq_file)) {
     existing <- data.table::as.data.table(arrow::read_parquet(paths$pq_file))
     combined <- data.table::rbindlist(list(existing, limbs_flat), fill = TRUE)
@@ -241,7 +297,10 @@ S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
   }
   arrow::write_parquet(combined, paths$pq_file)
 
-  # Build new register row
+  # -- Register --------------------------------------------------------------
+  # New versions start "Active". derivation_method and model_or_project live
+  # only in the register, not in the Parquet. file_path is the shared Parquet,
+  # the same for every version.
   reg_row <- data.table::data.table(
     rating_id         = rating_id,
     site_id           = x@station_id,
@@ -264,7 +323,12 @@ S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
   if (file.exists(paths$register)) {
     existing_reg <- data.table::fread(paths$register, colClasses = "character",
                                       showProgress = FALSE)
-    # Supersede any previously Active version for this site + tier
+    # Intent (and documented behaviour): mark earlier "Active" versions of this
+    # site + tier "Superseded". n_superseded, used in the message, is counted
+    # per tier. NB: inside existing_reg[...] the bare `tier` resolves to the
+    # COLUMN, so `tier == tier` below is always TRUE and the update applies to
+    # the site's Active rows in ALL tiers (see .filter_rows() in package.R for
+    # the scoping rule).
     if ("status" %in% names(existing_reg)) {
       n_superseded <- sum(existing_reg$site_id == x@station_id &
                           existing_reg$tier    == tier          &
@@ -280,6 +344,7 @@ S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
   } else {
     updated_reg <- reg_row
   }
+  # The whole register is rewritten, not appended to.
   data.table::fwrite(updated_reg, paths$register)
 
   message(sprintf(
@@ -296,6 +361,9 @@ S7::method(save_rating, FlodeRatingSet) <- function(x, root,
                                                 derivation_method = NA_character_,
                                                 model_or_project  = NA_character_,
                                                 notes             = NA_character_) {
+  # Curves are saved one at a time in list order through the curve method, so
+  # versions are numbered in that order and each save supersedes the site's
+  # previous Active version (see @details). The result is one path per curve.
   paths <- vapply(x@curves, function(cv) {
     save_rating(cv, root = root, tier = tier, saved_by = saved_by,
                 method_of_receipt = method_of_receipt,
@@ -316,6 +384,25 @@ S7::method(save_rating, FlodeRatingSet) <- function(x, root,
 #' Reads the shared ratings Parquet, filters to `site_id`, and reconstructs
 #' either one [FlodeRatingCurve] (when `version` is specified) or a [FlodeRatingSet]
 #' containing every stored version for that site (default).
+#'
+#' @details
+#' The shared Parquet of the chosen tier is read in full and filtered to
+#' `site_id`. The register is not consulted, so a version's `status`
+#' (`"Active"` or `"Superseded"`) has no effect on what is loaded. Each stored
+#' version is rebuilt through the [FlodeRatingCurve] constructor, which
+#' re-validates it. A missing Parquet, an unknown site and an unknown `version`
+#' are errors; nothing is printed.
+#'
+#' With `version = NULL` all versions are returned as a [FlodeRatingSet], whose
+#' validator requires non-overlapping validity windows. A window with
+#' `valid_to = NA` is open-ended, so an earlier version saved without a
+#' `valid_to` overlaps any later version that has a `valid_from`, and loading
+#' fails with the set's overlap error. Give superseded versions a closed window
+#' when saving them, or load them one at a time with `version`. A version saved
+#' without `valid_from` loads, but cannot be selected by [apply_rating()] inside
+#' a set.
+#'
+#' Related: [save_rating()], [list_ratings()], [apply_rating()].
 #'
 #' @param site_id Character. Station identifier (must match the `station_id`
 #'   used when the curve was saved).
@@ -353,13 +440,18 @@ load_rating <- function(site_id, root, tier = "gold", version = NULL) {
     ))
   }
 
+  # The whole shared Parquet is read, then filtered. `site_id` is also a column
+  # name, hence which() on dt$site_id rather than dt[site_id == site_id].
   dt <- data.table::as.data.table(arrow::read_parquet(paths$pq_file))
-  dt <- dt[dt$site_id == site_id]
+  idx <- which(dt$site_id == site_id)
+  dt  <- dt[idx]
 
   if (nrow(dt) == 0L) {
     stop(sprintf("No ratings found for site '%s'.", site_id))
   }
 
+  # Explicit dt$version below: a bare `version` inside dt[...] is the column,
+  # not this function's argument.
   if (!is.null(version)) {
     v  <- as.integer(version)
     dt <- dt[dt$version == v]
@@ -371,6 +463,9 @@ load_rating <- function(site_id, root, tier = "gold", version = NULL) {
 
   # Return all versions as a FlodeRatingSet
   versions <- sort(unique(dt$version))
+  # Inside dt[...] `version` is the COLUMN (intended) and `v` the loop value;
+  # the function argument `version` is NULL on this path. The set's validator
+  # rejects overlapping validity windows.
   curves   <- lapply(versions, function(v) .dt_to_curve(dt[version == v]))
 
   FlodeRatingSet(curves = curves, station_id = site_id)
@@ -385,6 +480,20 @@ load_rating <- function(site_id, root, tier = "gold", version = NULL) {
 #'
 #' Reads `<root>/register/rating_register.csv` and prints a summary of
 #' stored versions. Optionally filtered to one or more sites.
+#'
+#' @details
+#' Only the register is read (not the Parquet), so the listing shows what was
+#' recorded at save time, including each version's `status`: `"Superseded"`
+#' rows stay listed. Filters are exact any-of matches. If the register is
+#' missing, or nothing matches, a message (not an error) is issued and an empty
+#' table is returned.
+#'
+#' The printed table is a condensed view (identity, validity, provenance and
+#' note columns; `file_path` and any other columns are left out), but the
+#' invisibly returned value is the complete filtered register. Column types here
+#' come from `fread()` autodetection (`version` is integer), unlike
+#' [save_rating()], which reads the register as text. Related: [save_rating()],
+#' [load_rating()].
 #'
 #' @param root Character. Root of the data store.
 #' @param site_id Character vector or `NULL`. Filter to specific site(s).
@@ -413,8 +522,11 @@ list_ratings <- function(root, site_id = NULL, tier = NULL) {
 
   reg <- data.table::fread(reg_path, showProgress = FALSE)
 
-  if (!is.null(site_id)) reg <- reg[reg$site_id %in% site_id]
-  if (!is.null(tier))    reg <- reg[reg$tier    %in% tier]
+  # `site_id` and `tier` are also column names: a bare symbol inside reg[...]
+  # would resolve to the column and keep every row, so .filter_rows() matches
+  # outside the table scope.
+  if (!is.null(site_id)) reg <- .filter_rows(reg, "site_id", site_id)
+  if (!is.null(tier))    reg <- .filter_rows(reg, "tier", tier)
 
   if (nrow(reg) == 0L) {
     parts <- c(
@@ -436,6 +548,7 @@ list_ratings <- function(root, site_id = NULL, tier = NULL) {
                     "method_of_receipt", "derivation_method", "model_or_project",
                     "saved_by", "saved_at", "notes")
   present_cols <- intersect(core_cols, names(reg))
+  # `..` looks present_cols up in the calling scope, not as a column.
   display      <- reg[, ..present_cols]
 
   cat(sprintf("<Rating register>  %d version(s)\n\n", nrow(display)))

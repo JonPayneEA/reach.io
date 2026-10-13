@@ -1,15 +1,16 @@
 # ============================================================
 # Tool:        Output Helper
 # Description: Internal helper that either returns a
-#              data.table in memory or writes it to a CSV,
-#              used by the sync and batch download paths.
+#              data.table in memory or writes it to the Bronze
+#              tier as Parquet, used by the sync and batch
+#              download paths.
 # Flode Module: flode.io
 # Author:      [Hydrometric Data Lead]
 # Created:     2026-02-01
 # Modified:    2026-02-01 - JP: initial version
 # Tier:        1
 # Inputs:      data.table of readings, output mode
-# Outputs:     data.table (memory) or CSV file path (disk)
+# Outputs:     data.table (memory) or Bronze Parquet paths (disk)
 # Dependencies: data.table
 # ============================================================
 
@@ -18,11 +19,12 @@
 #' Handle output of a completed data.table of readings
 #'
 #' Internal helper that either returns a `data.table` of readings unchanged
-#' (memory mode) or writes it as a Bronze-tier Parquet file following the
-#' framework path convention:
-#' `bronze/hydrometric/EA/<data_type>/<YYYY>/<dataset_id>.parquet`
+#' (memory mode) or writes it to the Bronze tier as Parquet, one file per
+#' calendar year of observations, following the framework path convention:
+#' `bronze/<category>/<supplier>/<data_type>/<YYYY>/<dataset_id>.parquet`
 #'
-#' Applies [apply_bronze_schema()] to standardise columns before writing.
+#' Applies [apply_bronze_schema()] to standardise columns before writing and
+#' delegates the write to `.write_bronze_by_year()`.
 #'
 #' @param dt A `data.table` of readings with at least `dateTime`, `value`,
 #'   and optionally `quality` columns (as returned by [fetch_readings()]).
@@ -38,51 +40,86 @@
 #'   Defaults to `measure_id` when `NA` or empty.
 #' @param period Character. Temporal resolution stored in the Bronze schema
 #'   `period` column, e.g. `"15min"`, `"daily"`.
+#' @param supplier_code Character. Supplier code for the path and dataset ID.
+#'   Default `"EA"` (the Hydrology API).
+#' @param category Character. Data category for the path. Default
+#'   `"hydrometric"`.
+#' @param register_path Character or `NULL`. Hydrometric Data Register CSV. When
+#'   supplied, a provenance record is appended for every file written.
+#' @param method_of_receipt Character. Recorded in the register. Default
+#'   `"API pull"`.
 #'
 #' @return In `"memory"` mode, the `data.table` unchanged. In `"disk"` mode,
-#'   the Bronze Parquet file path as a character string (invisibly).
+#'   a character vector of the Bronze Parquet paths written (invisibly), one
+#'   per observation year.
 #'
 #' @noRd
 handle_output <- function(dt, output, out_dir, parameter, measure_id,
                            append = FALSE, site_id = NA_character_,
-                           period = NA_character_) {
+                           period = NA_character_,
+                           supplier_code = "EA",
+                           category = "hydrometric",
+                           register_path = NULL,
+                           method_of_receipt = "API pull") {
 
+  # Memory mode is a pass-through: no schema is applied, so the caller keeps the
+  # raw API columns (dateTime, value, quality, ...) rather than Bronze names
   if (output == "memory") return(dt)
 
-  data_type     <- param_to_data_type(parameter)
-  supplier_code <- "EA"
-  category      <- "hydrometric"
+  # -- Resolve identifiers ------------------------------------------------------
+  # Fail before anything is written: an unmapped parameter would otherwise
+  # produce a dataset_id and path with an NA data type.
+  data_type <- param_to_data_type(parameter)
+  if (is.na(data_type))
+    stop(sprintf("No framework data type for parameter '%s'.", parameter))
 
+  # The measure notation stands in for the site when no WISKI/site id was found
+  # for the station, so the series is still filed under a stable name.
+  # The dataset_id carries today's date (the default received_date): this is
+  # what makes a later re-download a new file rather than an overwrite.
   sid        <- if (!is.na(site_id) && nzchar(site_id)) site_id else measure_id
   dataset_id <- make_dataset_id(supplier_code, sid, data_type)
 
-  # Partition by data year — one Parquet file per calendar year of observations
-  data_years <- sort(unique(data.table::year(dt[["dateTime"]])))
-  paths      <- character(length(data_years))
+  # -- Apply schema and write ---------------------------------------------------
+  # The API returns dateTime/value/quality; `quality` becomes supplier_flag
+  # (all NA if the column is absent).
+  bronze_dt <- apply_bronze_schema(
+    dt,
+    dataset_id        = dataset_id,
+    site_id           = sid,
+    data_type         = data_type,
+    timestamp_col     = "dateTime",
+    value_col         = "value",
+    supplier_flag_col = "quality",
+    period            = period
+  )
 
-  for (i in seq_along(data_years)) {
-    yr      <- data_years[i]
-    yr_dt   <- dt[data.table::year(dateTime) == yr]
+  # One file per observation year; `files` records what was written and the
+  # period each file covers (it has zero rows if every timestamp was missing).
+  files <- .write_bronze_by_year(bronze_dt, out_dir, category, supplier_code,
+                                 data_type, dataset_id)
 
-    bronze_dt <- apply_bronze_schema(
-      yr_dt,
-      dataset_id        = dataset_id,
-      site_id           = sid,
-      data_type         = data_type,
-      timestamp_col     = "dateTime",
-      value_col         = "value",
-      supplier_flag_col = "quality",
-      period            = period
+  # -- Provenance ---------------------------------------------------------------
+  # Register is optional here, and only files that exist get a record. Written
+  # directly (unlike the orchestrators, which return rows from workers)
+  # because download_hydrology() works through measures one at a time in the
+  # calling process, so appends to the register never overlap. The supplier
+  # name is fixed as "HDE" regardless of supplier_code, since this helper only
+  # serves the Hydrology API download paths.
+  if (!is.null(register_path) && nrow(files) > 0L) {
+    .write_provenance_rows(
+      .bronze_prov_rows(files, dataset_id,
+                        supplier            = "HDE",
+                        supplier_code       = supplier_code,
+                        site_id             = sid,
+                        data_type           = data_type,
+                        temporal_resolution = period,
+                        method_of_receipt   = method_of_receipt),
+      register_path
     )
-
-    path <- bronze_path(out_dir, category, supplier_code, data_type, dataset_id,
-                        year = yr)
-    dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
-    arrow::write_parquet(bronze_dt, path)
-    paths[i] <- path
   }
 
-  invisible(paths)
+  invisible(files$path)
 }
 
 
@@ -98,6 +135,17 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
 #'
 #' The measure column is named `"rainfall"`, `"flow"`, or `"level"` according
 #' to the `measure` argument.
+#'
+#' @details
+#' Rows are reshaped one-for-one and in the order given: nothing is sorted,
+#' de-duplicated, gap-filled or unit-converted, and `value` is passed through
+#' untouched (including `NA`). Any other columns in `dt` are dropped. The
+#' date-time components are expressed in `tz`, so supply the zone the model
+#' expects; the default `"GMT"` has no daylight-saving shift, which avoids
+#' duplicated or missing local hours in the output. Seconds are truncated to
+#' whole numbers. Nothing is written to disk; to take data from the store first
+#' use [read_bronze()], and see [format_for_fmp()] for the Flood Modeller
+#' equivalent.
 #'
 #' @param dt A `data.table` or `data.frame` with at least two columns:
 #'   `dateTime` (POSIXct) and `value` (numeric).
@@ -196,6 +244,27 @@ format_for_pdm <- function(dt, measure = c("rainfall", "flow", "level"),
 #' testing without touching the file system. Supply `out_file` to write
 #' directly to disk; parent directories are created automatically.
 #'
+#' @details
+#' Inputs are validated first (object classes and the lengths of `gauge_ids`
+#' and `ied_refs`), so nothing is written if they are wrong. Mixed
+#' `period_name` values across `flows` (for example daily and 15-minute) are
+#' allowed but raise a warning, because the outer join then leaves `NA` where
+#' timesteps do not coincide.
+#'
+#' The merge assumes each series has at most one reading per `dateTime`; a
+#' duplicated timestamp inside one series would be matched against every
+#' reading at that time in the others and so add rows. The merged table is
+#' sorted by time before the relative hours are computed. A `start_time` later
+#' than some readings gives negative hours rather than an error.
+#'
+#' Flow values are written as supplied (the layout assumes m3/s; no unit
+#' conversion or check is made) to three decimal places, as is the time
+#' column. `NA` is replaced by `na_fill` before formatting, so
+#' `na_fill = 0` appears as `0.000` while the default leaves an empty cell.
+#' Header rows 1 and 2 are padded with empty cells so that every line has one
+#' field for the time column plus one per site. Use [read_bronze()] to obtain
+#' flow objects from the store, and [format_for_pdm()] for PDM for PCs.
+#'
 #' @param flows A named `list` of [FlodeFlow_Daily] or [FlodeFlow_15min] objects, one per
 #'   gauge. A single (unnamed) object is also accepted and wrapped automatically.
 #'   List names are used to construct IED references when `ied_refs` is `NULL`.
@@ -257,6 +326,9 @@ format_for_fmp <- function(flows,
 
   # -- 1. Normalise input -------------------------------------------------------
 
+  # All validation happens up front so that a bad argument can never leave a
+  # half-written file behind (the only side effect is in step 7).
+
   # Accept a single Flow object and wrap it
   if (S7::S7_inherits(flows, FlodeFlow_Daily) || S7::S7_inherits(flows, FlodeFlow_15min)) {
     flows <- list(flows)
@@ -289,18 +361,22 @@ format_for_fmp <- function(flows,
     ))
   }
 
-  # Warn on mixed period_names
+  # Warn on mixed period_names. This is only a warning: the outer join in step 3
+  # is still valid, it just produces NA where the timesteps do not line up.
   periods <- vapply(flows, function(obj) obj@period_name, character(1L))
   if (length(unique(periods)) > 1L) {
     warning(
       "Mixed period_names detected (",
       paste(unique(periods), collapse = ", "),
-      "). Merging by dateTime — gaps will appear where timesteps differ."
+      "). Merging by dateTime - gaps will appear where timesteps differ."
     )
   }
 
   # -- 2. Build IED references (Row 4 column headers) --------------------------
 
+  # Precedence mirrors the roxygen list above: explicit ied_refs win, then
+  # name + gauge id, then whichever of the two exists, then positional fallback.
+  # Order is that of `flows`, which must match gauge_ids / ied_refs.
   nms <- names(flows)
 
   if (!is.null(ied_refs)) {
@@ -317,12 +393,19 @@ format_for_fmp <- function(flows,
 
   # -- 3. Merge all time series on dateTime ------------------------------------
 
+  # Each series is reduced to dateTime + a positional column v1..vn, so the
+  # value columns line up with col_refs / gauge_ids by index and two sites never
+  # collide on the name "value". Subsetting already returns a new table; the
+  # explicit copy() is extra insurance that setnames() (which renames in place)
+  # can never touch the S7 object's own readings.
   dts <- lapply(seq_len(n), function(i) {
     dt <- data.table::copy(flows[[i]]@readings)[, .(dateTime, value)]
     data.table::setnames(dt, "value", paste0("v", i))
     dt
   })
 
+  # Full outer join (all = TRUE) so a short or gappy series never truncates the
+  # others; the gaps surface as NA and are handled in step 5
   merged <- Reduce(
     function(a, b) merge(a, b, by = "dateTime", all = TRUE),
     dts
@@ -331,6 +414,9 @@ format_for_fmp <- function(flows,
 
   # -- 4. Compute relative time in hours ---------------------------------------
 
+  # t = 0 is the first observation unless the caller fixes the origin (e.g. a
+  # warm-up period before the data starts). difftime() makes this independent
+  # of the time zone either POSIXct carries.
   t0 <- if (!is.null(start_time)) {
     start_time
   } else {
@@ -341,6 +427,8 @@ format_for_fmp <- function(flows,
 
   # -- 5. Apply na_fill --------------------------------------------------------
 
+  # Done before formatting so a fill value is printed as a number. With the
+  # default NA_real_ nothing is replaced and NAs become blank cells below.
   val_cols <- paste0("v", seq_len(n))
   if (!is.na(na_fill)) {
     for (col in val_cols) {
@@ -358,6 +446,8 @@ format_for_fmp <- function(flows,
   time_col  <- sprintf("%.3f", rel_hours)
   val_mat   <- as.matrix(merged[, ..val_cols])
   val_str   <- apply(val_mat, 2L, fmt_val)
+  # With a single site apply() returns a plain vector; restore a rows x 1
+  # matrix so the row loop below can index val_str[i, ]
   if (is.null(dim(val_str))) dim(val_str) <- c(length(val_str), 1L)
 
   row_strs <- vapply(
@@ -367,6 +457,7 @@ format_for_fmp <- function(flows,
   )
 
   # Header rows — pad with n blank cells after the first entry
+  # so every line has n + 1 comma-separated fields (time column + one per site)
   blanks <- rep("", n)
 
   row1 <- paste(c(title,   blanks), collapse = ",")

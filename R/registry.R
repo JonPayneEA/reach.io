@@ -21,26 +21,61 @@
 #' and writes the result as a Parquet file that every other pipeline tool reads
 #' from. Must be run before any backfill starts.
 #'
-#' By default (`overwrite = TRUE`) the existing registry is replaced. Set
-#' `overwrite = FALSE` to merge new gauges into an existing registry: gauges
-#' already present (matched on `gauge_id`) are left untouched, and only new
-#' rows are appended. This lets you update the gauge list CSV without losing
-#' `backfill_done` status or other metadata already written for existing gauges.
+#' A registry row is one *series*: the key is `gauge_id` + `data_type`, so a
+#' gauge that records both flow and level has two rows. The input is validated
+#' before anything is written: `gauge_id` must be non-empty, `data_type` must be
+#' present for every source except `"WISKI_ALL"` (whose files hold several
+#' parameters), and each key may appear only once.
 #'
-#' In a live Databricks environment the `write_parquet()` call can be replaced
-#' with a Delta write via `sparklyr` or the Databricks REST API without
-#' changing any other logic.
+#' By default (`overwrite = TRUE`) the existing registry is replaced. Set
+#' `overwrite = FALSE` to merge new series into an existing registry: series
+#' already present (matched on `gauge_id` + `data_type`) are left untouched,
+#' and only new rows are appended. This lets you update the gauge list CSV
+#' without losing `backfill_done` status or other metadata already written for
+#' existing series.
+#'
+#' @details
+#' ## Validation and defaults
+#'
+#' Checks run in this order and the first failure stops the function, before
+#' anything is written, so a bad CSV can never replace a good registry:
+#' required columns, empty `gauge_id`, missing `data_type`, duplicate keys,
+#' unknown `source_system` (see `VALID_SOURCES`), unknown `category`. Both
+#' `gauge_id` and `data_type` are read as character and trimmed, so numeric IDs
+#' such as `39001` keep their identity; an empty `data_type` becomes `NA`.
+#'
+#' Pipeline columns are added with fixed defaults: `active = TRUE`,
+#' `live = TRUE`, `backfill_done = FALSE`, `notes = NA` and `date_added` set
+#' to today. Any other columns in the CSV are dropped, so the stored schema
+#' does not depend on the input file. [run_backfill()] and [run_incremental()]
+#' only process rows with `active == TRUE`, and [run_incremental()] also
+#' skips `live == FALSE`. These flags cannot be set from the CSV (any such
+#' columns are overwritten); change them in the Parquet file.
+#'
+#' A `WISKI_ALL` row may have no `data_type`, but the orchestrators need a
+#' concrete type to fetch a series and log such a row as `FAILED`.
+#'
+#' ## Overwrite versus merge
+#'
+#' With `overwrite = TRUE` the registry is rebuilt from the CSV, so existing
+#' `backfill_done`, `active`, `live` and `notes` values are lost. With
+#' `overwrite = FALSE` only series not yet present are appended: attributes of
+#' an existing series (for example a changed `catchment`) are *not* updated
+#' from the CSV, and series missing from the CSV are not removed. If no
+#' registry exists yet, `overwrite = FALSE` behaves like a first build. Rows
+#' that [ingest_all_file()] adds (when given a `registry_path`) use the same
+#' `gauge_id` + `data_type` key.
 #'
 #' @section Windows file-locking:
 #' Arrow memory-maps Parquet files on Windows when reading, keeping a file
 #' handle open. Writing back to the same path while that map is live causes
 #' **Windows error 1224** ("The requested operation cannot be performed on a
-#' file with a user-mapped section open"). This function avoids the issue by
-#' writing to a temporary `.tmp` file and then using `file.rename()` to
-#' atomically replace the target — the rename only happens after the read map
-#' is released. If you observe the error despite this, check that no other
-#' process (e.g. an open R session or file explorer preview) is holding the
-#' registry file open.
+#' file with a user-mapped section open"). This function writes to a temporary
+#' `.tmp` file and then replaces the target (renaming, or copying if the rename
+#' is refused). If the target still cannot be replaced the function **stops
+#' with an error** rather than silently keeping the old registry — check that
+#' no other process (e.g. an open R session or file explorer preview) is
+#' holding the registry file open.
 #'
 #' @param input_csv Character. Path to the raw gauge list CSV. Must contain
 #'   columns: `gauge_id`, `source_system`, `data_type`, `category`,
@@ -50,8 +85,8 @@
 #'   into. Created if it does not exist. The file is written as
 #'   `gauge_registry.parquet` inside this directory.
 #' @param overwrite Logical. If `TRUE` (default), replace any existing
-#'   registry. If `FALSE`, merge new gauges into the existing registry,
-#'   preserving metadata for gauges already registered.
+#'   registry. If `FALSE`, merge new series into the existing registry,
+#'   preserving metadata for series already registered.
 #'
 #' @return The registry `data.table` invisibly (full merged registry when
 #'   `overwrite = FALSE`). The primary side-effect is writing
@@ -87,6 +122,43 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
     stop("Missing required columns: ", paste(missing, collapse = ", "))
   }
 
+  # gauge_id is an identifier, never a number: fread() reads "39001" as integer
+  # Normalise both key columns first so every later check, and the merge key,
+  # sees the same strings. data_type is coerced too because a column that is
+  # entirely empty (all WISKI_ALL rows) is read as logical NA, and empty
+  # strings are made NA so "missing" has a single representation.
+  raw_dt[, gauge_id := trimws(as.character(gauge_id))]
+  raw_dt[, data_type := trimws(as.character(data_type))]
+  raw_dt[!nzchar(data_type), data_type := NA_character_]
+
+  # Report row numbers (first 10) so the offending CSV lines are easy to find
+  bad_id <- is.na(raw_dt$gauge_id) | !nzchar(raw_dt$gauge_id)
+  if (any(bad_id)) {
+    stop(sprintf("`gauge_id` is missing or empty in %d row(s) (rows: %s).",
+                 sum(bad_id), paste(utils::head(which(bad_id), 10L), collapse = ", ")))
+  }
+
+  # -- Validate data_type: required except for WISKI_ALL ----------------------
+  # WISKI_ALL files hold several parameters, so the type is optional for that
+  # source only; every other source is fetched per series and needs it.
+  bad_type <- is.na(raw_dt$data_type) & raw_dt$source_system != "WISKI_ALL"
+  if (any(bad_type)) {
+    stop(sprintf("`data_type` is missing for %d non-WISKI_ALL row(s): %s",
+                 sum(bad_type),
+                 paste(utils::head(raw_dt$gauge_id[bad_type], 10L), collapse = ", ")))
+  }
+
+  # -- Validate uniqueness of (gauge_id, data_type) ----------------------------
+  # Same gauge with different types is fine (flow + level); the same pair
+  # twice is not. An NA type keys as "" (see .registry_key()), so a repeated
+  # NA-type gauge also counts as a duplicate.
+  dup <- duplicated(.registry_key(raw_dt$gauge_id, raw_dt$data_type))
+  if (any(dup)) {
+    stop(sprintf("Duplicate gauge_id + data_type combination(s): %s",
+                 paste(unique(.registry_key(raw_dt$gauge_id, raw_dt$data_type)[dup]),
+                       collapse = ", ")))
+  }
+
   # -- Validate source_system values ------------------------------------------
   # Any value not in VALID_SOURCES will cause the router to fail later, so
   # catch bad values here at registry build time
@@ -110,6 +182,8 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
   }
 
   # -- Add registry metadata columns (modify in place) ------------------------
+  # New rows always start active, live and not yet backfilled. In merge mode
+  # these defaults only reach genuinely new series (see below).
   raw_dt[, active        := TRUE]
   raw_dt[, live          := TRUE]
   raw_dt[, date_added    := Sys.Date()]
@@ -117,12 +191,15 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
   raw_dt[, notes         := NA_character_]
 
   # Select and order columns explicitly so the schema is stable regardless
-  # of what extra columns the input CSV contains
+  # of what extra columns the input CSV contains (extras are dropped here)
   new_dt <- raw_dt[, .(gauge_id, source_system, data_type, category,
                         catchment, ea_site_ref,
                         active, live, date_added, backfill_done, notes)]
 
   # -- Merge with existing registry if overwrite = FALSE ----------------------
+  # Everything validated above is in memory only; nothing has touched the
+  # existing registry file yet. When overwrite = FALSE but no file exists, the
+  # else branch below makes this a plain first build.
   registry_path <- file.path(output_path, "gauge_registry.parquet")
 
   if (!overwrite && file.exists(registry_path)) {
@@ -133,31 +210,32 @@ build_gauge_registry <- function(input_csv, output_path, overwrite = TRUE) {
       existing_dt[, live := TRUE]
     }
 
-    # Add only gauges not already in the registry
-    new_ids   <- new_dt$gauge_id[!new_dt$gauge_id %in% existing_dt$gauge_id]
-    added_dt  <- new_dt[gauge_id %in% new_ids]
+    # Add only series (gauge_id + data_type) not already in the registry.
+    # Existing rows are kept exactly as stored, so backfill_done, active, live
+    # and notes survive; their other fields are not refreshed from the CSV,
+    # and series absent from the CSV are not removed.
+    is_new    <- !.registry_key(new_dt$gauge_id, new_dt$data_type) %in%
+                 .registry_key(existing_dt$gauge_id, existing_dt$data_type)
+    added_dt  <- new_dt[is_new]
+    # fill = TRUE: a column found on only one side (e.g. extra columns in an
+    # older registry) becomes NA for the other rows instead of erroring
     registry_dt <- data.table::rbindlist(
       list(existing_dt, added_dt),
       use.names = TRUE, fill = TRUE
     )
     message(sprintf(
-      "Merge mode: %d new gauge(s) added, %d existing preserved -> %s",
+      "Merge mode: %d new series added, %d existing preserved -> %s",
       nrow(added_dt), nrow(existing_dt), output_path
     ))
   } else {
     registry_dt <- new_dt
-    message(sprintf("Registry written: %d gauges -> %s",
+    message(sprintf("Registry written: %d series -> %s",
                     nrow(registry_dt), output_path))
   }
 
-  # -- Write as Parquet (Delta-compatible) ------------------------------------
-  # Write to a temp file then rename so that on Windows the read_parquet()
-  # memory-map above is fully released before we touch the target path.
-  # file.rename() is atomic on both Windows and POSIX.
-  dir.create(output_path, recursive = TRUE, showWarnings = FALSE)
-  tmp_path <- paste0(registry_path, ".tmp")
-  arrow::write_parquet(registry_dt, tmp_path)
-  file.rename(tmp_path, registry_path)
+  # -- Write as Parquet -------------------------------------------------------
+  # Atomic write (temp file then replace); errors if the target is locked
+  .write_parquet_atomic(registry_dt, registry_path)
 
   invisible(registry_dt)
 }

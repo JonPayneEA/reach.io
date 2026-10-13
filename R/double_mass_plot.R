@@ -18,7 +18,6 @@
 # ============================================================
 
 #' @import S7
-#' @import ggplot2
 NULL
 
 
@@ -54,7 +53,11 @@ NULL
 #' @examples
 #' cumsum_na(c(1, NA, 3))  # returns c(1, 1, 4)
 #' cumsum_na(c(NA, NA))    # returns c(0, 0)
-cumsum_na <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
+cumsum_na <- function(x) {
+  x <- as.numeric(x)
+  x[is.na(x)] <- 0
+  cumsum(x)
+}
 
 # Auto-generate a readable axis label from a list of objects
 #' @noRd
@@ -205,7 +208,7 @@ cumsum_na <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
 #' @param label_x,label_y Axis labels. Auto-generated from the source
 #'   parameter types and `output_units` when `NULL`.
 #'
-#' @return A `ggplot` object. The aligned, cumulative `data.table` used
+#' @return A `ggplot` object (requires the suggested package 'ggplot2'). The aligned, cumulative `data.table` used
 #'   to build the plot is attached as `attr(p, "data")` for inspection or
 #'   further processing.
 #'
@@ -251,6 +254,10 @@ double_mass_plot <- function(x_data,
                              subtitle           = NULL,
                              label_x            = NULL,
                              label_y            = NULL) {
+
+  if (!requireNamespace("ggplot2", quietly = TRUE))
+    stop("double_mass_plot() requires the 'ggplot2' package. ",
+         "Install it with install.packages(\"ggplot2\").", call. = FALSE)
 
   # -- Coerce single objects to lists
   if (!is.list(x_data) || S7::S7_inherits(x_data, S7::S7_object)) {
