@@ -33,6 +33,9 @@
 #' @noRd
 submit_batch <- function(measure_notation, from_date, to_date) {
 
+  # Submission is a plain GET: the endpoint itself either redirects to a
+  # cached CSV or to a status page, so no job id is handled here. The date
+  # bounds mirror the sync endpoint (>= from, strictly < to).
   resp <- httr::GET(
     paste0(BASE_URL, "/data/batch-readings/batch"),
     query = list(
@@ -43,6 +46,8 @@ submit_batch <- function(measure_notation, from_date, to_date) {
   )
 
   httr::stop_for_status(resp)
+  # resp$url is the post-redirect URL: a status page for a queued job, or the
+  # CSV itself for a cached result. run_batch() tells the two apart by it.
   list(status_url = resp$url, measure = measure_notation)
 }
 
@@ -66,6 +71,9 @@ submit_batch <- function(measure_notation, from_date, to_date) {
 #' @noRd
 poll_batch <- function(status_url, max_wait_s = 600, poll_interval_s = 15) {
 
+  # The deadline is checked after each status read and before sleeping, so the
+  # job always gets a final poll, but total wall time can overrun max_wait_s by
+  # up to one poll interval plus a request.
   deadline <- Sys.time() + max_wait_s
 
   repeat {
@@ -75,12 +83,17 @@ poll_batch <- function(status_url, max_wait_s = 600, poll_interval_s = 15) {
     info   <- httr::content(resp, as = "parsed", simplifyVector = TRUE)
     status <- info$status
 
+    # Guard against a malformed reply (missing or multi-valued status) so the
+    # `==` comparisons below always see a single non-NA string.
     if (length(status) != 1L || is.na(status))
       stop("Batch status response had no usable 'status' field: ", status_url)
 
     message(sprintf("  [%s] %s", format(Sys.time(), "%H:%M:%S"), status))
 
+    # Only Completed and Failed are terminal. Pending, InProgress (and any
+    # status value not listed) keep polling until the deadline.
     if (status == "Completed") {
+      # A completed job with no result URL is an error, not an empty result.
       if (length(info$url) != 1L || is.na(info$url))
         stop("Batch completed but returned no download URL: ", status_url)
       return(info$url)
@@ -88,6 +101,7 @@ poll_batch <- function(status_url, max_wait_s = 600, poll_interval_s = 15) {
     if (status == "Failed")    stop("Batch failed: ",  status_url)
     if (Sys.time() > deadline) stop("Timed out: ",     status_url)
 
+    # Also paces the status polls: one request at a time, poll_interval_s apart.
     Sys.sleep(poll_interval_s)
   }
 }
@@ -129,8 +143,12 @@ run_batch <- function(mid, from_date, to_date, output, out_dir, param,
                       period = NA_character_, category = "hydrometric",
                       register_path = NULL) {
 
+  # The whole job sits inside one tryCatch: any failure (submit, poll, timeout,
+  # download, parse, or the Bronze write) becomes ok = FALSE for this measure
+  # rather than an error, so download_hydrology() carries on with the next.
   tryCatch({
 
+    # -- Submit the job -------------------------------------------------------
     batch      <- submit_batch(mid, from_date, to_date)
     status_url <- batch$status_url
 
@@ -143,6 +161,12 @@ run_batch <- function(mid, from_date, to_date, output, out_dir, param,
       dl_url <- poll_batch(status_url, max_wait_s = max_wait_s)
     }
 
+    # -- Download the CSV -----------------------------------------------------
+    # Download to a temp file rather than reading the body directly:
+    # stop_for_status() runs before anything is parsed, so an HTTP error page
+    # can never be read (or saved) as data. on.exit() registers on run_batch()
+    # itself because the tryCatch expression is evaluated in its frame, so the
+    # temp file is removed on success, early return, and error alike.
     tmp <- tempfile(fileext = ".csv")
     on.exit(unlink(tmp), add = TRUE)
     resp <- httr::GET(dl_url, httr::write_disk(tmp, overwrite = TRUE))
@@ -150,11 +174,17 @@ run_batch <- function(mid, from_date, to_date, output, out_dir, param,
 
     dt <- data.table::fread(tmp)
     dt[, measure_notation := mid]
+    # Same helper as the sync path, so both methods yield identical types.
     .parse_reading_datetimes(dt)
 
     Sys.sleep(1)  # EA fair-use: one request at a time
 
+    # -- Return or write ------------------------------------------------------
+    # The whole CSV is already in memory (dt) at this point; disk mode converts
+    # it in one go through handle_output() (year-partitioned Bronze + register).
     if (output == "disk") {
+      # Nothing to store is a success (ok = TRUE, rows = 0), not a failure; no
+      # file and no register row are produced.
       if (nrow(dt) == 0L) {
         message("  No data returned - nothing written.")
         return(list(measure = mid, data = NULL, file = NA_character_,
@@ -173,6 +203,7 @@ run_batch <- function(mid, from_date, to_date, output, out_dir, param,
     }
 
   }, error = function(e) {
+    # rows is NA on failure, whereas a job that returned no data reports 0.
     message("  ERROR: ", conditionMessage(e))
     list(measure = mid, data = NULL, file = NA_character_,
          rows = NA_integer_, ok = FALSE)

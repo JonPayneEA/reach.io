@@ -29,12 +29,20 @@
 #' @return `dt`, invisibly.
 #' @noRd
 .parse_reading_datetimes <- function(dt) {
+  # Columns are optional: either may be absent, and an already-typed column is
+  # left alone (fread returns IDate, which inherits "Date", so it passes the
+  # inherits() test). Here `date` on the right-hand side is the column.
   if ("date" %in% names(dt) && !inherits(dt[["date"]], "Date"))
     dt[, date := as.Date(date)]
 
   if ("dateTime" %in% names(dt)) {
     ts_raw <- dt[["dateTime"]]
     if (is.character(ts_raw)) {
+      # Drop the Z / +hh:mm offset WITHOUT converting: this is only correct
+      # because EA timestamps are always UTC. A non-zero offset would be read
+      # as UTC clock time. Strings that still do not fit the explicit format
+      # become NA silently, so downstream NA-timestamp handling matters.
+      # The second sub() accepts a space separator as well as "T".
       ts_clean <- sub("(Z|[+-]\\d{2}:\\d{2})$", "", ts_raw)
       ts_clean <- sub(" ", "T", ts_clean, fixed = TRUE)
       data.table::set(dt, j = "dateTime",
@@ -43,11 +51,13 @@
                                          tz     = "UTC"))
     } else if (inherits(ts_raw, "POSIXct")) {
       # jsonlite / fread may auto-parse using the local timezone. Force the
-      # tzone attribute to UTC without shifting the underlying numeric value.
+      # tzone attribute to UTC without shifting the underlying numeric value
+      # (relabels the zone, does not convert).
       attr(ts_raw, "tzone") <- "UTC"
       data.table::set(dt, j = "dateTime", value = ts_raw)
     }
   }
+  # Modified by reference via set() / :=, so callers ignore the return value.
   invisible(dt)
 }
 
@@ -58,6 +68,25 @@
 #' as a `data.table`. The default API cap of 100,000 rows is overridden to
 #' the hard maximum of 2,000,000. For larger requests use
 #' [download_hydrology()] with `method = "batch"`.
+#'
+#' @details
+#' - **One request, no paging.** Exactly one HTTP request is made and its
+#'   items are taken as they come. If the range holds more than `limit` rows
+#'   the result is silently truncated; [make_date_chunks()] and
+#'   [download_hydrology()] exist to keep each call below that.
+#' - **No pacing or retries.** This function does not sleep or retry, so a
+#'   caller looping over many measures or chunks must pause between calls to
+#'   respect the EA fair-use request (one request at a time).
+#' - **Errors.** An HTTP error status raises an error (via
+#'   `httr::stop_for_status()`); an empty response is not an error and returns
+#'   an empty `data.table`.
+#' - **Date bounds.** `from_date` is sent as `mineq-date` (inclusive) and
+#'   `to_date` as `max-date` (strictly before), so adjacent ranges that share
+#'   a boundary neither overlap nor leave a gap.
+#' - **Types.** `date` is returned as `Date` and `dateTime` as UTC `POSIXct`,
+#'   identically to the batch path.
+#' - Nothing is written to disk; for Bronze output use
+#'   [download_hydrology()] with `output = "disk"`.
 #'
 #' @param measure_notation Character. Unique measure ID — the `notation`
 #'   column from [get_measures()], e.g.
@@ -92,6 +121,9 @@ fetch_readings <- function(measure_notation,
   url <- sprintf("%s/id/measures/%s/readings.json",
                  BASE_URL, measure_notation)
 
+  # Date bounds are asymmetric by design: mineq-date is >=, max-date is
+  # strict <. Keeping to_date exclusive package-wide means consecutive chunks
+  # can share a boundary date with no duplicated or dropped readings.
   query <- list(
     `mineq-date` = from_date,  # >= from_date
     `max-date`   = to_date,    # <  to_date
@@ -99,15 +131,24 @@ fetch_readings <- function(measure_notation,
     `_view`      = "full"      # include quality flags and completeness columns
   )
 
+  # Omitted (not sent as NULL) when unset, so the API returns both Qualified
+  # and Measured observations.
   if (!is.null(observation_type)) query$observationType <- observation_type
 
   resp  <- httr::GET(url, query = query)
+  # Raise on 4xx/5xx so an error page is never parsed as if it were readings.
   httr::stop_for_status(resp)
   items <- httr::content(resp, as = "parsed", simplifyVector = TRUE)$items
 
+  # Zero-row result is a normal outcome (gap in the record, or a period before
+  # the series began) and is distinguished from failure by not raising.
   if (length(items) == 0) return(data.table::data.table())
 
   dt <- data.table::as.data.table(items)
+  # Tag every row with its measure so rows stay attributable once
+  # download_hydrology() combines many measures. The right-hand side is the
+  # function argument only while the response carries no column of the same
+  # name; if one ever appeared, data.table would resolve the name to it.
   dt[, measure_notation := measure_notation]
 
   # Parse date columns to proper R types for correct downstream filtering
@@ -123,6 +164,17 @@ fetch_readings <- function(measure_notation,
 #' synchronous API calls well within the 2,000,000-row hard limit. Especially
 #' important for 15-minute data where a single year can be ~35,000 rows per
 #' station.
+#'
+#' @details
+#' Chunks are anchored to `from_date`, not to calendar years: each chunk
+#' starts on the anniversary of `from_date`, so `"2019-06-01"` gives
+#' June-to-June chunks. Each `chunk_to` equals the next `chunk_from`; because
+#' the API treats the start as inclusive and the end as exclusive (see
+#' [fetch_readings()]) the chunks tile the range with no overlap and no gap.
+#' Bounds are returned as `"YYYY-MM-DD"` character strings ready to pass
+#' straight to [fetch_readings()]. Pure date arithmetic: no network requests
+#' and no side effects. [fetch_from_hde()] and [download_hydrology()] both use
+#' it.
 #'
 #' @param from_date Character. Start date in `"YYYY-MM-DD"` format.
 #' @param to_date Character. End date in `"YYYY-MM-DD"` format.
@@ -147,6 +199,8 @@ make_date_chunks <- function(from_date, to_date) {
   # Drop the final boundary if it coincides with to_date to avoid a
   # zero-length chunk at the end
   starts <- starts[starts < to]
+  # Each chunk ends where the next begins (exclusive end, inclusive start);
+  # only the last end is capped at to_date rather than a full year on.
   ends   <- c(starts[-1], to)
 
   data.table::data.table(chunk_from = as.character(starts),
@@ -185,11 +239,15 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
                      site_id = NA_character_, period = NA_character_,
                      category = "hydrometric", register_path = NULL) {
 
+  # `ok` starts TRUE and is only ever flipped to FALSE: any failed chunk marks
+  # the whole measure as not ok, even though chunks that succeeded are kept.
   chunk_list <- list()
   total_rows <- 0L
   dest       <- NA_character_
   ok         <- TRUE
 
+  # -- Fetch annual chunks ----------------------------------------------------
+  # Chunks are fetched strictly one after another (EA fair use).
   for (j in seq_len(nrow(chunks))) {
 
     chunk_from <- chunks$chunk_from[j]
@@ -198,16 +256,23 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
     message(sprintf("    Chunk %d/%d: %s -> %s",
                     j, nrow(chunks), chunk_from, chunk_to))
 
+    # Per-chunk isolation: a failure (HTTP error, parse error) is logged and
+    # flagged via ok, and the loop moves on to the next chunk.
     tryCatch({
 
       dt <- fetch_readings(mid, chunk_from, chunk_to,
                            observation_type = observation_type)
 
+      # `next` inside tryCatch() acts on the enclosing for loop. Note it also
+      # skips the Sys.sleep(1) below, so empty chunks are not paced.
       if (nrow(dt) == 0) {
         message("    No data for this chunk - skipping.")
         next
       }
 
+      # fetch_readings() makes a single unpaged request, so reaching the cap
+      # means the API cut the response off. Data is kept but flagged; ok is
+      # not set to FALSE.
       if (nrow(dt) >= API_HARD_LIMIT) {
         warning(sprintf(
           "Chunk %d/%d for '%s' hit the API row limit (%d). Data may be truncated - consider method = 'batch'.",
@@ -215,6 +280,7 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
         ))
       }
 
+      # Append to a list (cheap); combined once after the loop.
       chunk_list[[length(chunk_list) + 1L]] <- dt
       total_rows <- total_rows + nrow(dt)
       message(sprintf("    %d rows (running total: %d)", nrow(dt), total_rows))
@@ -223,10 +289,12 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
 
     }, error = function(e) {
       message("    ERROR: ", conditionMessage(e))
+      # <<- is needed: the handler runs in its own function scope.
       ok <<- FALSE
     })
   }
 
+  # -- Combine and write ------------------------------------------------------
   # Combine all chunks in one shot — much faster than incremental rbind
   combined <- if (length(chunk_list) > 0L) {
     data.table::rbindlist(chunk_list, fill = TRUE)
@@ -234,6 +302,11 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
     NULL
   }
 
+  # Disk mode writes once per measure, after all chunks, so the Bronze writer
+  # can split the full series by observation year (a chunk boundary need not
+  # match a calendar year). Nothing is written, and no register rows are added,
+  # when no chunk returned data. This call is outside the tryCatch above, so a
+  # write error propagates to the caller.
   if (output == "disk" && !is.null(combined) && nrow(combined) > 0L) {
     paths <- handle_output(combined, "disk", out_dir, param, mid,
                            site_id = site_id, period = period,
@@ -243,6 +316,9 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
     dest <- paste(paths, collapse = "; ")
   }
 
+  # `rows` is the number of rows fetched across chunks, not the number written
+  # (the Bronze writer drops rows with a missing timestamp). `file` stays NA
+  # in memory mode and when nothing was written.
   list(measure = mid,
        data    = if (output == "memory") combined else NULL,
        file    = dest,
