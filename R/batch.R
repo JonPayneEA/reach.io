@@ -115,7 +115,7 @@ poll_batch <- function(status_url, max_wait_s = 600, poll_interval_s = 15) {
 #' and reads it with `data.table::fread()`. Date columns are parsed by the same
 #' helper as the sync path so both methods return identical types. In disk
 #' mode the readings are then written to the Bronze tier via
-#' [handle_output()]; note that the whole CSV is held in memory while it is
+#' `handle_output()`; note that the whole CSV is held in memory while it is
 #' converted, so very large batch results need correspondingly large RAM.
 #'
 #' @param mid Character. Measure notation.
