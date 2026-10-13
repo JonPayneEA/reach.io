@@ -214,7 +214,7 @@ make_date_chunks <- function(from_date, to_date) {
 #' `method = "sync"`. Iterates over annual date chunks, accumulating readings
 #' as a list that is combined once at the end with `rbindlist()` (avoiding
 #' repeated full-table copies). In memory mode the combined table is returned;
-#' in disk mode it is written to the Bronze tier via [handle_output()].
+#' in disk mode it is written to the Bronze tier via `handle_output()`.
 #'
 #' @param mid Character. Measure notation.
 #' @param chunks `data.table`. Output of [make_date_chunks()].
