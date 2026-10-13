@@ -82,7 +82,7 @@ VALID_CATEGORIES <- c("hydrometric", "radarH19", "MOSES")
 #' The trailing `YYYYMMDD` is the *received* date, not an observation date.
 #' Because Bronze is append-only, the same series ingested on different days
 #' gets different IDs (and so different files), whereas re-ingesting on the
-#' same day produces the same ID and overwrites that day's files. Readers
+#' same day produces the same ID, and the writer merges into that day's files. Readers
 #' rely on this layout: [read_bronze()] orders files by the trailing date to
 #' decide which copy of a duplicated observation is the most recent, and
 #' strips it again to recognise rows of the same series.
@@ -430,7 +430,10 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
 #' the year directory always reflects the *observation* year (not the ingest
 #' year). Bronze is append-only: re-ingesting the same series on a later day
 #' adds a new file (new `dataset_id` date); duplicates are resolved on read by
-#' [read_bronze()]. Re-ingesting on the same day overwrites that day's file.
+#' [read_bronze()]. Re-ingesting on the same day merges into that day's file:
+#' existing rows are kept and, for a timestamp present in both, the new row
+#' wins. (Replacing the file would silently drop the earlier rows, for example
+#' when an incremental run follows a backfill on the same day.)
 #'
 #' @param bronze_dt A `data.table` conforming to the Bronze schema.
 #' @param output_dir,category,supplier_code,data_type,dataset_id See
@@ -471,15 +474,31 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
     # year is passed explicitly: the default would use the received year
     path <- bronze_path(output_dir, category, supplier_code, data_type,
                         dataset_id, year = yr)
-    .write_parquet_atomic(part, path)
-    # period_start/end describe this year's file only; they become the
-    # time_period_start/end of that file's provenance record
+
+    # The file name ends in the received DATE, so a second write of the same
+    # series and year on the same day resolves to the same path (for example a
+    # backfill followed by an incremental run). Replacing the file would
+    # silently discard the earlier rows, so merge instead: existing rows are
+    # kept, and where a timestamp appears in both the NEW row wins.
+    merged <- part
+    if (file.exists(path)) {
+      existing <- data.table::as.data.table(arrow::read_parquet(path))
+      merged   <- data.table::rbindlist(list(existing, part),
+                                        use.names = TRUE, fill = TRUE)
+      merged   <- unique(merged, by = "timestamp", fromLast = TRUE)
+      data.table::setorder(merged, timestamp)
+    }
+    .write_parquet_atomic(merged, path)
+
+    # period_start/end describe the whole file as it now stands (including any
+    # rows merged in); they become the time_period_start/end of that file's
+    # provenance record. `rows` counts the rows written by THIS call.
     data.table::data.table(
       year         = yr,
       path         = path,
       rows         = nrow(part),
-      period_start = format(min(part$timestamp), "%Y-%m-%d", tz = "UTC"),
-      period_end   = format(max(part$timestamp), "%Y-%m-%d", tz = "UTC")
+      period_start = format(min(merged$timestamp), "%Y-%m-%d", tz = "UTC"),
+      period_end   = format(max(merged$timestamp), "%Y-%m-%d", tz = "UTC")
     )
   })
   data.table::rbindlist(files)

@@ -76,7 +76,8 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
   # The measure notation stands in for the site when no WISKI/site id was found
   # for the station, so the series is still filed under a stable name.
   # The dataset_id carries today's date (the default received_date): this is
-  # what makes a later re-download a new file rather than an overwrite.
+  # what makes a later-day re-download a new file; a same-day repeat is merged
+  # into the existing file by the writer.
   sid        <- if (!is.na(site_id) && nzchar(site_id)) site_id else measure_id
   dataset_id <- make_dataset_id(supplier_code, sid, data_type)
 

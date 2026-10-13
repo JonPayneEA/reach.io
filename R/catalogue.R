@@ -131,7 +131,7 @@
 #' suppliers hold it). `start` and `end` are the earliest and latest period
 #' dates recorded (`"YYYY-MM-DD"` text). `n_datasets` counts register rows: the
 #' Bronze writers record one row per year file and every ingest appends more
-#' (a same-day re-ingest overwrites the file but still adds a row), so it counts
+#' (a same-day re-ingest merges into the existing file but still adds a row), so it counts
 #' registered files rather than distinct series.
 #'
 #' A header line and the table are printed to the console. When the register is
@@ -569,7 +569,11 @@ check_gaps <- function(root, site_id, data_type, category = "hydrometric",
   # one interval apart. `breaks` holds the index of the last missing step of
   # each period, bracketed by 0 and length(missing); gap_start/gap_end are the
   # first and last MISSING steps of a period.
-  gaps   <- as.integer(diff(missing) / int_sec)
+  # diff() of POSIXct is a difftime whose units R chooses (mins, hours, days)
+  # from the data, so it must be converted to seconds explicitly before dividing
+  # by int_sec; dividing the raw difftime gave ~0 for every pair and merged all
+  # gaps into one period.
+  gaps   <- as.integer(round(as.numeric(diff(missing), units = "secs") / int_sec))
   breaks <- c(0L, which(gaps > 1L), length(missing))
 
   gap_dt <- data.table::rbindlist(lapply(seq_along(breaks[-1L]), function(i) {
@@ -941,8 +945,9 @@ check_silver_gaps <- function(root, site_id, data_type,
   }
 
   # Intent as in check_gaps(): a new period starts wherever consecutive missing
-  # steps are more than one interval apart.
-  gaps   <- as.integer(diff(missing) / int_sec)
+  # steps are more than one interval apart. Seconds are requested explicitly:
+  # a bare difftime has auto-chosen units (see check_gaps()).
+  gaps   <- as.integer(round(as.numeric(diff(missing), units = "secs") / int_sec))
   breaks <- c(0L, which(gaps > 1L), length(missing))
 
   gap_dt <- data.table::rbindlist(lapply(seq_along(breaks[-1L]), function(i) {

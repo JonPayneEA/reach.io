@@ -458,8 +458,9 @@
 
     # -- Apply Bronze schema and write to framework folder structure ----------
     # The dataset_id ends in run_date, so ingesting the same series again on
-    # the same day gives the same name and replaces that day's year files;
-    # a later day adds new files (Bronze is append-only). The trace keeps
+    # the same day gives the same name, and the year files are then merged
+    # with what is already there; a later day adds new files (Bronze is
+    # append-only). The trace keeps
     # several series of one type at a station apart.
     supplier_code <- "WISKI"
     dataset_id    <- make_dataset_id(supplier_code, station, data_type,

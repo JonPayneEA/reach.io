@@ -256,8 +256,8 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
 #' Bronze file names end in the received date (see [read_bronze()]). If a
 #' series is written twice for the same observation year on the same calendar
 #' day, for example by a second run or by this function after a same-day
-#' [run_backfill()], the later file replaces the earlier one and holds only
-#' the rows that run wrote.
+#' [run_backfill()], the new rows are merged into the existing file rather
+#' than replacing it, so nothing already stored is lost.
 #'
 #' `gauge_ids` is checked against the registry after it has been narrowed to
 #' active, live rows, so an inactive or non-live gauge is reported as not

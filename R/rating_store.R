@@ -163,8 +163,9 @@ NULL
 #' Order of work: the curve's `station_id` is checked (a missing or empty one is
 #' an error); the next version number is read from the register; the limbs are
 #' appended to the tier's Parquet (the whole file is read, the new rows stacked
-#' on, and the file rewritten); then the register row is appended and earlier
-#' `"Active"` rows are marked `"Superseded"`. The register, not the Parquet, is
+#' on, and the file rewritten); then earlier `"Active"` rows for the same site
+#' and tier are marked `"Superseded"` and the new register row is appended. The
+#' register, not the Parquet, is
 #' the source of version numbers, and numbers are never reused.
 #'
 #' The two writes are not atomic. If the process stops after the Parquet is
@@ -180,9 +181,11 @@ NULL
 #'
 #' For a [FlodeRatingSet], each curve is saved in list order through the same
 #' method, using the curve's own `station_id` (the set's is ignored). Each gets
-#' its own version and register row, and because every save supersedes the
-#' site's previous `"Active"` version, only the last curve of the set is left
-#' `"Active"`. The return value is then one path per curve, all the same file.
+#' its own version and register row. The members of a set are the rating for
+#' different periods, so they are all current together: the site's previous
+#' `"Active"` versions are marked `"Superseded"` once, before the set is saved,
+#' and every member of the new set is left `"Active"`. The return value is one
+#' path per curve, all the same file.
 #'
 #' Directories are created as needed. A message reports any superseding and the
 #' file written. Related: [list_ratings()], [load_rating()],
@@ -216,8 +219,8 @@ NULL
 #' Every saved curve gets a unique `rating_id` of the form
 #' `{site_id}_RATING_{tier}_v{version}` (e.g. `510310_RATING_gold_v2`).
 #' The register also records a `status` column. When a new version is saved,
-#' any previously `"Active"` version for the same site and tier is
-#' automatically updated to `"Superseded"`, so `list_ratings()` always
+#' any previously `"Active"` version for the same site and tier (other tiers
+#' are not affected) is automatically updated to `"Superseded"`, so `list_ratings()` always
 #' shows which version is currently in use.
 #'
 #' @return The path(s) to the written Parquet file(s), invisibly.
@@ -260,13 +263,34 @@ NULL
 #' }
 save_rating <- S7::new_generic("save_rating", "x")
 
+# Mark every "Active" register row for one site AND tier as "Superseded".
+# Rows are selected with a logical vector built outside data.table scope: an
+# earlier version wrote `tier == tier` inside `reg[...]`, where the bare `tier`
+# is the COLUMN, so every tier's Active rows for the site were superseded.
+# Returns the number of rows changed. Read-modify-write of the whole register.
+#' @noRd
+.supersede_active <- function(register_path, site_id, tier) {
+  if (!file.exists(register_path)) return(0L)
+  reg <- data.table::fread(register_path, colClasses = "character",
+                           showProgress = FALSE)
+  if (!"status" %in% names(reg)) return(0L)
+  hit <- which(reg$site_id == site_id & reg$tier == tier & reg$status == "Active")
+  if (length(hit) == 0L) return(0L)
+  data.table::set(reg, i = hit, j = "status", value = "Superseded")
+  data.table::fwrite(reg, register_path)
+  length(hit)
+}
+
 S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
                                                   tier               = "gold",
                                                   saved_by           = Sys.info()[["user"]],
                                                   method_of_receipt  = NA_character_,
                                                   derivation_method  = NA_character_,
                                                   model_or_project   = NA_character_,
-                                                  notes              = NA_character_) {
+                                                  notes              = NA_character_,
+                                                  .supersede         = TRUE) {
+  # `.supersede` is internal: the FlodeRatingSet method turns it off for the
+  # members of a set, which are all current together
   # -- Validate and resolve paths --------------------------------------------
   if (is.na(x@station_id) || !nzchar(x@station_id)) {
     stop("`station_id` must be set on the FlodeRatingCurve before saving.")
@@ -320,26 +344,22 @@ S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
     notes             = as.character(notes)
   )
 
+  # Earlier "Active" versions of this site + tier are superseded by the new one
+  # (not other tiers, and not the site's versions in other tiers). Done before
+  # the new row is appended so the new row itself stays "Active".
+  n_superseded <- if (.supersede) {
+    .supersede_active(paths$register, x@station_id, tier)
+  } else {
+    0L
+  }
+  if (n_superseded > 0L) {
+    message(sprintf("  Superseded %d previously Active version(s) at [%s] for site '%s'.",
+                    n_superseded, tier, x@station_id))
+  }
+
   if (file.exists(paths$register)) {
     existing_reg <- data.table::fread(paths$register, colClasses = "character",
                                       showProgress = FALSE)
-    # Intent (and documented behaviour): mark earlier "Active" versions of this
-    # site + tier "Superseded". n_superseded, used in the message, is counted
-    # per tier. NB: inside existing_reg[...] the bare `tier` resolves to the
-    # COLUMN, so `tier == tier` below is always TRUE and the update applies to
-    # the site's Active rows in ALL tiers (see .filter_rows() in package.R for
-    # the scoping rule).
-    if ("status" %in% names(existing_reg)) {
-      n_superseded <- sum(existing_reg$site_id == x@station_id &
-                          existing_reg$tier    == tier          &
-                          existing_reg$status  == "Active")
-      existing_reg[site_id == x@station_id & tier == tier & status == "Active",
-                   status := "Superseded"]
-      if (n_superseded > 0L) {
-        message(sprintf("  Superseded %d previously Active version(s) at [%s] for site '%s'.",
-                        n_superseded, tier, x@station_id))
-      }
-    }
     updated_reg <- data.table::rbindlist(list(existing_reg, reg_row), fill = TRUE)
   } else {
     updated_reg <- reg_row
@@ -361,15 +381,26 @@ S7::method(save_rating, FlodeRatingSet) <- function(x, root,
                                                 derivation_method = NA_character_,
                                                 model_or_project  = NA_character_,
                                                 notes             = NA_character_) {
-  # Curves are saved one at a time in list order through the curve method, so
-  # versions are numbered in that order and each save supersedes the site's
-  # previous Active version (see @details). The result is one path per curve.
+  # The members of a set are the rating for different periods, so they are all
+  # current together. Supersede the previous Active versions ONCE (per distinct
+  # site and tier), then save every member without superseding the others.
+  # Curves are saved one at a time in list order, so versions are numbered in
+  # that order. The result is one path per curve.
+  reg_path <- .rating_paths(root, tier)$register
+  for (site in unique(vapply(x@curves, function(cv) cv@station_id, character(1L)))) {
+    n_old <- .supersede_active(reg_path, site, tier)
+    if (n_old > 0L) {
+      message(sprintf("  Superseded %d previously Active version(s) at [%s] for site '%s'.",
+                      n_old, tier, site))
+    }
+  }
   paths <- vapply(x@curves, function(cv) {
     save_rating(cv, root = root, tier = tier, saved_by = saved_by,
                 method_of_receipt = method_of_receipt,
                 derivation_method = derivation_method,
                 model_or_project  = model_or_project,
-                notes             = notes)
+                notes             = notes,
+                .supersede        = FALSE)
   }, character(1L))
   invisible(paths)
 }

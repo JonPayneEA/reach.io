@@ -92,7 +92,8 @@
 #'   year-partitioned Bronze writer, so sync and batch give the same layout.
 #'   `dataset_id` ends in the date of receipt, so Bronze is append-only:
 #'   downloading the same series on a later day adds files, while repeating it
-#'   on the same day overwrites that day's files.
+#'   on the same day merges the new rows into that day's files (new values
+#'   win for timestamps present in both).
 #' - The `dataset_id` carries the site and data type but not the period or
 #'   value type, so selecting several measures of one data type at one station
 #'   in a single run (for example with `period_name = "all"`) targets the same
