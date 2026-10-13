@@ -33,6 +33,11 @@
 # Internal helpers
 # =============================================================================
 
+# Framework data type code -> parameter name used to pick the S7 class from
+# HYDRO_CLASS. Deliberately a private copy of .data_type_to_param() in
+# read_silver.R so this file has no dependency on the Silver reader. Only the
+# three types with an S7 class are supported: SM, SWE and PE are valid codes in
+# the store (DATA_TYPE_CODES) but cannot be read back through read_bronze() yet.
 #' @noRd
 .data_type_to_param_b <- function(data_type) {
   switch(data_type,
@@ -46,20 +51,31 @@
   )
 }
 
+# Decide the series period ("15min", "hourly", "daily") that selects the S7
+# class. The stored `period` column is trusted when it holds exactly one value.
+# If it is absent/all NA, or the files disagree (e.g. a series re-ingested at a
+# different resolution), the choice is made from the data instead.
 #' @noRd
 .resolve_period_b <- function(dt) {
   p <- unique(dt$period[!is.na(dt$period)])
   if (length(p) == 1L) return(p)
 
   # Fall back to inferring from median timestamp gap
+  # A single row has no gap to measure; "15min" is the default assumption
   if (nrow(dt) < 2L) return("15min")
   diffs   <- as.numeric(diff(sort(dt$timestamp)), units = "secs")
+  # The median (not the mean) so that gaps in the record do not shift the result
   med_sec <- stats::median(diffs, na.rm = TRUE)
+  # Anything coarser than hourly is treated as daily
   if (med_sec <= 900)  return("15min")
   if (med_sec <= 3600) return("hourly")
   "daily"
 }
 
+# Reshape Bronze rows into the readings table the FlodeHydroData classes expect
+# (dateTime, date, value, measure_notation) plus the Bronze extras. Bronze has no
+# API measure notation, so `measure_notation` carries the dataset_id, which still
+# identifies which ingest (and trace) each row came from.
 #' @noRd
 .build_bronze_readings <- function(dt) {
   data.table::data.table(
@@ -74,10 +90,18 @@
 }
 
 #' Escape regex metacharacters in a literal string
+#'
+#' Gauge IDs and supplier codes are interpolated into a file-name pattern in
+#' `.list_bronze_files()`; escaping stops characters such as `.` or `+` in an
+#' ID matching more than themselves.
 #' @noRd
 .re_escape <- function(x) gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", x)
 
 #' Received date (from the 8-digit suffix) of Bronze file names
+#'
+#' This is the ingest date baked into the `dataset_id`, not an observation
+#' date. It is the sort key that makes "later file wins" work when duplicate
+#' observations are resolved. A name without the suffix gives `NA`.
 #' @noRd
 .bronze_received_date <- function(files) {
   as.Date(sub(".*_([0-9]{8})\\.parquet$", "\\1", basename(files)), "%Y%m%d")
@@ -88,8 +112,11 @@
 #' File names are `<supplier>_<gauge>_<type>[_<trace>]_<YYYYMMDD>.parquet`.
 #' @noRd
 .bronze_file_trace <- function(files, gauge_id, data_type, supplier_code) {
+  # Strip ".parquet" and the received date, leaving "<sup>_<gauge>_<type>[_<trace>]"
   base   <- sub("_[0-9]{8}$", "", sub("\\.parquet$", "", basename(files)))
   prefix <- paste(supplier_code, gauge_id, data_type, sep = "_")
+  # Whatever follows the prefix and its joining underscore (+ 2L) is the trace;
+  # an untraced file is exactly the prefix, so this yields "".
   substring(base, nchar(prefix) + 2L)
 }
 
@@ -97,6 +124,10 @@
 #'
 #' Files are returned oldest-received first, so later rows win when duplicates
 #' are resolved.
+#'
+#' Also used by `get_high_watermark()` in incremental.R, which is why this
+#' returns an empty vector instead of raising an error: "no data yet" is a
+#' normal state for a first incremental run.
 #' @noRd
 .list_bronze_files <- function(root, gauge_id, data_type,
                                supplier_code = "EA",
@@ -108,7 +139,11 @@
 
   year_dirs <- list.dirs(dt_root, recursive = FALSE, full.names = TRUE)
 
-  # Narrow to the year range implied by start / end
+  # Narrow to the year range implied by start / end. Year directories hold
+  # *observation* years, so this prunes whole directories exactly (a file in
+  # 2021/ cannot contain 2022 data). Both ends are inclusive at year level; the
+  # exact timestamp cut is made later in read_bronze() once rows are loaded.
+  # Directories whose names are not years are dropped when a range is given.
   if (!is.null(start) || !is.null(end)) {
     years <- suppressWarnings(as.integer(basename(year_dirs)))
     lo    <- if (!is.null(start)) as.integer(format(as.Date(start), "%Y")) else -Inf
@@ -117,13 +152,23 @@
   }
   if (length(year_dirs) == 0L) return(character(0))
 
+  # <supplier>_<gauge>_<type>[_<trace>]_<YYYYMMDD>.parquet. Matching the whole
+  # name (anchored, with the trace optional) stops gauge "39001" from picking up
+  # files of a different gauge or type that merely start with the same text,
+  # while still admitting every trace of this gauge.
   pat <- sprintf("^%s_%s_%s(_.+)?_[0-9]{8}\\.parquet$",
                  .re_escape(supplier_code), .re_escape(gauge_id),
                  .re_escape(data_type))
   files <- list.files(year_dirs, pattern = pat, full.names = TRUE)
+  # Oldest received first; the path is the tie-breaker so the order (and hence
+  # which duplicate wins) is deterministic across platforms
   files[order(.bronze_received_date(files), files)]
 }
 
+# Strict wrapper over .list_bronze_files() for the readers: the same search,
+# but each way of coming up empty is turned into a distinct error, from
+# coarsest (no store) to finest (no file for this gauge in the date range), so
+# the message says which level of the layout is missing.
 #' @noRd
 .locate_bronze_files <- function(root, gauge_id, data_type,
                                   supplier_code, category,
@@ -198,6 +243,34 @@
 #' partitioned by observation year (one file per ingest, filed under the ingest
 #' year) should be re-ingested for date-range reads to be reliable.
 #'
+#' Rows are matched as "the same observation" by series and timestamp, where
+#' the series is the `dataset_id` with its received-date suffix removed. That
+#' keeps the supplier, site, data type and trace, so two traces of one gauge
+#' are never merged into each other. Duplicates are resolved before `start` and
+#' `end` are applied, and the result is sorted by time. The returned
+#' `from_date` and `to_date` are the first and last timestamps actually
+#' returned, not the bounds you asked for.
+#'
+#' `end` is inclusive: a bare date such as `"2023-12-31"` includes the whole of
+#' that day. This differs from the `to_date`/`end_date` arguments of
+#' [download_hydrology()], [run_backfill()] and [run_incremental()], which are
+#' exclusive. Bounds are interpreted as UTC, like the stored timestamps.
+#'
+#' A file that cannot be read produces a warning and is skipped, so a damaged
+#' year does not hide the rest; an error is raised only if nothing could be
+#' read at all. Absent Bronze data is always an error (there is no fallback to
+#' another tier). Each failure to find data (no store, no such data type, no
+#' file for the gauge, nothing in the range) has its own message.
+#'
+#' If the series has more than one `trace` and none is chosen, the call stops
+#' and names the available traces rather than guessing. The S7 class comes from
+#' the stored `period` (or, if that is missing or inconsistent, the median
+#' timestep). Only 15-minute and daily series have a class; for any other
+#' period (e.g. hourly) a warning is issued and the plain `readings`
+#' `data.table` is returned instead of an S7 object. No QC or unit conversion
+#' is applied. See [read_bronze_multi()] and [read_bronze_catchment()] to read
+#' several gauges at once.
+#'
 #' @return An S7 object of the appropriate `FlodeHydroData` subclass
 #'   ([FlodeFlow_15min], [FlodeLevel_15min], [FlodeRainfall_15min], [FlodeFlow_Daily], etc.),
 #'   depending on the data type and stored period. The `@readings` slot is
@@ -223,13 +296,19 @@ read_bronze <- function(root, gauge_id, data_type,
                         end           = NULL,
                         trace         = NULL) {
 
+  # -- Locate files ------------------------------------------------------------
   # Validate the data type before touching the file system
   param <- .data_type_to_param_b(data_type)
 
+  # Throws if nothing matches; files come back oldest-received first, an order
+  # the de-duplication step below depends on
   files <- .locate_bronze_files(root, gauge_id, data_type,
                                 supplier_code, category, start, end)
 
+  # -- Select the series -------------------------------------------------------
   # A gauge can hold several series of one data type (WISKI traces)
+  # Selecting here, before reading, means unwanted series cost no I/O. Filtering
+  # `files` keeps the oldest-first order.
   traces <- .bronze_file_trace(files, gauge_id, data_type, supplier_code)
   if (!is.null(trace)) {
     files <- files[traces == trace]
@@ -237,6 +316,8 @@ read_bronze <- function(root, gauge_id, data_type,
       stop(sprintf("No Bronze series with trace '%s' for gauge '%s' / '%s'.",
                    trace, gauge_id, data_type))
   } else if (length(unique(traces)) > 1L) {
+    # Refuse to guess: silently picking one series (or merging several) would
+    # return plausible-looking but wrong data
     stop(sprintf(
       "Gauge '%s' / '%s' holds several series (%s). Choose one with `trace`.",
       gauge_id, data_type,
@@ -245,6 +326,8 @@ read_bronze <- function(root, gauge_id, data_type,
     ))
   }
 
+  # -- Read and combine files --------------------------------------------------
+  # One unreadable file warns and is skipped rather than failing the whole read
   dt_list <- lapply(files, function(f) {
     tryCatch(
       data.table::as.data.table(arrow::read_parquet(f)),
@@ -261,13 +344,24 @@ read_bronze <- function(root, gauge_id, data_type,
     stop(sprintf("No data could be read for gauge '%s' / '%s'.",
                  gauge_id, data_type))
 
+  # -- Resolve overlap between files -------------------------------------------
   # Resolve overlap between files: files are ordered oldest-received first, so
   # keeping the last occurrence keeps the most recently received row
+  # rbindlist() preserves file order, which is what fromLast = TRUE relies on.
+  # The series key is the dataset_id minus its received date, so a trace stays
+  # part of the key. The key is taken from the stored dataset_id column rather
+  # than the file name.
   dt[, .series := sub("_[0-9]{8}$", "", dataset_id)]
   dt <- unique(dt, by = c(".series", "timestamp"), fromLast = TRUE)
   dt[, .series := NULL]
 
+  # -- Apply date bounds -------------------------------------------------------
   # Exact timestamp bounds (year-dir filter was approximate)
+  # Comparisons use dt$timestamp explicitly. Note that `data_type` is both an
+  # argument of this function and a Bronze column, so it must never be used
+  # inside dt[...] here (the column would win; see .filter_rows() in package.R).
+  # `end` is inclusive: .bound_posixct() turns a bare date into the last instant
+  # of that day.
   if (!is.null(start)) {
     lo <- .bound_posixct(start, "start")
     dt <- dt[dt$timestamp >= lo]
@@ -285,10 +379,14 @@ read_bronze <- function(root, gauge_id, data_type,
 
   data.table::setorder(dt, site_id, timestamp)
 
+  # -- Build the S7 object -----------------------------------------------------
   readings <- .build_bronze_readings(dt)
   period   <- .resolve_period_b(dt)
   cls      <- HYDRO_CLASS[[param]][[period]]
 
+  # HYDRO_CLASS has no entry for some periods (e.g. "hourly"); hand back the
+  # bare readings so the caller still gets the data, with a warning rather
+  # than an error
   if (is.null(cls)) {
     warning(sprintf(
       "No S7 class for parameter '%s', period '%s'. Returning data.table.",
@@ -315,6 +413,15 @@ read_bronze <- function(root, gauge_id, data_type,
 #' as a named list. Gauges that fail (e.g. no Bronze data exists) are skipped
 #' with a warning rather than stopping the whole call.
 #'
+#' @details
+#' Gauges are read one after another with identical arguments, so a single
+#' `start`, `end`, `supplier_code`, `category` and `trace` applies to all of
+#' them. Every failure becomes a warning, including the error raised when a
+#' gauge holds several series and no `trace` was given; check
+#' `names(result)` against `gauge_ids` to find what was skipped. If every
+#' gauge fails the result is an empty list, not an error. Only an empty
+#' `gauge_ids` stops the call.
+#'
 #' @param root Character. Root of the data store.
 #' @param gauge_ids Character vector. One or more site identifiers.
 #' @param data_type Character. Framework data type code (`"Q"`, `"H"`,
@@ -337,9 +444,12 @@ read_bronze_multi <- function(root, gauge_ids, data_type, ...) {
   if (length(gauge_ids) == 0L)
     stop("`gauge_ids` must contain at least one gauge identifier.")
 
+  # Pre-named list so each result is stored under its gauge ID; assigning NULL
+  # for a failed gauge removes that entry, and the final Filter() is a guard
   results <- vector("list", length(gauge_ids))
   names(results) <- gauge_ids
 
+  # Sequential, so any skip warnings appear in gauge order
   for (gid in gauge_ids) {
     results[[gid]] <- tryCatch(
       read_bronze(root, gid, data_type, ...),
@@ -363,6 +473,20 @@ read_bronze_multi <- function(root, gauge_ids, data_type, ...) {
 #'
 #' Looks up gauge identifiers for the specified catchment from the gauge
 #' registry, then delegates to [read_bronze_multi()].
+#'
+#' @details
+#' The registry must contain columns literally named `site_id` and
+#' `catchment_col`. Note that the registry written by [build_gauge_registry()]
+#' names its columns `gauge_id` and `catchment`, so it needs renaming (or a
+#' suitable `catchment_col`) before use here. Gauges are matched on exact
+#' equality with `catchment_id`; the registry's own `data_type`, `category` and
+#' `source_system` are not consulted, so the single `data_type` you pass is
+#' requested for every gauge, with the default `supplier_code = "EA"` unless
+#' supplied through `...`.
+#'
+#' A catchment with no gauges in the registry is an error, whereas individual
+#' gauges that have no Bronze data are skipped with a warning (see
+#' [read_bronze_multi()]).
 #'
 #' @param root Character. Root of the data store.
 #' @param catchment_id Character. Catchment identifier to filter the registry
@@ -392,6 +516,8 @@ read_bronze_catchment <- function(root, catchment_id, data_type,
                                    ...) {
   registry <- data.table::as.data.table(registry)
 
+  # Validate the registry shape up front: `[[` on a missing column returns NULL,
+  # which would otherwise surface as a misleading "no gauges found" error below
   if (!catchment_col %in% names(registry))
     stop(sprintf(
       "Column '%s' not found in registry. Available: %s",
@@ -400,6 +526,9 @@ read_bronze_catchment <- function(root, catchment_id, data_type,
   if (!"site_id" %in% names(registry))
     stop("Registry must contain a 'site_id' column.")
 
+  # Plain vector indexing (no dt[...]) on purpose: the default catchment_col is
+  # "catchment_id", the same name as the argument, and inside dt[...] the column
+  # would win and match every row
   gauge_ids <- registry[["site_id"]][registry[[catchment_col]] == catchment_id]
 
   if (length(gauge_ids) == 0L)

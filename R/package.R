@@ -70,12 +70,27 @@ NULL
 
 # -- Package-level constants --------------------------------------------------
 
+# Root of the EA Hydrology API; endpoint paths are appended to it
+# (/id/stations.json, /id/measures.json, /id/measures/<measure>/readings.json
+# and /data/batch-readings/batch).
 #' @noRd
 BASE_URL <- "https://environment.data.gov.uk/hydrology"
 
+# Most rows the readings endpoint will return for one request. Sync downloads
+# are split into date chunks so a single measure stays under this, and
+# run_sync() warns when a chunk reaches it (the response would then be truncated).
 #' @noRd
 API_HARD_LIMIT <- 2000000L
 
+# Per-parameter defaults used to choose which API measure counts as "the" series
+# for a parameter. This is the single place those choices live: get_measures(),
+# download_hydrology() and the HDE router all read it, and callers can override
+# period/value_type per call.
+#   observed_property  the API's observedProperty name for the parameter
+#   value_type         NULL means "do not filter on valueType" (rainfall has
+#                      only one); "all" is accepted by callers as an explicit
+#                      "no filter" sentinel
+#   default_period     the period selected unless the caller asks otherwise
 #' @noRd
 PARAMETER_CONFIG <- list(
   rainfall = list(
@@ -96,6 +111,9 @@ PARAMETER_CONFIG <- list(
 )
 
 # Valid source systems recognised by the pipeline router
+# build_gauge_registry() rejects any other source_system, so the router never
+# sees an unknown one. Adding a source means extending this vector, the router,
+# and SUPPLIER_CODES in schema.R (which gives the source its directory code).
 #' @noRd
 VALID_SOURCES <- c("HDE", "WISKI", "WISKI_ALL")
 
@@ -105,6 +123,11 @@ VALID_SOURCES <- c("HDE", "WISKI", "WISKI_ALL")
 # Column names used inside data.table expressions (`dt[, x := ...]`,
 # `dt[cond]`, `.SD`/`..cols`). Declared so R CMD check does not report them as
 # undefined globals.
+# This only silences the check; it does not resolve name clashes. Several of
+# these names (site_id, data_type, category, ...) are also argument names in
+# functions that subset tables, and inside dt[...] the column wins over the
+# argument. Use .filter_rows() or which() first in those cases.
+# Add a name here when new data.table code introduces another bare column name.
 utils::globalVariables(c(
   ".", "..present_cols", "..val_cols", ".covered", ".series", ".snap_key",
   ".snapped", "C", "Time.stamp", "a", "active", "b", "backfill_done",
@@ -150,21 +173,32 @@ utils::globalVariables(c(
 #' @noRd
 .bound_posixct <- function(x, which = c("start", "end")) {
   which <- match.arg(which)
+  # An exact instant: only the tzone attribute is relabelled to UTC, the moment
+  # in time is unchanged. `which` makes no difference here.
   if (inherits(x, "POSIXct")) {
     attr(x, "tzone") <- "UTC"
     return(x)
   }
+  # "End of day" is the last millisecond rather than the next midnight, so that
+  # an inclusive `<=` test on the bound keeps the whole day without admitting
+  # the following midnight reading.
   end_of_day <- 86400 - 0.001
+  # Date: format() first so the calendar date is taken as written, whatever the
+  # session time zone, then read it as midnight UTC
   if (inherits(x, "Date")) {
     t <- as.POSIXct(format(x, "%Y-%m-%d"), tz = "UTC")
     return(if (which == "end") t + end_of_day else t)
   }
+  # Character: tolerate the ISO 8601 "T" separator. A string with a time of day
+  # is an exact instant and used as given for both `start` and `end`; a bare
+  # date falls through to the whole-day logic below.
   x <- sub("T", " ", as.character(x), fixed = TRUE)
   if (grepl("\\d{1,2}:\\d{2}", x)) {
     t <- as.POSIXct(x, tz = "UTC")
     if (is.na(t)) stop(sprintf("Could not parse date-time bound '%s'.", x), call. = FALSE)
     return(t)
   }
+  # Bare date string: parse failures are reported against the user's text
   d <- as.Date(x)
   if (is.na(d)) stop(sprintf("Could not parse date bound '%s'.", x), call. = FALSE)
   t <- as.POSIXct(format(d, "%Y-%m-%d"), tz = "UTC")
@@ -186,6 +220,10 @@ utils::globalVariables(c(
 #' @return `dt` restricted to matching rows.
 #' @noRd
 .filter_rows <- function(dt, col, values) {
+  # The column is fetched by name with [[ and compared outside dt[...], so
+  # `values` is always the caller's argument. %in% (rather than ==) gives FALSE
+  # instead of NA for missing entries, and which() turns the result into plain
+  # row numbers, so a NA never produces a phantom all-NA row.
   rows <- which(dt[[col]] %in% values)
   dt[rows]
 }
@@ -199,6 +237,7 @@ utils::globalVariables(c(
 # table where they are found before print.S7_object.
 
 .onLoad <- function(libname, pkgname) {
+  # S7 classes dispatch print through S3 under the name "<package>::<class>"
   registerS3method("print", "reach.io::FlodeRatingCurve",  .print_RatingCurve,  envir = asNamespace(pkgname))
   registerS3method("print", "reach.io::FlodeRatingSet",    .print_RatingSet,    envir = asNamespace(pkgname))
   registerS3method("print", "reach.io::FlodeHydroData",    .print_HydroData,    envir = asNamespace(pkgname))
@@ -206,6 +245,9 @@ utils::globalVariables(c(
 
   # Register this package's pipeline activities so reach.utils::run_pipeline()
   # can dispatch to them by name from a pipeline YAML config.
+  # Done at load time so the names are available as soon as the package is
+  # attached or loaded, with no setup step. The names ("backfill",
+  # "incremental") are the strings a YAML step refers to.
   reach.utils::register_activity("backfill",    run_backfill,    package = pkgname)
   reach.utils::register_activity("incremental", run_incremental, package = pkgname)
 }
