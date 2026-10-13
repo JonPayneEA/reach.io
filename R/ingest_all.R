@@ -43,7 +43,7 @@
 #' Parse a .all file to intermediate per-station Parquet files
 #'
 #' Internal. Reads a WISKI .all export in chunks and writes one raw Parquet
-#' per station per source file to a temp subdirectory. Called by
+#' per station block (one time series) to a temp subdirectory. Called by
 #' [ingest_all_file()].
 #'
 #' @param path Character. Path to the .all file.
@@ -59,19 +59,27 @@
 .parse_all_blocks <- function(path, tmp_dir, chunk_size = 50000L,
                                encoding = "latin1", tz = "UTC") {
 
+  # An existing tmp_dir is reused, not emptied: leftover block files from an
+  # earlier keep_tmp run would be merged by pass 2 along with the new ones.
   dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
+  # Running count of blocks written; it numbers the intermediate files, which
+  # fixes their order for the "last block wins" dedupe in pass 2.
   block_n <- 0L
 
   con <- file(path, open = "r", encoding = encoding)
   on.exit(close(con))
   
+  # Lines of a block that may not be complete yet (see the read loop below)
   carried <- character(0)
   
   # Parse one station block and write raw Parquet to tmp_dir. Columns are
   # kept as-is from the .all file at this stage — normalisation happens in
   # pass 2 so the merge step has full metadata available.
+  # Blocks that cannot be used (no "Time stamp," header, no data rows, no
+  # Station Number) return without writing a file and without a message.
   write_block <- function(block) {
     
+    # Metadata lines look like "Key:<TAB>Value" and become a named list.
     meta_lines <- block[grepl(":\t", block) & !startsWith(block, "Time stamp")]
     meta <- do.call(c, lapply(strsplit(meta_lines, ":\t"), function(x) {
       stats::setNames(list(trimws(x[2L])), trimws(x[1L]))
@@ -98,6 +106,8 @@
       paste(c(parts[seq_len(n_expected - 1L)], remarks_quoted), collapse = ",")
     }, character(1L), USE.NAMES = FALSE)
 
+    # "---" is the export's missing-value marker. make.names() turns header
+    # text such as "Time stamp" into "Time.stamp" so it can be used in `$`.
     dt <- data.table::fread(
       text       = c(block[header_i], clean_rows),
       sep        = ",",
@@ -109,11 +119,16 @@
     station_num <- meta[["Station Number"]]
     if (is.null(station_num) || is.na(station_num)) return(invisible(NULL))
 
-    # Parse in the file's time zone, then store as a UTC instant
+    # Parse in the file's time zone, then store as a UTC instant. Timestamps
+    # that fail to parse (bad format, or a local time that does not exist /
+    # is ambiguous at a DST change) become NA here; pass 2 counts and drops
+    # them with a warning.
     ts <- as.POSIXct(dt[["Time.stamp"]], format = "%d/%m/%Y %H:%M:%S", tz = tz)
     attr(ts, "tzone") <- "UTC"
     dt[, timestamp      := ts]
     dt[, Time.stamp     := NULL]
+    # Block metadata is repeated on every row so that pass 2 can read it back
+    # from the merged table without keeping the blocks apart.
     dt[, station_number := station_num]
     dt[, station_name   := meta[["Station Name"]]      %||% NA_character_]
     dt[, parameter      := meta[["Parameter Name"]]    %||% NA_character_]
@@ -126,7 +141,11 @@
     # ts_name follows the pattern <catchment>/<station>/<param_code>/<resolution>…
     # e.g. "THM/3401TH/SG_DS/15m.Cmd.RelAbs.P" → param_code = "sg_ds".
     # This is used to disambiguate multiple series (e.g. upstream vs downstream
-    # stage) that share the same station number and data_type code.
+    # stage) that share the same station number and data_type code. It also
+    # becomes the `trace` in the Bronze dataset_id (selectable with
+    # read_bronze(trace = )), and station + param_code is what pass 2 treats
+    # as one series. A name with no "/" (e.g. "Daily Mean (Mrt0)") uses the
+    # whole sanitised name.
     raw_ts     <- meta[["Time series Name"]] %||% NA_character_
     param_code <- if (!is.na(raw_ts)) {
       ts_parts <- strsplit(raw_ts, "/", fixed = TRUE)[[1L]]
@@ -152,6 +171,12 @@
     invisible(NULL)
   }
   
+  # -- Read the file in line chunks, splitting into station blocks -------------
+  # A block begins at a "Station Site:" line and runs to the line before the
+  # next one. A chunk boundary can fall inside a block, so only blocks followed
+  # by another "Station Site:" are known to be complete. The last block of each
+  # chunk is carried over and prepended to the next chunk; at end of file the
+  # carried block is the final one and is written.
   repeat {
     raw <- readLines(con, n = chunk_size, warn = FALSE)
     
@@ -163,6 +188,10 @@
     lines  <- c(carried, raw)
     starts <- which(startsWith(lines, "Station Site:"))
     
+    # No block start in this chunk: everything read so far belongs to the
+    # current block, so keep accumulating. This is why memory is bounded by
+    # the largest block rather than by chunk_size. (Lines before the first
+    # "Station Site:" in the file are never assigned to a block and are lost.)
     if (!length(starts)) {
       carried <- lines
       next
@@ -194,6 +223,8 @@
 #' @noRd
 .wiski_param_to_type <- function(raw_param) {
   if (length(raw_param) != 1L || is.na(raw_param)) return(NA_character_)
+  # Exclusions are tested first: names such as "Groundwater Level" or "Soil
+  # Moisture" would otherwise match the level / rain patterns below.
   if (grepl("ground|soil|temp|snow|evap", raw_param, ignore.case = TRUE))
     return(NA_character_)
   if (grepl("flow|discharge", raw_param, ignore.case = TRUE)) return("Q")
@@ -210,10 +241,14 @@
 #' and warns, naming the column chosen.
 #' @noRd
 .pick_value_column <- function(dt, meta_cols, flag_col, station) {
+  # The quality-code column is also numeric, so it is removed from the
+  # candidates up front: it must never be mistaken for the measurement.
   cand  <- setdiff(names(dt), c(meta_cols, flag_col))
   named <- cand[grepl("^value", cand, ignore.case = TRUE)]
   if (length(named) > 0L) return(named[1L])
 
+  # Fallback for exports without a "Value" column. NA (no usable column)
+  # makes the caller skip the series.
   is_num <- vapply(cand, function(cn) is.numeric(dt[[cn]]), logical(1L))
   num    <- cand[is_num]
   if (length(num) == 0L) return(NA_character_)
@@ -247,6 +282,9 @@
                                 register_path,
                                 category = "hydrometric") {
 
+  # -- Group the block files into series ----------------------------------------
+  # An empty tmp_dir means pass 1 found no usable block (wrong file, or no
+  # "Station Site:" / "Time stamp," lines), which is an error, not an empty log.
   all_files <- list.files(tmp_dir, pattern = "\\.parquet$", full.names = TRUE)
   if (!length(all_files)) stop("No intermediate Parquet files found in: ", tmp_dir)
 
@@ -256,10 +294,14 @@
 
   message(sprintf("Merging %d series to Bronze...", length(file_groups)))
 
+  # log_rows is indexed by series (k) so a skipped series leaves a NULL slot,
+  # filtered out at the end; skipped series are recorded in `skipped` instead.
   log_rows <- vector("list", length(file_groups))
   skipped  <- list()
   prov_all <- list()
 
+  # -- Merge and write one series at a time -------------------------------------
+  # Only one series (all its blocks) is held in memory at once.
   for (k in seq_along(file_groups)) {
     key        <- names(file_groups)[k]
     key_parts  <- strsplit(key, "__", fixed = TRUE)[[1L]]
@@ -268,6 +310,7 @@
     # Block files sort by their zero-padded counter, i.e. file order
     files      <- sort(file_groups[[key]])
 
+    # fill = TRUE: blocks of one series need not have identical columns
     dt <- data.table::rbindlist(
       lapply(files, function(f) {
         data.table::as.data.table(arrow::read_parquet(f))
@@ -286,19 +329,27 @@
 
     # Deduplicate on timestamp — overlapping records appear at export
     # boundaries. setorder() is stable, so ties stay in block order and
-    # fromLast = TRUE keeps the row from the last block.
+    # fromLast = TRUE keeps the row from the last block. This happens before
+    # missing values are dropped (below), so the last block's row wins even if
+    # its value is missing and an earlier block had one.
     data.table::setorder(dt, timestamp)
     dt <- unique(dt, by = "timestamp", fromLast = TRUE)
 
-    # Quality flag column — named "Quality.Code" or similar in .all exports
+    # Quality flag column — named "Quality.Code" or similar in .all exports.
+    # Found by name (first match) so it can be kept as supplier_flag and kept
+    # out of the value-column choice.
     flag_col <- names(dt)[grepl("quality", names(dt), ignore.case = TRUE)][1L]
     if (is.na(flag_col)) flag_col <- NULL
 
+    # Everything added in pass 1 (not original export columns), so these are
+    # never candidates for the value column.
     meta_cols <- c("timestamp", "station_number", "station_name",
                    "parameter", "unit", "ts_name", "lon", "lat")
     value_col <- .pick_value_column(dt, meta_cols, flag_col, station)
 
-    # Derive the data_type code from the parameter metadata in the .all block
+    # Derive the data_type code from the parameter metadata in the .all block.
+    # Both skip paths below warn and record the series in `skipped` rather
+    # than stopping, so one unsupported series cannot abort a large ingest.
     raw_param <- if ("parameter" %in% names(dt)) dt$parameter[1L] else NA_character_
     data_type <- .wiski_param_to_type(raw_param)
     if (is.na(data_type)) {
@@ -324,6 +375,8 @@
     # WISKI ts_name examples (path style): "THM/3401TH/SG/15m.Cmd.RelAbs.P"
     # The \b15m\b pattern matches "15m" as a whole word (surrounded by / or .)
     # without also matching "315m" or the "15m" within "15min".
+    # Checked finest to coarsest; an unmatched name leaves period_str NA and
+    # triggers the timestep estimate below.
     raw_ts_name <- if ("ts_name" %in% names(dt)) dt$ts_name[1L] else NA_character_
     period_str  <- data.table::fcase(
       grepl("15[- ]?min|\\b15m\\b",        raw_ts_name, ignore.case = TRUE, perl = TRUE), "15min",
@@ -341,6 +394,9 @@
         gaps <- gaps[gaps > 0]
         if (length(gaps) > 0) {
           med_gap <- stats::median(gaps, na.rm = TRUE)
+          # Cut-offs sit just above the nominal 900 s / 3600 s / 86400 s steps.
+          # There is no lower bound (anything finer than 15 min is labelled
+          # "15min"), and a median above 25 h gives "unknown".
           period_str <- data.table::fcase(
             med_gap <= 960,   "15min",
             med_gap <= 3900,  "hourly",
@@ -350,10 +406,14 @@
         }
       }
     }
+    # Undetermined (e.g. a one-row series with no usable ts_name) is stored as
+    # "unknown" rather than NA.
     period_str <- period_str %||% "unknown"
     if (is.na(period_str)) period_str <- "unknown"
 
-    # Build a minimal pre-schema data.table for apply_bronze_schema()
+    # Build a minimal pre-schema data.table for apply_bronze_schema().
+    # Values are coerced to numeric, so non-numeric text becomes NA and is
+    # dropped as "no value" below; the quality code is kept as text.
     pre_dt <- data.table::data.table(
       datetime      = dt$timestamp,
       value         = suppressWarnings(as.numeric(dt[[value_col]])),
@@ -367,6 +427,8 @@
                       format(nrow(pre_dt), big.mark = ",")))
     }
     pre_dt <- pre_dt[!is.na(value)]
+    # A series with timestamps but no values at all is skipped without a
+    # warning (recorded in `skipped`; the message above gives the count).
     if (nrow(pre_dt) == 0L) {
       skipped[[length(skipped) + 1L]] <- data.table::data.table(
         station = station, parameter = raw_param, reason = "no values")
@@ -375,6 +437,8 @@
 
     # Guard: warn when off-grid timestamps appear in a 15-min series.
     # Bronze is written unchanged; resolution is the job of snap_offgrid_timestamps().
+    # Minutes are checked in UTC, i.e. on the stored instants. Only the
+    # first five offending timestamps are quoted in the warning.
     if (identical(period_str, "15min")) {
       off_mins <- which(!as.integer(format(pre_dt[["datetime"]], "%M", tz = "UTC")) %in%
                           c(0L, 15L, 30L, 45L))
@@ -393,6 +457,10 @@
     }
 
     # -- Apply Bronze schema and write to framework folder structure ----------
+    # The dataset_id ends in run_date, so ingesting the same series again on
+    # the same day gives the same name and replaces that day's year files;
+    # a later day adds new files (Bronze is append-only). The trace keeps
+    # several series of one type at a station apart.
     supplier_code <- "WISKI"
     dataset_id    <- make_dataset_id(supplier_code, station, data_type,
                                      received_date = run_date,
@@ -412,6 +480,7 @@
     out_files <- .write_bronze_by_year(bronze_dt, output_dir, category,
                                        supplier_code, data_type, dataset_id)
 
+    # Provenance is collected and written once after the loop, not per series
     prov_all[[length(prov_all) + 1L]] <- .bronze_prov_rows(
       out_files,
       dataset_id          = dataset_id,
@@ -437,9 +506,14 @@
                     nrow(out_files)))
   }
 
+  # -- Register and return -------------------------------------------------------
+  # Written after every series, so an error part-way through leaves the Bronze
+  # files already written without register rows.
   .write_provenance_rows(data.table::rbindlist(prov_all, fill = TRUE),
                          register_path)
 
+  # Skipped series have NULL slots in log_rows; their details travel on the
+  # "skipped" attribute so the log itself only lists what was written.
   log_dt <- data.table::rbindlist(Filter(Negate(is.null), log_rows))
   attr(log_dt, "skipped") <- data.table::rbindlist(skipped, fill = TRUE)
   log_dt
@@ -482,6 +556,61 @@
 #' `source_system = "WISKI_ALL"`, `live = FALSE`, and `backfill_done = TRUE`.
 #' Only (station, data type) combinations not already in the registry are
 #' added; existing entries are left untouched.
+#'
+#' @details
+#' ## Input format
+#'
+#' A `.all` file is a stack of station blocks. Each starts with a
+#' `Station Site:` line, then `Key:<TAB>Value` metadata lines such as
+#' `Station Number`, `Parameter Name` and `Time series Name`, then a
+#' `Time stamp,...` header and CSV rows. A block without a header, data rows or station number
+#' is skipped without a message. The `Remarks` column may contain commas; any
+#' extra fields are re-joined and quoted before parsing so they stay in
+#' `Remarks`.
+#'
+#' ## Series identity and rules
+#'
+#' A series is one station plus the parameter code taken from the third
+#' element of the `Time series Name` path (for example `SG_DS`); that code
+#' becomes the `trace` in the `dataset_id`, so several series of one type at a
+#' station are kept apart and can be selected with `read_bronze(trace = )`.
+#' For each series:
+#'
+#' - The `Value` column is chosen by name, never the quality-code column
+#'   (which is kept as `supplier_flag`). If there is no `Value` column the
+#'   first numeric column is used, with a warning that names it.
+#' - Rows are de-duplicated on `timestamp` before missing values are dropped,
+#'   so a later block's row wins even where its value is missing.
+#' - Rows with no value are dropped, with a message giving the count. A
+#'   series left with no values is skipped.
+#' - The period (`15min`, `hourly`, `daily`) is read from the time series
+#'   name, else estimated from the median timestep, else `"unknown"`.
+#' - Off-grid timestamps in a 15-minute series (not on :00/:15/:30/:45) give a
+#'   warning but are written unchanged; see [snap_offgrid_timestamps()].
+#'
+#' Timestamps are read in `tz` and stored as UTC instants. The year folder is
+#' the UTC year of each observation.
+#'
+#' ## Side effects and re-runs
+#'
+#' Besides the Bronze files, the function writes provenance rows to
+#' `register_path` after all series are merged (so a failure part-way leaves
+#' Bronze files without register rows) and, if requested, updates
+#' `registry_path`. The temp directory is `<output_dir>/.tmp_<name>`, where
+#' `<name>` is the file name without its extension. It is reused, not
+#' cleared, if it already exists, so remove a leftover one (from
+#' `keep_tmp = TRUE`) before re-ingesting.
+#'
+#' The `dataset_id` ends in the day of ingest. Re-ingesting a series on a
+#' later day adds new files; [read_bronze()] keeps the most recently received
+#' row per timestamp. On the *same* day the `dataset_id` is identical, so for
+#' any observation year present in both ingests the later file replaces the
+#' earlier one rather than adding to it. Ingesting two exports of the same
+#' station that overlap in a calendar year on one day therefore keeps only
+#' the second export's data for that year.
+#'
+#' Pass 2 holds all blocks of one series in memory at a time, so peak memory
+#' is set by the largest series, not by `chunk_size`.
 #'
 #' @param path Character. Path to the `.all` file.
 #' @param output_dir Character. Root of the data store. Bronze files are
@@ -555,6 +684,12 @@ ingest_all_file <- function(path,
 
   if (!file.exists(path)) stop("File not found: ", path)
 
+  # -- Set up the temp directory ------------------------------------------------
+  # run_date is taken once and shared by every series, so all dataset_ids from
+  # one call carry the same received date. The temp directory is named after
+  # the input file (inside the store), so two files with the same base name
+  # must not be ingested at the same time. on.exit removes it even when a pass
+  # errors, unless keep_tmp = TRUE.
   run_date <- Sys.Date()
   tmp_dir  <- file.path(
     output_dir,
@@ -562,6 +697,7 @@ ingest_all_file <- function(path,
   )
   on.exit(if (!keep_tmp) unlink(tmp_dir, recursive = TRUE), add = TRUE)
 
+  # -- Pass 1 then pass 2 -------------------------------------------------------
   message(sprintf("Pass 1: parsing %s", basename(path)))
   .parse_all_blocks(path, tmp_dir, chunk_size, encoding, tz)
 
@@ -569,6 +705,8 @@ ingest_all_file <- function(path,
   log_dt <- .merge_all_parquets(tmp_dir, output_dir, run_date,
                                 register_path, category)
 
+  # A file whose series were all skipped is not an error: the log is empty and
+  # the reasons are in attr(log_dt, "skipped") (and in the warnings).
   if (nrow(log_dt) == 0L) {
     message("Ingest complete: no series were written.")
   } else {
@@ -580,6 +718,8 @@ ingest_all_file <- function(path,
   }
 
   # -- Auto-register discovered stations into the gauge registry --------------
+  # Only after Bronze and provenance are written, and only for series that
+  # were actually written (skipped ones are not registered).
   if (!is.null(registry_path) && nrow(log_dt) > 0L) {
     .register_wiski_all_gauges(log_dt, registry_path, category, run_date)
   }
@@ -609,9 +749,12 @@ ingest_all_file <- function(path,
 
   dir.create(dirname(registry_path), recursive = TRUE, showWarnings = FALSE)
 
-  # Registry data_type uses parameter names (flow / level / rainfall)
+  # Registry data_type uses parameter names (flow / level / rainfall), the
+  # inverse of param_to_data_type(), while the log holds framework codes.
   code_to_param <- c(Q = "flow", H = "level", P = "rainfall")
 
+  # One candidate per (station, type): several traces of a type share one
+  # registry row, matching the registry key of gauge_id + data_type.
   cand <- unique(data.table::data.table(
     gauge_id  = log_dt$gauge_id,
     data_type = unname(code_to_param[log_dt$data_type])
@@ -631,12 +774,16 @@ ingest_all_file <- function(path,
     notes         = NA_character_
   )
 
+  # -- Merge with an existing registry, or create one ---------------------------
   if (file.exists(registry_path)) {
     existing <- data.table::as.data.table(arrow::read_parquet(registry_path))
 
     # Ensure backward compatibility with registries built before `live` existed
     if (!"live" %in% names(existing)) existing[, live := TRUE]
 
+    # Existing rows are never modified (so their flags and notes survive).
+    # Matching is on the full key: an existing row for the same gauge with a
+    # different data_type, or with NA data_type, does not count as present.
     is_new   <- !.registry_key(new_rows$gauge_id, new_rows$data_type) %in%
                 .registry_key(existing$gauge_id, existing$data_type)
     to_add   <- new_rows[is_new]
@@ -656,6 +803,8 @@ ingest_all_file <- function(path,
     ))
   }
 
+  # Atomic replace (temp file then rename): Arrow memory-maps the file it read
+  # above, which blocks a direct overwrite on Windows
   .write_parquet_atomic(registry, registry_path)
   invisible(NULL)
 }
@@ -681,6 +830,25 @@ ingest_all_file <- function(path,
 #'
 #' The whole `.all` file is parsed on every call, so for large exports prefer
 #' [ingest_all_file()] once rather than fetching gauge by gauge.
+#'
+#' @details
+#' This is the `WISKI_ALL` branch of [route_gauge()]. The file is ingested
+#' into a throwaway store with `category = "hydrometric"` and the default
+#' `tz = "UTC"` (neither can be set from the registry), so the provenance
+#' rows it writes go to that temporary register and nothing is added to your
+#' real register or Bronze store. Every station and parameter in the file is
+#' ingested, not only the requested ones; only the requested `data_type` is
+#' read back. The store is deleted when the function exits.
+#'
+#' The date filter is half-open, `[start_date, end_date)`, with both dates
+#' read as UTC midnight.
+#'
+#' A missing file only produces a warning and an empty result. Through
+#' [run_backfill()] or [run_incremental()] (which call [route_gauge()] with
+#' `on_error = "stop"`) that is therefore logged as `EMPTY`, not `FAILED`; a
+#' missing `WISKI_ALL_ROOT`, an unsupported `data_type` or a parsing error is
+#' an error and is logged `FAILED`. An empty result also occurs when the file
+#' holds no series of the requested type.
 #'
 #' @param gauge_id Character. Gauge identifier matching `gauge_id` in the
 #'   registry, and the station number embedded in the `.all` file.
@@ -716,6 +884,8 @@ fetch_from_wiski_all <- function(gauge_id, data_type, start_date, end_date) {
     stop("[WISKI_ALL] WISKI_ALL_ROOT environment variable not set.")
   }
 
+  # An unusable data_type is an error (orchestrators log it FAILED); a missing
+  # file for one gauge only warns, see below.
   dt_code <- param_to_data_type(data_type)
   if (length(dt_code) != 1L || is.na(dt_code)) {
     stop(sprintf("[WISKI_ALL] Unsupported data_type '%s'.", data_type))
@@ -728,7 +898,9 @@ fetch_from_wiski_all <- function(gauge_id, data_type, start_date, end_date) {
     return(data.table::data.table())
   }
 
-  # Ingest to a temporary store, then read the requested series back
+  # Ingest to a temporary store, then read the requested series back. The
+  # station number inside the file is the Bronze site_id, so a file whose
+  # stations differ from `gauge_id` yields no matching files (empty result).
   tmp_store <- tempfile("wiski_all_")
   on.exit(unlink(tmp_store, recursive = TRUE), add = TRUE)
 
@@ -745,6 +917,7 @@ fetch_from_wiski_all <- function(gauge_id, data_type, start_date, end_date) {
   }))
   if (nrow(dt) == 0L) return(dt)
 
+  # Half-open window [start, end): end_date is exclusive, as elsewhere
   from_dt <- as.POSIXct(start_date, tz = "UTC")
   to_dt   <- as.POSIXct(end_date,   tz = "UTC")
   dt[dt$timestamp >= from_dt & dt$timestamp < to_dt]

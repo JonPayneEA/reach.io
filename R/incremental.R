@@ -40,17 +40,26 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
                                supplier_code = "EA",
                                category      = "hydrometric") {
 
+  # Typed NA so callers can always test is.na() and format() the result
   na_ts <- as.POSIXct(NA_real_, origin = "1970-01-01", tz = "UTC")
 
+  # Matches every file for the gauge + type, including all WISKI traces and
+  # every received date, so the watermark is the max over all of them
   files <- .list_bronze_files(output_dir, gauge_id, data_type,
                               supplier_code, category)
   if (length(files) == 0L) return(na_ts)
 
-  # Newest observation-year directory that holds this gauge
+  # Newest observation-year directory that holds this gauge. Files are
+  # partitioned by observation year, so the latest timestamp must be in the
+  # newest year directory; older years never need opening. Files whose parent
+  # directory is not a year are ignored.
   yr    <- suppressWarnings(as.integer(basename(dirname(files))))
   files <- files[!is.na(yr) & yr == max(yr, na.rm = TRUE)]
   if (length(files) == 0L) return(na_ts)
 
+  # A file that cannot be read is skipped with a warning rather than failing
+  # the gauge. If every file in the directory is unreadable the result is NA
+  # and the caller falls back to default_start.
   ts <- lapply(files, function(f) {
     tryCatch(
       arrow::read_parquet(f, col_select = "timestamp")[["timestamp"]],
@@ -61,6 +70,7 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
       }
     )
   })
+  # c() (not unlist) so the POSIXct class survives the combine
   ts <- do.call(c, Filter(Negate(is.null), ts))
   if (is.null(ts) || all(is.na(ts))) return(na_ts)
 
@@ -78,6 +88,10 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
 
   t_start <- proc.time()
   elapsed <- function() round((proc.time() - t_start)[["elapsed"]], 2)
+  # One log-row shape for every outcome. `watermark` is the value found
+  # before this run, as text so a missing one logs as NA; FAILED rows carry
+  # none (the failure may have happened before it was read). All rows from
+  # one run share `run_at`, so the appended history can be grouped by run.
   row <- function(status, watermark = NA_character_, rows = 0L,
                   error = NA_character_) {
     data.table::data.table(
@@ -95,6 +109,10 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
 
   tryCatch({
 
+    # -- Resolve where this series lives in Bronze ----------------------------
+    # Validate before any disk or network access. The watermark lookup needs a
+    # concrete framework type code, so a registry row without a usable
+    # data_type (e.g. an NA WISKI_ALL row) is logged FAILED, not guessed at.
     supplier_code <- source_to_supplier(gauge$source_system)
     dt_code       <- param_to_data_type(gauge$data_type %||% NA_character_)
     category      <- gauge$category
@@ -125,6 +143,10 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
       format(hwm, "%Y-%m-%d %H:%M:%S", tz = "UTC")
 
     # -- Skip if already up to date -------------------------------------------
+    # end_date is exclusive and the API works in whole days, so once the
+    # watermark's day reaches end_date there is nothing left to request. With
+    # the default end_date (today) this also means today's partial day is
+    # never fetched.
     if (!is.na(hwm) && as.Date(hwm) >= as.Date(end_date)) {
       return(list(log = row("NO_NEW_DATA", hwm_chr), prov = NULL))
     }
@@ -135,10 +157,16 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
     # -- Fetch via router (errors propagate -> FAILED) -------------------------
     data_dt <- route_gauge(gauge, start_date, end_date, on_error = "stop")
 
+    # EMPTY: the source returned nothing at all for the requested days
+    # (distinct from FAILED, which is an error, and NO_NEW_DATA below)
     if (is.null(data_dt) || nrow(data_dt) == 0L) {
       return(list(log = row("EMPTY", hwm_chr), prov = NULL))
     }
 
+    # Fetching from the watermark's own day re-delivers rows already stored;
+    # keep only strictly newer ones so Bronze is not given duplicates. The
+    # one gauge-level watermark applies to every series (trace) in data_dt.
+    # NO_NEW_DATA here means the source had nothing beyond what we hold.
     if (!is.na(hwm)) {
       data_dt <- data_dt[data_dt$timestamp > hwm]
       if (nrow(data_dt) == 0L) {
@@ -146,6 +174,9 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
       }
     }
 
+    # Written by the worker; provenance rows are returned for the main
+    # process to append. The " incremental" suffix tells these register
+    # entries apart from backfill ones.
     prov <- .store_bronze(
       data_dt, gauge, output_dir,
       method_of_receipt = paste0(gauge$source_system %||% "unknown", " incremental")
@@ -182,6 +213,55 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
 #' normal runs do not create duplicates. If overlap does occur (for example a
 #' gauge re-backfilled later), [read_bronze()] keeps the most recently received
 #' row for each timestamp.
+#'
+#' @details
+#' ## Watermark
+#'
+#' The watermark is the maximum Bronze `timestamp` for the gauge and data type,
+#' taken from the newest observation-year directory only. If a gauge has
+#' several series of one type (WISKI traces) the watermark is the maximum
+#' across all of them, and it is applied to every series fetched. Because the
+#' fetch starts on the watermark's own day, rows from earlier that day are
+#' fetched again and discarded. Values that arrive late or are revised with a
+#' timestamp at or before the watermark are not picked up; use
+#' [run_backfill()] for those.
+#'
+#' ## Date window
+#'
+#' `end_date` is exclusive and the API works in whole days. A series whose
+#' watermark day is on or after `end_date` is logged `NO_NEW_DATA` without a
+#' request. With the default `end_date` (today) the current, incomplete day is
+#' therefore never fetched.
+#'
+#' ## Status values
+#'
+#' - `SUCCESS`: new rows were written (`rows` counts them).
+#' - `NO_NEW_DATA`: already up to date, or the source returned only rows at
+#'   or before the watermark.
+#' - `EMPTY`: the source returned nothing for the requested days.
+#' - `FAILED`: an error was raised (including a registry row whose
+#'   `source_system` or `data_type` cannot be resolved, such as an `NA`
+#'   `data_type`). The message is in `error`.
+#'
+#' ## Order of work and side effects
+#'
+#' Workers read the watermark, fetch, filter and write Bronze files. Once
+#' every gauge has finished, the main process appends the provenance rows to
+#' the register CSV, then appends this run's rows to `log_path` (columns are
+#' unioned, so older logs with a different layout stay readable). Unlike
+#' [run_backfill()] there is no batching: if the run is interrupted, Bronze
+#' files already written have no register records. The registry is not
+#' modified, so `backfill_done` is untouched.
+#'
+#' Bronze file names end in the received date (see [read_bronze()]). If a
+#' series is written twice for the same observation year on the same calendar
+#' day, for example by a second run or by this function after a same-day
+#' [run_backfill()], the later file replaces the earlier one and holds only
+#' the rows that run wrote.
+#'
+#' `gauge_ids` is checked against the registry after it has been narrowed to
+#' active, live rows, so an inactive or non-live gauge is reported as not
+#' found.
 #'
 #' @inheritSection run_backfill EA fair use
 #'
@@ -241,9 +321,12 @@ run_incremental <- function(registry_path,
                             gauge_ids     = NULL,
                             n_workers     = .default_workers()) {
 
+  # One timestamp for the whole run, stamped on every log row
   run_at <- Sys.time()
 
   # -- Load registry and restrict to active, live gauges ----------------------
+  # live = FALSE marks historical dumps (WISKI .all) that have no feed to
+  # poll. An NA, or a registry with no `live` column at all, counts as live.
   registry_dt <- data.table::as.data.table(
     arrow::read_parquet(registry_path)
   )
@@ -253,6 +336,9 @@ run_incremental <- function(registry_path,
   }
 
   # -- Optionally restrict to a gauge subset ----------------------------------
+  # Checked against the already-filtered registry, so an inactive or non-live
+  # gauge is reported as "not found" too. Warn for partial misses; stop only
+  # when nothing is left to run.
   if (!is.null(gauge_ids)) {
     unknown <- setdiff(gauge_ids, registry_dt$gauge_id)
     if (length(unknown) > 0) {
@@ -276,6 +362,9 @@ run_incremental <- function(registry_path,
   on.exit(future::plan(old_plan), add = TRUE)
 
   # -- Process each gauge -----------------------------------------------------
+  # One future per registry row, no batching or mid-run checkpoint (cf.
+  # run_backfill()). Workers write Bronze files but must not touch the
+  # register, so they return their provenance rows instead.
   res <- future.apply::future_lapply(
     seq_len(n_gauges),
     function(i) .incremental_one(registry_dt[i], output_dir, end_date,
@@ -285,7 +374,8 @@ run_incremental <- function(registry_path,
 
   log_dt <- data.table::rbindlist(lapply(res, `[[`, "log"), fill = TRUE)
 
-  # Register is appended from the main process only
+  # Register is appended from the main process only (concurrent appends to
+  # one CSV are not safe), once all workers have finished
   .write_provenance_rows(
     data.table::rbindlist(lapply(res, `[[`, "prov"), fill = TRUE),
     register_path
@@ -302,6 +392,9 @@ run_incremental <- function(registry_path,
   ))
 
   # -- Steward alert if failure rate exceeds 5% -------------------------------
+  # More than 5% failing points to a systemic problem (API outage, schema
+  # change) rather than isolated bad gauges. n_gauges can be 0 here when no
+  # gauge_ids filter was given, hence the guard.
   fail_pct <- if (n_gauges > 0L) n_failed / n_gauges else 0
   if (fail_pct > 0.05) {
     warning(sprintf(
@@ -311,6 +404,8 @@ run_incremental <- function(registry_path,
   }
 
   # -- Append to log (preserves full run history across multiple syncs) -------
+  # Appended, not overwritten (unlike run_backfill()); the returned log_dt is
+  # this run only, not the accumulated history.
   .append_log(log_dt, log_path)
   message(sprintf("Log appended: %s", log_path))
 
