@@ -40,3 +40,43 @@ test_that("snap_offgrid_timestamps does not modify its input", {
   expect_equal(dt, before)
   expect_false(".snapped" %in% names(dt))
 })
+
+
+# -- two off-grid rows competing for one empty slot ----------------------------
+#
+# Regression: occupancy was judged against on-grid rows only, so 00:13 and 00:14
+# (both rounding to the empty 00:15 slot) were both kept at 00:15.
+
+compete <- function(times, site = "A") {
+  data.table::data.table(
+    site_id   = site,
+    timestamp = as.POSIXct(times, tz = "UTC"),
+    value     = seq_along(times)
+  )
+}
+
+test_that("only the nearest of several off-grid rows is snapped onto an empty slot", {
+  dt <- compete(c("2022-01-01 00:00", "2022-01-01 00:13", "2022-01-01 00:14"))
+  expect_warning(expect_warning(out <- snap_offgrid_timestamps(dt)))
+  expect_equal(format(out$timestamp, "%H:%M"), c("00:00", "00:15"))
+  expect_equal(out[.snapped == TRUE, value], 3L)          # the 00:14 reading (nearer)
+  expect_false(anyDuplicated(out[, .(site_id, timestamp)]) > 0L)
+})
+
+test_that("on an equal distance the earlier off-grid row is kept", {
+  # 00:07:30 and 00:22:30 are not competing; use symmetric rows around 00:15
+  dt <- compete(c("2022-01-01 00:14", "2022-01-01 00:16"))
+  expect_warning(out <- snap_offgrid_timestamps(dt))
+  expect_equal(nrow(out), 1L)
+  expect_equal(out$value, 1L)
+})
+
+test_that("competition is judged per site", {
+  dt <- data.table::rbindlist(list(
+    compete(c("2022-01-01 00:00", "2022-01-01 00:14"), site = "A"),
+    compete(c("2022-01-01 00:00", "2022-01-01 00:14"), site = "B")
+  ))
+  expect_warning(out <- snap_offgrid_timestamps(dt))
+  expect_equal(nrow(out), 4L)                              # one snapped row per site
+  expect_equal(out[.snapped == TRUE, site_id], c("A", "B"))
+})

@@ -988,7 +988,9 @@ y_to_qc_flag <- function(y) {
 #'   \item If the nearest 15-min slot is already occupied by an on-grid reading
 #'     for the same site, the off-grid row is \strong{dropped} (redundant copy).
 #'   \item Otherwise the timestamp is \strong{snapped} to the nearest slot and
-#'     the row is retained with \code{.snapped = TRUE}.
+#'     the row is retained with \code{.snapped = TRUE}. If several off-grid rows
+#'     compete for the same empty slot, only the nearest is retained and the
+#'     others are dropped.
 #' }
 #'
 #' A \code{warning()} is emitted for each class of action taken (drops and
@@ -1012,10 +1014,10 @@ y_to_qc_flag <- function(y) {
 #' that [promote_to_silver()] can downgrade it to \emph{Estimated}.
 #'
 #' Rows that are already on the grid, and rows exempted by the \code{period}
-#' rule below, are returned unchanged. Note that occupancy is judged against
-#' on-grid rows only: if two \emph{different} off-grid rows round to the same
-#' empty slot, both are kept at that timestamp, so callers that need unique
-#' timestamps should de-duplicate afterwards.
+#' rule below, are returned unchanged. If two \emph{different} off-grid rows of
+#' a site round to the same empty slot, only the one nearest the slot (the
+#' earlier, on a tie) is snapped and the other is dropped as redundant, so
+#' snapping never creates two rows for one site and timestamp.
 #'
 #' Only 15-minute data is touched. If \code{dt} has a \code{period} column
 #' (as Bronze data does), rows whose \code{period} is non-missing and not
@@ -1084,6 +1086,15 @@ snap_offgrid_timestamps <- function(dt) {
                                 sep = "|")]
   off_grid[, .covered  := .snap_key %in% occupied]
 
+  # Two different off-grid rows can round onto the same EMPTY slot (for example
+  # 00:13 and 00:14 both go to 00:15). Keeping both would put two values at one
+  # timestamp, so keep only the one nearest the slot (the earlier on a tie) and
+  # treat the others as redundant, exactly like rows whose slot is occupied.
+  off_grid[, .dist := abs(as.numeric(timestamp) - as.numeric(snap_ts))]
+  data.table::setorder(off_grid, .snap_key, .dist, timestamp)
+  off_grid[, .rank    := seq_len(.N), by = .snap_key]
+  off_grid[, .covered := .covered | .rank > 1L]
+
   n_dropped <- sum(off_grid$.covered)
   n_snapped <- sum(!off_grid$.covered)
 
@@ -1092,7 +1103,7 @@ snap_offgrid_timestamps <- function(dt) {
   # uncovered rows are kept, with their timestamp replaced by the snapped one
   to_snap <- off_grid[!(.covered)]
   to_snap[, timestamp  := snap_ts]
-  to_snap[, c("snap_ts", ".snap_key", ".covered") := NULL]
+  to_snap[, c("snap_ts", ".snap_key", ".covered", ".dist", ".rank") := NULL]
   to_snap[, .snapped   := TRUE]
 
   # `.snapped` lets promote_to_silver() downgrade adjusted rows to Estimated
@@ -1102,7 +1113,7 @@ snap_offgrid_timestamps <- function(dt) {
   if (n_dropped > 0L)
     warning(
       sprintf(
-        "%d off-grid timestamp(s) dropped (on-grid slot already occupied).",
+        "%d off-grid timestamp(s) dropped (target slot already occupied, or a nearer row kept).",
         n_dropped
       ),
       call. = FALSE

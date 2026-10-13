@@ -37,10 +37,16 @@
 #'   stores the result.
 #' - **Missing data.** An unknown gauge, or a gauge with no matching measure,
 #'   gives a warning (the latter lists the resolutions that do exist) and an
-#'   empty `data.table`, not an error. A chunk whose request fails is also
-#'   only a warning: the remaining chunks are still fetched and the data
-#'   returned is then incomplete. Errors from the station lookup itself
-#'   (for example an HTTP failure) are raised.
+#'   empty `data.table` with `on_error = "warn"`; with `"stop"` it is an error,
+#'   so an orchestrator records the gauge as `FAILED` rather than `EMPTY`. A chunk whose request fails is handled
+#'   according to `on_error`: with `"warn"` (the default) each failure is a
+#'   warning, the remaining chunks are still fetched and the data returned is
+#'   incomplete; with `"stop"` all chunks are still attempted and then an error
+#'   is raised naming the chunks that failed, so a partial series is never
+#'   returned as if it were complete. [route_gauge()] passes its own `on_error`
+#'   through, which is how [run_backfill()] and [run_incremental()] record such
+#'   a gauge as `FAILED`. Errors from the station lookup itself (for example an
+#'   HTTP failure) are always raised.
 #' - **Timestamps.** `timestamp` comes from the readings' `dateTime`. For
 #'   daily aggregates that is midnight UTC; the time of occurrence of a daily
 #'   maximum or minimum is not available from this endpoint. If no valid
@@ -55,6 +61,10 @@
 #'   `"rainfall"`.
 #' @param start_date Character. Start date (inclusive) in `"YYYY-MM-DD"` format.
 #' @param end_date Character. End date (**exclusive**) in `"YYYY-MM-DD"` format.
+#' @param on_error Character. `"warn"` (default) turns problems into warnings
+#'   and returns what was fetched (or an empty table); `"stop"` raises an error
+#'   instead, for an unknown gauge, a missing measure, or (after all chunks have
+#'   been tried) one or more failed chunks.
 #'
 #' @return A `data.table` conforming to the Bronze schema (`timestamp`,
 #'   `value`, `supplier_flag`, `dataset_id`, `site_id`, `data_type`),
@@ -66,7 +76,10 @@
 #' \dontrun{
 #' fetch_from_hde("SS92F014", "flow", "2020-01-01", "2020-12-31")
 #' }
-fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
+fetch_from_hde <- function(gauge_id, data_type, start_date, end_date,
+                           on_error = c("warn", "stop")) {
+
+  on_error <- match.arg(on_error)
 
   message(sprintf("  [HDE] %s | %s | %s to %s",
                   gauge_id, data_type, start_date, end_date))
@@ -76,7 +89,11 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
   # result) so one unavailable gauge does not raise inside a larger run.
   stn <- find_stations(wiski_ids = gauge_id)
   if (nrow(stn) == 0) {
-    warning(sprintf("[HDE] No station found for gauge_id: %s", gauge_id))
+    msg <- sprintf("[HDE] No station found for gauge_id: %s", gauge_id)
+    # "stop": a registered gauge the source does not know is a failure to
+    # investigate, not an empty response (which the orchestrators log EMPTY)
+    if (on_error == "stop") stop(msg, call. = FALSE)
+    warning(msg)
     return(data.table::data.table())
   }
 
@@ -98,14 +115,16 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
     # Warn with what IS available so the user can diagnose missing resolutions
     available <- stn[parameter == data_type,
                      paste(period, value_type, sep = "/")]
-    warning(sprintf(
+    msg <- sprintf(
       "[HDE] No %s %s %s measure found for gauge_id: %s. Available: %s",
       config$default_period,
       config$value_type %||% "(any)",
       data_type,
       gauge_id,
       if (length(available)) paste(available, collapse = ", ") else "none"
-    ))
+    )
+    if (on_error == "stop") stop(msg, call. = FALSE)
+    warning(msg)
     return(data.table::data.table())
   }
 
@@ -118,25 +137,38 @@ fetch_from_hde <- function(gauge_id, data_type, start_date, end_date) {
   # by Filter() below.
   chunks     <- make_date_chunks(start_date, end_date)
   chunk_list <- vector("list", nrow(chunks))
+  failed     <- character()
 
   for (j in seq_len(nrow(chunks))) {
-    # A chunk failure is downgraded to a warning, so the other chunks are
-    # still fetched. It does NOT raise, which means route_gauge(on_error =
-    # "stop") will not see it and a partial series can be returned.
+    # A chunk failure never aborts the loop: the other chunks are still
+    # fetched. What happens afterwards depends on on_error: "warn" returns the
+    # partial series (each failure was already a warning), "stop" raises once
+    # the loop is done (below) so the caller can record the gauge as FAILED
+    # instead of storing an incomplete series as if it were whole.
     dt <- tryCatch(
       fetch_readings(measure_notation,
                      chunks$chunk_from[j],
                      chunks$chunk_to[j]),
       error = function(e) {
-        warning(sprintf("[HDE] Chunk %d failed for %s: %s",
-                        j, gauge_id, e$message))
+        failed <<- c(failed, sprintf("%s to %s: %s", chunks$chunk_from[j],
+                                     chunks$chunk_to[j], e$message))
+        if (on_error == "warn") {
+          warning(sprintf("[HDE] Chunk %d failed for %s: %s",
+                          j, gauge_id, e$message))
+        }
         NULL
       }
     )
     if (!is.null(dt) && nrow(dt) > 0L) chunk_list[[j]] <- dt
     # EA fair use: one request at a time. Unlike run_sync(), this pauses after
     # every chunk, including empty and failed ones.
-    Sys.sleep(1)
+    .pace()
+  }
+
+  if (length(failed) > 0L && on_error == "stop") {
+    stop(sprintf("[HDE] %d of %d chunk(s) failed for %s (%s)",
+                 length(failed), nrow(chunks), gauge_id,
+                 paste(failed, collapse = "; ")), call. = FALSE)
   }
 
   chunk_list <- Filter(Negate(is.null), chunk_list)
@@ -343,8 +375,10 @@ fetch_from_wiski <- function(gauge_id, data_type, start_date, end_date) {
 #'   [run_incremental()] do. The re-raised error is prefixed with the gauge ID
 #'   and drops the original call.
 #' - **Warnings are not errors.** Problems the clients report as warnings
-#'   (for example [fetch_from_hde()] on a failed chunk) are not intercepted
-#'   here and do not trigger `on_error`.
+#'   (for example an unknown gauge in [fetch_from_hde()]) are not intercepted
+#'   here and do not trigger `on_error`. A failed HDE chunk is handled
+#'   separately: `on_error` is passed down, so with `"stop"` it becomes an
+#'   error here.
 #' - **Side effects.** None of its own: the network or file access is done by
 #'   the chosen client, and the result is not written to Bronze here.
 #'   [fetch_from_wiski()] always errors at present.
@@ -386,13 +420,13 @@ route_gauge <- function(gauge_row, start_date, end_date,
       gauge_row$source_system,
       "HDE"       = fetch_from_hde(
                       gauge_row$gauge_id, gauge_row$data_type,
-                      start_date, end_date),
+                      start_date, end_date, on_error = on_error),
       "WISKI"     = fetch_from_wiski(
                       gauge_row$gauge_id, gauge_row$data_type,
                       start_date, end_date),
       "WISKI_ALL" = fetch_from_wiski_all(
                       gauge_row$gauge_id, gauge_row$data_type,
-                      start_date, end_date),
+                      start_date, end_date, on_error = on_error),
       stop("No client for source_system: ", gauge_row$source_system)
     )
   }, error = function(e) {

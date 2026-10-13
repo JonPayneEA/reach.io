@@ -59,8 +59,10 @@
 .parse_all_blocks <- function(path, tmp_dir, chunk_size = 50000L,
                                encoding = "latin1", tz = "UTC") {
 
-  # An existing tmp_dir is reused, not emptied: leftover block files from an
-  # earlier keep_tmp run would be merged by pass 2 along with the new ones.
+  # Start from an empty tmp_dir. Pass 2 merges EVERY block file it finds there,
+  # so leftovers (from an earlier keep_tmp = TRUE run, or an interrupted one)
+  # would otherwise be ingested together with the new blocks.
+  unlink(tmp_dir, recursive = TRUE)
   dir.create(tmp_dir, showWarnings = FALSE, recursive = TRUE)
   # Running count of blocks written; it numbers the intermediate files, which
   # fixes their order for the "last block wins" dedupe in pass 2.
@@ -325,6 +327,19 @@
       warning(sprintf("[%s] %d row(s) had an unparseable timestamp and were dropped.",
                       station, n_bad_ts), call. = FALSE)
       dt <- dt[!is.na(timestamp)]
+    }
+
+    # A series is keyed on station + the third element of the ts_name path, so
+    # two time series that differ only elsewhere in the name (for example
+    # ".../SG/15m..." and ".../SG/1d...") share a key. They cannot be separated
+    # here, and the timestamp de-duplication below would mix them, so say so
+    # rather than merging silently.
+    ts_names <- unique(stats::na.omit(dt$ts_name))
+    if (length(ts_names) > 1L) {
+      warning(sprintf(
+        "[%s] %d different time series names share the series key '%s' and were merged: %s",
+        station, length(ts_names), key, paste(ts_names, collapse = ", ")
+      ), call. = FALSE)
     }
 
     # Deduplicate on timestamp — overlapping records appear at export
@@ -598,9 +613,9 @@
 #' `register_path` after all series are merged (so a failure part-way leaves
 #' Bronze files without register rows) and, if requested, updates
 #' `registry_path`. The temp directory is `<output_dir>/.tmp_<name>`, where
-#' `<name>` is the file name without its extension. It is reused, not
-#' cleared, if it already exists, so remove a leftover one (from
-#' `keep_tmp = TRUE`) before re-ingesting.
+#' `<name>` is the file name without its extension. It is emptied at the start
+#' of every call, so leftovers from an earlier `keep_tmp = TRUE` or interrupted
+#' run are never merged into the new ingest.
 #'
 #' The `dataset_id` ends in the day of ingest. Re-ingesting a series on a
 #' later day adds new files; [read_bronze()] keeps the most recently received
@@ -627,9 +642,11 @@
 #'   `"latin1"`, which covers Windows-1252 — the encoding used by WISKI
 #'   exports from EA Windows systems. Change to `"UTF-8"` if your `.all`
 #'   files are known to be UTF-8 encoded.
-#' @param keep_tmp Logical. Keep intermediate Parquet files after pass 2?
-#'   Default `FALSE`. Set `TRUE` for debugging or to re-run pass 2 without
-#'   re-parsing.
+#' @param keep_tmp Logical. Keep the intermediate per-block Parquet files
+#'   (`<output_dir>/.tmp_<name>/<station>__<param>__<nnn>.parquet`) after the
+#'   run? Default `FALSE`. Set `TRUE` to inspect what was parsed from each
+#'   block when debugging. The files are not reused: the next call clears the
+#'   directory and parses the file again.
 #' @param registry_path Character or `NULL`. Path to an existing
 #'   `gauge_registry.parquet` file. When supplied, every station discovered
 #'   in the `.all` file is added to the registry if not already present (see
@@ -860,6 +877,10 @@ ingest_all_file <- function(path,
 #'   format.
 #' @param end_date Character. End date (**exclusive**) in `"YYYY-MM-DD"`
 #'   format.
+#' @param on_error Character. `"warn"` (default) gives a warning and an empty
+#'   result when the `.all` file is missing or holds no series of the requested
+#'   type; `"stop"` raises an error instead, which [route_gauge()] passes down
+#'   so the orchestrators log such a gauge as `FAILED` rather than `EMPTY`.
 #'
 #' @return A `data.table` conforming to the Bronze schema (`timestamp`,
 #'   `value`, `supplier_flag`, `dataset_id`, `site_id`, `data_type`, `period`),
@@ -875,7 +896,10 @@ ingest_all_file <- function(path,
 #' Sys.setenv(WISKI_ALL_ROOT = "/mnt/wiski/exports")
 #' fetch_from_wiski_all("2723TH", "flow", "2010-01-01", "2013-01-01")
 #' }
-fetch_from_wiski_all <- function(gauge_id, data_type, start_date, end_date) {
+fetch_from_wiski_all <- function(gauge_id, data_type, start_date, end_date,
+                                 on_error = c("warn", "stop")) {
+
+  on_error <- match.arg(on_error)
 
   message(sprintf("  [WISKI_ALL] %s | %s | %s to %s",
                   gauge_id, data_type, start_date, end_date))
@@ -894,8 +918,12 @@ fetch_from_wiski_all <- function(gauge_id, data_type, start_date, end_date) {
 
   all_file <- file.path(all_root, paste0(gauge_id, ".all"))
   if (!file.exists(all_file)) {
-    warning(sprintf("[WISKI_ALL] No .all file found for gauge_id: %s at %s",
-                    gauge_id, all_file))
+    msg <- sprintf("[WISKI_ALL] No .all file found for gauge_id: %s at %s",
+                   gauge_id, all_file)
+    # "stop": a registered gauge with no export file is a failure to
+    # investigate, not an empty response (which orchestrators log EMPTY)
+    if (on_error == "stop") stop(msg, call. = FALSE)
+    warning(msg)
     return(data.table::data.table())
   }
 
@@ -911,7 +939,14 @@ fetch_from_wiski_all <- function(gauge_id, data_type, start_date, end_date) {
   files <- .list_bronze_files(tmp_store, gauge_id, dt_code,
                               supplier_code = "WISKI",
                               category      = "hydrometric")
-  if (length(files) == 0L) return(data.table::data.table())
+  if (length(files) == 0L) {
+    # The file exists but holds no series of this station and data type
+    if (on_error == "stop") {
+      stop(sprintf("[WISKI_ALL] No %s series for station '%s' in %s",
+                   data_type, gauge_id, all_file), call. = FALSE)
+    }
+    return(data.table::data.table())
+  }
 
   dt <- data.table::rbindlist(lapply(files, function(f) {
     data.table::as.data.table(arrow::read_parquet(f))

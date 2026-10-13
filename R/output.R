@@ -44,6 +44,9 @@
 #'   Default `"EA"` (the Hydrology API).
 #' @param category Character. Data category for the path. Default
 #'   `"hydrometric"`.
+#' @param trace Character or `NULL`. Optional series discriminator added to the
+#'   `dataset_id` (see [make_dataset_id()]); used when several measures at one
+#'   station share a data type, so each is filed separately.
 #' @param register_path Character or `NULL`. Hydrometric Data Register CSV. When
 #'   supplied, a provenance record is appended for every file written.
 #' @param method_of_receipt Character. Recorded in the register. Default
@@ -60,7 +63,8 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
                            supplier_code = "EA",
                            category = "hydrometric",
                            register_path = NULL,
-                           method_of_receipt = "API pull") {
+                           method_of_receipt = "API pull",
+                           trace = NULL) {
 
   # Memory mode is a pass-through: no schema is applied, so the caller keeps the
   # raw API columns (dateTime, value, quality, ...) rather than Bronze names
@@ -79,7 +83,7 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
   # what makes a later-day re-download a new file; a same-day repeat is merged
   # into the existing file by the writer.
   sid        <- if (!is.na(site_id) && nzchar(site_id)) site_id else measure_id
-  dataset_id <- make_dataset_id(supplier_code, sid, data_type)
+  dataset_id <- make_dataset_id(supplier_code, sid, data_type, trace = trace)
 
   # -- Apply schema and write ---------------------------------------------------
   # The API returns dateTime/value/quality; `quality` becomes supplier_flag

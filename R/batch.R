@@ -132,6 +132,9 @@ poll_batch <- function(status_url, max_wait_s = 600, poll_interval_s = 15) {
 #' @param category Character. Bronze data category (disk mode).
 #' @param register_path Character or `NULL`. Provenance register CSV (disk
 #'   mode).
+#' @param trace Character or `NULL`. Series discriminator for the Bronze
+#'   `dataset_id` (disk mode), used when a station has several measures of one
+#'   data type.
 #'
 #' @return A named list: `measure`, `data` (`data.table` in memory mode,
 #'   `NULL` in disk mode), `file` (`NA` in memory mode; Bronze paths joined by
@@ -141,7 +144,7 @@ poll_batch <- function(status_url, max_wait_s = 600, poll_interval_s = 15) {
 run_batch <- function(mid, from_date, to_date, output, out_dir, param,
                       max_wait_s = 600, site_id = NA_character_,
                       period = NA_character_, category = "hydrometric",
-                      register_path = NULL) {
+                      register_path = NULL, trace = NULL) {
 
   # The whole job sits inside one tryCatch: any failure (submit, poll, timeout,
   # download, parse, or the Bronze write) becomes ok = FALSE for this measure
@@ -177,7 +180,7 @@ run_batch <- function(mid, from_date, to_date, output, out_dir, param,
     # Same helper as the sync path, so both methods yield identical types.
     .parse_reading_datetimes(dt)
 
-    Sys.sleep(1)  # EA fair-use: one request at a time
+    .pace()  # EA fair-use: one request at a time
 
     # -- Return or write ------------------------------------------------------
     # The whole CSV is already in memory (dt) at this point; disk mode converts
@@ -193,7 +196,8 @@ run_batch <- function(mid, from_date, to_date, output, out_dir, param,
       paths <- handle_output(dt, "disk", out_dir, param, mid,
                              site_id = site_id, period = period,
                              category = category, register_path = register_path,
-                             method_of_receipt = "API pull (batch)")
+                             method_of_receipt = "API pull (batch)",
+                             trace = trace)
       message("  Saved -> ", paste(paths, collapse = "; "))
       list(measure = mid, data = NULL, file = paste(paths, collapse = "; "),
            rows = nrow(dt), ok = TRUE)

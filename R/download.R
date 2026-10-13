@@ -15,6 +15,33 @@
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
+#' Series traces that keep several measures at one station apart
+#'
+#' Builds a short, file-name-safe trace from each measure's period and value
+#' type (e.g. `"15min_instantaneous"`), taking the columns from either
+#' [find_stations()] (`period`, `value_type`) or [get_measures()]
+#' (`periodName`, `valueType`). Traces are made unique within the input, so two
+#' measures that differ only in other respects still get different traces.
+#'
+#' @param m A `data.table` of measures that share a station.
+#' @return A character vector of traces, one per row of `m`.
+#' @noRd
+.measure_traces <- function(m) {
+  pick <- function(a, b) {
+    if (a %in% names(m)) m[[a]] else if (b %in% names(m)) m[[b]] else rep(NA_character_, nrow(m))
+  }
+  per <- pick("period", "periodName")
+  vt  <- pick("value_type", "valueType")
+  tr  <- vapply(seq_len(nrow(m)), function(i) {
+    parts <- c(per[i], vt[i])
+    parts <- parts[!is.na(parts) & nzchar(parts)]
+    if (length(parts) == 0L) "measure" else paste(parts, collapse = "_")
+  }, character(1L))
+  tr <- gsub("^_+|_+$", "", gsub("[^a-z0-9]+", "_", tolower(tr)))
+  make.unique(tr, sep = "_")
+}
+
+
 #' Download hydrology readings from the EA Hydrology API
 #'
 #' Single entry point for downloading rainfall, flow, and/or level data from
@@ -94,10 +121,13 @@
 #'   downloading the same series on a later day adds files, while repeating it
 #'   on the same day merges the new rows into that day's files (new values
 #'   win for timestamps present in both).
-#' - The `dataset_id` carries the site and data type but not the period or
-#'   value type, so selecting several measures of one data type at one station
-#'   in a single run (for example with `period_name = "all"`) targets the same
-#'   file for each of them.
+#' - A `dataset_id` carries the site and data type but not the period or value
+#'   type. When one run selects several measures of a data type at the same
+#'   station (for example with `period_name = "all"` or `value_type = "all"`),
+#'   each is given a trace built from its period and value type (such as
+#'   `"15min_instantaneous"`) so they are filed separately instead of mixing in
+#'   one file. Read one back with `read_bronze(trace = )`. A station with a
+#'   single selected measure keeps the plain, trace-free `dataset_id`.
 #' - One provenance row per file written is appended to the Hydrometric Data
 #'   Register at `register_path` (default
 #'   `<out_dir>/register/hydrometric_data_register.csv`).
@@ -375,11 +405,40 @@ download_hydrology <- function(
     measure_dts   <- list()
     param_summary <- list()
 
+    # ── Series traces (disk mode) ────────────────────────────────────────────
+    # A dataset_id carries the site and data type but not the period or value
+    # type. If a station has several selected measures of this parameter (for
+    # example instantaneous and daily maximum with value_type = "all"), they
+    # would be written to the SAME file and mix. Give such measures a trace
+    # built from period + value type so each is filed (and read back with
+    # read_bronze(trace = )) separately. A single measure per station keeps the
+    # plain, trace-free dataset_id.
+    measure_traces <- rep(NA_character_, nrow(measures))
+    if (output == "disk") {
+      shared <- duplicated(measures$site_id) | duplicated(measures$site_id, fromLast = TRUE)
+      if (any(shared)) {
+        measure_traces[shared] <- .measure_traces(measures[which(shared)])
+      }
+    }
+
     # ── Loop over each measure ───────────────────────────────────────────────
     for (i in seq_len(nrow(measures))) {
 
       mid         <- measures$notation[i]
       site_id_val <- measures$site_id[i]
+      trace_val   <- if (is.na(measure_traces[i])) NULL else measure_traces[i]
+
+      # The Bronze `period` column should hold THIS measure's resolution. With
+      # period_name = "all", p_period is the literal "all", which is a filter
+      # setting rather than a resolution, so prefer the measure's own value
+      # (find_stations() gives `period`, get_measures() gives `periodName`).
+      period_val <- p_period
+      for (pc in c("period", "periodName")) {
+        if (pc %in% names(measures) && !is.na(measures[[pc]][i])) {
+          period_val <- measures[[pc]][i]
+          break
+        }
+      }
       message(sprintf("\n  [%d/%d] %s", i, nrow(measures), mid))
 
       # Dispatch to the appropriate worker based on method. Both workers
@@ -387,15 +446,17 @@ download_hydrology <- function(
       # errors are caught inside the workers and returned as ok = FALSE, so
       # one bad measure does not abort the run. (run_sync() does not catch
       # errors from the disk write itself, which would propagate from here.)
-      # Each worker paces its own requests (Sys.sleep) for EA fair use.
+      # Each worker paces its own requests (.pace()) for EA fair use.
       result <- if (method == "sync") {
         run_sync(mid, chunks, output, out_dir, param, observation_type,
-                 site_id = site_id_val, period = p_period,
-                 category = category, register_path = register_path)
+                 site_id = site_id_val, period = period_val,
+                 category = category, register_path = register_path,
+                 trace = trace_val)
       } else {
         run_batch(mid, from_date, to_date, output, out_dir, param, max_wait_s,
-                  site_id = site_id_val, period = p_period,
-                  category = category, register_path = register_path)
+                  site_id = site_id_val, period = period_val,
+                  category = category, register_path = register_path,
+                  trace = trace_val)
       }
 
       if (output == "memory" &&

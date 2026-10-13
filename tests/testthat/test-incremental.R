@@ -215,3 +215,26 @@ test_that("run_incremental keeps earlier same-day Bronze rows (no overwrite)", {
   expect_equal(log_dt$status, "SUCCESS")
   expect_equal(nrow(read_bronze(root, "G020", "Q")@readings), 98L)
 })
+
+
+# -- gauge_ids: unknown and excluded ids are reported separately ----------------
+
+test_that("run_incremental distinguishes unknown ids from inactive / non-live ones", {
+  root <- withr::local_tempdir()
+  reg  <- data.table::rbindlist(list(
+    reg_row("RUN"), reg_row("OFF", active = FALSE), reg_row("HIST", live = FALSE)
+  ))
+  reg_path <- make_test_registry(root, reg)
+  mock_route(data.table::data.table())
+
+  w <- character()
+  withCallingHandlers(
+    suppressMessages(run_incremental(
+      reg_path, root, gauge_ids = c("RUN", "OFF", "HIST", "GHOST"),
+      n_workers = 1L, log_path = tempfile())),
+    warning = function(cnd) { w <<- c(w, conditionMessage(cnd)); invokeRestart("muffleWarning") }
+  )
+  expect_true(any(grepl("not found in registry: GHOST", w)))
+  expect_true(any(grepl("inactive or not live: OFF, HIST", w)))
+  expect_false(any(grepl("not found in registry:.*OFF", w)))
+})

@@ -206,6 +206,18 @@ utils::globalVariables(c(
 }
 
 
+#' Pause between requests to the EA API
+#'
+#' The Hydrology API fair-use guidance asks for one request at a time. All the
+#' per-request pauses go through this one function so the delay is defined in a
+#' single place and tests can replace it with a no-op (base `Sys.sleep()` itself
+#' cannot be mocked).
+#'
+#' @param secs Numeric. Seconds to wait. Default 1.
+#' @noRd
+.pace <- function(secs = 1) Sys.sleep(secs)
+
+
 #' Keep rows where a column is in a set of values
 #'
 #' Safe replacement for `dt[dt$col %in% values]` inside functions whose
