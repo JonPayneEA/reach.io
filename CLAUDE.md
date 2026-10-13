@@ -20,7 +20,7 @@ reach.io/
 │   ├── package.R       # Package constants: PARAMETER_CONFIG, VALID_SOURCES, VALID_CATEGORIES
 │   ├── schema.R        # Bronze schema, dataset IDs, supplier codes, provenance
 │   ├── setup.R         # setup_hydro_store()
-│   ├── classes.R       # S7 HydroData classes (Rainfall_Daily, Flow_15min, etc.)
+│   ├── classes.R       # S7 FlodeHydroData classes (FlodeRainfall_Daily, FlodeFlow_15min, etc.)
 │   ├── lookup.R        # find_stations(), get_measures()
 │   ├── download.R      # download_hydrology()
 │   ├── sync.R          # fetch_readings(), make_date_chunks(), run_sync()
@@ -126,7 +126,8 @@ regardless of which store tier data comes from.
 ### Language & Dependencies
 - **R** package; uses `S7` for OOP, `data.table` for tabular data, `arrow` for Parquet I/O
 - `future` / `future.apply` for parallelism
-- `httr` for API calls, `ggplot2` for plots, `lubridate` for dates
+- `httr` for API calls, `ggplot2` for plots; dates use base R
+  and data.table (`lubridate` is confined to reach.utils)
 
 ### Testing
 Run tests with:

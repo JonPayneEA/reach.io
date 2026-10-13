@@ -93,7 +93,7 @@ Before any QC checks run, the Bronze input is validated:
 
 ## 6. S7 Object Validation (all reads)
 
-**Location:** `R/classes.R` — `HydroData` validator, triggered on construction
+**Location:** `R/classes.R` — `FlodeHydroData` validator, triggered on construction
 
 | Check | What it verifies |
 |---|---|

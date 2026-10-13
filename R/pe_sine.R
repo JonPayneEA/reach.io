@@ -13,7 +13,7 @@
 # Modified:    2026-03-25 - JP: initial implementation
 # Tier:        1
 # Inputs:      Observed PE numeric vectors with Date vectors
-# Outputs:     Fitted parameters; PotEvap_Daily S7 objects; diagnostics
+# Outputs:     Fitted parameters; FlodePotEvap_Daily S7 objects; diagnostics
 # Dependencies: data.table, ggplot2, stats
 # ============================================================
 
@@ -173,10 +173,10 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
 #' @param end Date or character (`"YYYY-MM-DD"`). End of the output series
 #'   (inclusive).
 #' @param as_s7 Logical. If `TRUE` (default), wrap the result in a
-#'   [PotEvap_Daily] S7 object with `source_name = "sine_curve"`.
+#'   [FlodePotEvap_Daily] S7 object with `source_name = "sine_curve"`.
 #'   If `FALSE`, return a plain `data.table` with columns `date` and `pe`.
 #'
-#' @return A [PotEvap_Daily] S7 object (when `as_s7 = TRUE`) or a
+#' @return A [FlodePotEvap_Daily] S7 object (when `as_s7 = TRUE`) or a
 #'   `data.table` with columns `date` (Date) and `pe` (numeric,
 #'   mm day\eqn{^{-1}}) (when `as_s7 = FALSE`).
 #'
@@ -187,7 +187,7 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
 #' params <- list(B = 2.5, A = 2.0, phi = 172)
 #' pe_obj <- generate_pe_sine(params$B, params$A, params$phi,
 #'                            start = "2010-01-01", end = "2014-12-31")
-#' pe_obj  # PotEvap_Daily S7 object
+#' pe_obj  # FlodePotEvap_Daily S7 object
 #'
 #' # Plain data.table output
 #' dt <- generate_pe_sine(2.5, 2.0, 172,
@@ -216,7 +216,7 @@ generate_pe_sine <- function(B, A, phi, start, end, as_s7 = TRUE) {
     return(data.table::data.table(date = dates, pe = pe_values))
   }
 
-  PotEvap_Daily(
+  FlodePotEvap_Daily(
     readings    = data.table::data.table(
       dateTime = as.POSIXct(dates, tz = "UTC"),
       date     = dates,

@@ -8,7 +8,7 @@
 # Author:      JP
 # Created:     2026-03-19
 # Tier:        2
-# Inputs:      Lists of HydroData / PotEvapData S7 objects
+# Inputs:      Lists of FlodeHydroData / FlodePotEvapData S7 objects
 # Outputs:     ggplot2 double-mass plot
 # Dependencies: S7, data.table, ggplot2
 # Notes:       Level gauge data is not yet supported (requires
@@ -60,8 +60,8 @@ cumsum_na <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
 #' @noRd
 .axis_label <- function(data_list, output_units) {
   params <- vapply(data_list, function(obj) {
-    if (S7::S7_inherits(obj, HydroData))    obj@parameter
-    else if (S7::S7_inherits(obj, PotEvapData)) "pot. evaporation"
+    if (S7::S7_inherits(obj, FlodeHydroData))    obj@parameter
+    else if (S7::S7_inherits(obj, FlodePotEvapData)) "pot. evaporation"
     else "unknown"
   }, character(1L))
 
@@ -80,7 +80,7 @@ cumsum_na <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
 .scale_to_volume <- function(obj, weight, catchment_area_km2,
                              output_units, pe_daily = NULL) {
 
-  if (S7::S7_inherits(obj, HydroData) && obj@parameter == "level") {
+  if (S7::S7_inherits(obj, FlodeHydroData) && obj@parameter == "level") {
     stop(
       "double_mass_plot: level gauge data is not yet supported. ",
       "Convert to flow via a rating equation before passing to this function."
@@ -89,9 +89,9 @@ cumsum_na <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
 
   dt <- data.table::copy(obj@readings)[, .(dateTime, date, value)]
 
-  is_rainfall <- S7::S7_inherits(obj, HydroData) && obj@parameter == "rainfall"
-  is_pe_obj   <- S7::S7_inherits(obj, PotEvapData)
-  is_flow     <- S7::S7_inherits(obj, HydroData) && obj@parameter == "flow"
+  is_rainfall <- S7::S7_inherits(obj, FlodeHydroData) && obj@parameter == "rainfall"
+  is_pe_obj   <- S7::S7_inherits(obj, FlodePotEvapData)
+  is_flow     <- S7::S7_inherits(obj, FlodeHydroData) && obj@parameter == "flow"
 
   period_nm <- obj@period_name
   dt_sec    <- .dt_seconds(period_nm)
@@ -158,8 +158,8 @@ cumsum_na <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
 #' Double-mass plot for hydrological volume comparison (trial)
 #'
 #' Builds two cumulative volume series — one for each axis — from any
-#' combination of [Rainfall_Daily], [Rainfall_15min], [Flow_Daily],
-#' [Flow_15min], [PotEvap_Daily], [PotEvap_Hourly], or [PotEvap_15min]
+#' combination of [FlodeRainfall_Daily], [FlodeRainfall_15min], [FlodeFlow_Daily],
+#' [FlodeFlow_15min], [FlodePotEvap_Daily], [FlodePotEvap_Hourly], or [FlodePotEvap_15min]
 #' objects, then plots the cumulative X series against the cumulative Y
 #' series. A perfectly consistent volume ratio plots as a straight line.
 #'
@@ -182,9 +182,9 @@ cumsum_na <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
 #' Level gauge data requires rating equations and is not currently
 #' handled. Convert level to flow before passing data to this function.
 #'
-#' @param x_data A `HydroData` or `PotEvapData` object, **or** a list of
+#' @param x_data A `FlodeHydroData` or `FlodePotEvapData` object, **or** a list of
 #'   such objects, contributing to the X axis.
-#' @param y_data A `HydroData` or `PotEvapData` object, **or** a list of
+#' @param y_data A `FlodeHydroData` or `FlodePotEvapData` object, **or** a list of
 #'   such objects, contributing to the Y axis.
 #' @param catchment_area_km2 Numeric scalar. Catchment area in km².
 #'   Required when any source is rainfall or potential evaporation (both
@@ -193,7 +193,7 @@ cumsum_na <- function(x) cumsum(data.table::fifelse(is.na(x), 0, x))
 #'   weights for each X source. Defaults to `1` for all sources.
 #' @param weights_y Numeric vector, length `length(y_data)`. Multiplicative
 #'   weights for each Y source. Defaults to `1` for all sources.
-#' @param pe An optional [PotEvap_Daily] object. When provided, the PE
+#' @param pe An optional [FlodePotEvap_Daily] object. When provided, the PE
 #'   signal is subtracted from every rainfall source on both axes before
 #'   any volume scaling or weighting is applied.
 #' @param output_units Character scalar. Volume units for both axes.
@@ -275,8 +275,8 @@ double_mass_plot <- function(x_data,
   # Validate optional PE object
   pe_daily <- NULL
   if (!is.null(pe)) {
-    if (!S7::S7_inherits(pe, PotEvapData)) {
-      stop("`pe` must be a PotEvapData object (e.g. PotEvap_Daily).")
+    if (!S7::S7_inherits(pe, FlodePotEvapData)) {
+      stop("`pe` must be a FlodePotEvapData object (e.g. FlodePotEvap_Daily).")
     }
     pe_daily <- data.table::copy(pe@readings)
   }

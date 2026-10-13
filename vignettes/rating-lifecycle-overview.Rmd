@@ -41,7 +41,7 @@ in the register.
 
 ### 1. Construction
 
-A `RatingCurve` is assembled from a table of limbs. Each limb covers a stage
+A `FlodeRatingCurve` is assembled from a table of limbs. Each limb covers a stage
 range and carries its own `C`, `a`, `b` coefficients and a `doubtful` flag
 (used to suppress plotting of extrapolated out-of-bank limbs).
 
@@ -51,8 +51,8 @@ Limb 2:  lower = 0.5 m,  upper = 1.2 m   <- boundaries must be contiguous
 Limb 3:  lower = 1.2 m,  upper = Inf      <- doubtful = TRUE (out of bank)
 ```
 
-Multiple `RatingCurve` objects with non-overlapping validity windows are
-grouped into a `RatingSet` to represent a site's rating history.
+Multiple `FlodeRatingCurve` objects with non-overlapping validity windows are
+grouped into a `FlodeRatingSet` to represent a site's rating history.
 
 ---
 
@@ -116,9 +116,9 @@ version used by `apply_rating()` to produce operational flow data.
 
 ### 7. Application to Level Data
 
-`apply_rating()` accepts a `Level_Daily` or `Level_15min` object and a
-`RatingCurve` or `RatingSet`. Each observation is matched to the correct
-curve by date, rated, and returned as `Flow_Daily` or `Flow_15min`. A
+`apply_rating()` accepts a `FlodeLevel_Daily` or `FlodeLevel_15min` object and a
+`FlodeRatingCurve` or `FlodeRatingSet`. Each observation is matched to the correct
+curve by date, rated, and returned as `FlodeFlow_Daily` or `FlodeFlow_15min`. A
 `doubtful` column propagates the extrapolation flag.
 
 ---
@@ -176,7 +176,7 @@ per limb). `site_id` + `version` is the composite key within each file.
 Field survey / model output
         |
         v
-   [RatingCurve]
+   [FlodeRatingCurve]
         |
         +-- check_limb_continuity()
         |         |
@@ -195,7 +195,7 @@ Field survey / model output
               apply_rating(level_obj, rs)
                        |
                        v
-                 Flow_Daily / Flow_15min
+                 FlodeFlow_Daily / FlodeFlow_15min
 ```
 
 See `vignette("rating-curve-lifecycle")` for worked R code covering each step.

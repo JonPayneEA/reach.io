@@ -45,7 +45,7 @@ Replaces and extends the analysis functions currently in `riskyData`.
 
 ### Design Notes
 
-- All functions accept reach.io S7 objects (`Rainfall_Daily`, `Rainfall_15min`, etc.)
+- All functions accept reach.io S7 objects (`FlodeRainfall_Daily`, `FlodeRainfall_15min`, etc.)
   and return either new S7 objects or plain `data.table`s as appropriate
 - `exceed()` should match `riskyData::exceed()` behaviour for backward compatibility:
   events closer together than `gap_width` timesteps are merged into one
@@ -166,7 +166,7 @@ argument:
 |---|---|
 | `riskyData::loadAPI()` | `reach.io::download_hydrology()` + `find_stations()` |
 | `riskyData::exceed()` | `reach.hydro::exceed()` |
-| `HydroImportFactory$new()` | reach.io S7 constructors (`Rainfall_15min()` etc.) |
+| `HydroImportFactory$new()` | reach.io S7 constructors (`FlodeRainfall_15min()` etc.) |
 | `$hydroYearDay()` | `reach.io::add_hydro_year()` |
 | `$postOrder()` | `data.table::setorder(dt, dateTime)` |
 | `riskyData::cumsumNA()` | `reach.io::cumsum_na()` |

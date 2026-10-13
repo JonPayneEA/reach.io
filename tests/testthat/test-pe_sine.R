@@ -109,11 +109,11 @@ test_that("fit_pe_sine() errors when dates is not a Date vector", {
 # 5. generate_pe_sine()
 # =============================================================================
 
-test_that("generate_pe_sine() returns PotEvap_Daily when as_s7 = TRUE", {
+test_that("generate_pe_sine() returns FlodePotEvap_Daily when as_s7 = TRUE", {
   obj <- generate_pe_sine(2.5, 2.0, 172,
                           start = "2020-01-01", end = "2020-12-31",
                           as_s7 = TRUE)
-  expect_true(inherits(obj, "reach.io::PotEvap_Daily"))
+  expect_true(inherits(obj, "reach.io::FlodePotEvap_Daily"))
 })
 
 test_that("generate_pe_sine() returns data.table when as_s7 = FALSE", {
@@ -271,10 +271,10 @@ test_that("fit -> generate -> disagg_to_15min chain works end-to-end", {
 
   pe_daily <- generate_pe_sine(params$B, params$A, params$phi,
                                start = "2020-01-01", end = "2020-12-31")
-  expect_true(inherits(pe_daily, "reach.io::PotEvap_Daily"))
+  expect_true(inherits(pe_daily, "reach.io::FlodePotEvap_Daily"))
 
   pe_15min <- disagg_to_15min(pe_daily)
-  expect_true(inherits(pe_15min, "reach.io::PotEvap_15min"))
+  expect_true(inherits(pe_15min, "reach.io::FlodePotEvap_15min"))
 
   dt_15 <- as_data_table(pe_15min)
   # 366 days * 96 intervals = 35136 rows

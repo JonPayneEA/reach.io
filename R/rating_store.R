@@ -1,7 +1,7 @@
 # ============================================================
 # Tool:        Rating curve storage
-# Description: Read/write helpers for persisting RatingCurve
-#              and RatingSet objects under the governance
+# Description: Read/write helpers for persisting FlodeRatingCurve
+#              and FlodeRatingSet objects under the governance
 #              directory structure.
 #
 #              Storage location (all three tiers):
@@ -74,7 +74,7 @@ NULL
   max(as.integer(rows$version), na.rm = TRUE) + 1L
 }
 
-# Flatten one RatingCurve to a data.table row-per-limb ready for Parquet.
+# Flatten one FlodeRatingCurve to a data.table row-per-limb ready for Parquet.
 #' @noRd
 .curve_to_dt <- function(x, version) {
   dt <- data.table::copy(x@limbs)
@@ -93,7 +93,7 @@ NULL
   dt
 }
 
-# Reconstruct one RatingCurve from a data.table slice (one version only).
+# Reconstruct one FlodeRatingCurve from a data.table slice (one version only).
 #' @noRd
 .dt_to_curve <- function(dt) {
   data.table::setorder(dt, limb_no)
@@ -102,7 +102,7 @@ NULL
   vf <- dt$valid_from[1L]
   vt <- dt$valid_to[1L]
 
-  RatingCurve(
+  FlodeRatingCurve(
     limbs      = limbs,
     valid_from = if (!is.na(vf) && nzchar(vf)) as.Date(vf) else NA,
     valid_to   = if (!is.na(vt) && nzchar(vt)) as.Date(vt) else NA,
@@ -118,7 +118,7 @@ NULL
 
 #' Save a rating curve to the hydrometric ratings store
 #'
-#' Writes a [RatingCurve] (or every curve in a [RatingSet]) into the
+#' Writes a [FlodeRatingCurve] (or every curve in a [FlodeRatingSet]) into the
 #' shared `<root>/<tier>/hydrometric/ratings/ratings.parquet` file and
 #' appends a governance row to `<root>/register/rating_register.csv`.
 #'
@@ -140,7 +140,7 @@ NULL
 #' The ratings directory and register are created automatically if they
 #' do not yet exist (no need to call [setup_hydro_store()] first).
 #'
-#' @param x A [RatingCurve] or [RatingSet]. The curve's `station_id` slot
+#' @param x A [FlodeRatingCurve] or [FlodeRatingSet]. The curve's `station_id` slot
 #'   must be set to a non-empty string.
 #' @param root Character. Root of the data store
 #'   (the directory that contains `bronze/`, `silver/`, `gold/`,
@@ -212,7 +212,7 @@ NULL
 #' }
 save_rating <- S7::new_generic("save_rating", "x")
 
-S7::method(save_rating, RatingCurve) <- function(x, root,
+S7::method(save_rating, FlodeRatingCurve) <- function(x, root,
                                                   tier               = "gold",
                                                   saved_by           = Sys.info()[["user"]],
                                                   method_of_receipt  = NA_character_,
@@ -220,7 +220,7 @@ S7::method(save_rating, RatingCurve) <- function(x, root,
                                                   model_or_project   = NA_character_,
                                                   notes              = NA_character_) {
   if (is.na(x@station_id) || !nzchar(x@station_id)) {
-    stop("`station_id` must be set on the RatingCurve before saving.")
+    stop("`station_id` must be set on the FlodeRatingCurve before saving.")
   }
   tier <- match.arg(tier, c("bronze", "silver", "gold"))
 
@@ -283,13 +283,13 @@ S7::method(save_rating, RatingCurve) <- function(x, root,
   data.table::fwrite(updated_reg, paths$register)
 
   message(sprintf(
-    "Saved RatingCurve [%s] v%d for site '%s'  ->  %s",
+    "Saved FlodeRatingCurve [%s] v%d for site '%s'  ->  %s",
     tier, version, x@station_id, paths$pq_file
   ))
   invisible(paths$pq_file)
 }
 
-S7::method(save_rating, RatingSet) <- function(x, root,
+S7::method(save_rating, FlodeRatingSet) <- function(x, root,
                                                 tier              = "gold",
                                                 saved_by          = Sys.info()[["user"]],
                                                 method_of_receipt = NA_character_,
@@ -314,7 +314,7 @@ S7::method(save_rating, RatingSet) <- function(x, root,
 #' Load rating curve(s) from the Gold calibration store
 #'
 #' Reads the shared ratings Parquet, filters to `site_id`, and reconstructs
-#' either one [RatingCurve] (when `version` is specified) or a [RatingSet]
+#' either one [FlodeRatingCurve] (when `version` is specified) or a [FlodeRatingSet]
 #' containing every stored version for that site (default).
 #'
 #' @param site_id Character. Station identifier (must match the `station_id`
@@ -323,17 +323,17 @@ S7::method(save_rating, RatingSet) <- function(x, root,
 #' @param tier Character. Tier to load from: `"bronze"`, `"silver"`, or
 #'   `"gold"` (default).
 #' @param version Integer or `NULL`. When `NULL` (default), all versions are
-#'   loaded and returned as a [RatingSet] ordered by version number.
+#'   loaded and returned as a [FlodeRatingSet] ordered by version number.
 #'   When a specific integer is given, only that version is returned as a
-#'   [RatingCurve].
+#'   [FlodeRatingCurve].
 #'
-#' @return A [RatingCurve] (single version) or [RatingSet] (all versions).
+#' @return A [FlodeRatingCurve] (single version) or [FlodeRatingSet] (all versions).
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#' # Gold (default) — all versions as a RatingSet for apply_rating()
+#' # Gold (default) — all versions as a FlodeRatingSet for apply_rating()
 #' rs   <- load_rating("510310", root = "data/hydro")
 #' flow <- apply_rating(level_obj, rs)
 #'
@@ -369,11 +369,11 @@ load_rating <- function(site_id, root, tier = "gold", version = NULL) {
     return(.dt_to_curve(dt))
   }
 
-  # Return all versions as a RatingSet
+  # Return all versions as a FlodeRatingSet
   versions <- sort(unique(dt$version))
   curves   <- lapply(versions, function(v) .dt_to_curve(dt[version == v]))
 
-  RatingSet(curves = curves, station_id = site_id)
+  FlodeRatingSet(curves = curves, station_id = site_id)
 }
 
 

@@ -152,7 +152,7 @@ format_for_pdm <- function(dt, measure = c("rainfall", "flow", "level"),
 
 #' Export flow time series to Flood Modeller Pro Bespoke Format 1
 #'
-#' Writes one or more [Flow_Daily] or [Flow_15min] objects to the four-header-row
+#' Writes one or more [FlodeFlow_Daily] or [FlodeFlow_15min] objects to the four-header-row
 #' CSV format used by Flood Modeller Pro (FMP) to assign flow boundary conditions
 #' to named 1D IED (node) references at simulation runtime.
 #'
@@ -196,7 +196,7 @@ format_for_pdm <- function(dt, measure = c("rainfall", "flow", "level"),
 #' testing without touching the file system. Supply `out_file` to write
 #' directly to disk; parent directories are created automatically.
 #'
-#' @param flows A named `list` of [Flow_Daily] or [Flow_15min] objects, one per
+#' @param flows A named `list` of [FlodeFlow_Daily] or [FlodeFlow_15min] objects, one per
 #'   gauge. A single (unnamed) object is also accepted and wrapped automatically.
 #'   List names are used to construct IED references when `ied_refs` is `NULL`.
 #' @param title Character scalar. File title placed in Row 1. Default
@@ -258,21 +258,21 @@ format_for_fmp <- function(flows,
   # -- 1. Normalise input -------------------------------------------------------
 
   # Accept a single Flow object and wrap it
-  if (S7::S7_inherits(flows, Flow_Daily) || S7::S7_inherits(flows, Flow_15min)) {
+  if (S7::S7_inherits(flows, FlodeFlow_Daily) || S7::S7_inherits(flows, FlodeFlow_15min)) {
     flows <- list(flows)
   }
 
   if (!is.list(flows) || length(flows) == 0L) {
-    stop("`flows` must be a non-empty list of Flow_Daily or Flow_15min objects.")
+    stop("`flows` must be a non-empty list of FlodeFlow_Daily or FlodeFlow_15min objects.")
   }
 
   n <- length(flows)
 
   for (i in seq_len(n)) {
-    if (!S7::S7_inherits(flows[[i]], Flow_Daily) &&
-        !S7::S7_inherits(flows[[i]], Flow_15min)) {
+    if (!S7::S7_inherits(flows[[i]], FlodeFlow_Daily) &&
+        !S7::S7_inherits(flows[[i]], FlodeFlow_15min)) {
       stop(sprintf(
-        "`flows[[%d]]` is not a Flow_Daily or Flow_15min object.", i
+        "`flows[[%d]]` is not a FlodeFlow_Daily or FlodeFlow_15min object.", i
       ))
     }
   }

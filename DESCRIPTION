@@ -21,13 +21,15 @@ Imports:
     future,
     future.apply,
     ggplot2,
-    lubridate,
     parallel,
+    reach.utils,
     S7
 Suggests:
     knitr,
     rmarkdown,
     testthat (>= 3.0.0)
+Remotes:
+    JonPayneEA/reach.utils
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 URL: https://github.com/JonPayneEA/reach.io

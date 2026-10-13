@@ -295,7 +295,7 @@ flow_obj <- read_silver(
 )
 
 flow_obj
-#> <reach.io::Flow_15min>
+#> <reach.io::FlodeFlow_15min>
 #> Slots (@):
 #>   @parameter      flow
 #>   @period_name    15min
