@@ -73,8 +73,10 @@ and tier are marked \code{"Superseded"} and the new register row is appended. Th
 register, not the Parquet, is
 the source of version numbers, and numbers are never reused.
 
-The two writes are not atomic. If the process stops after the Parquet is
-rewritten but before the register is, the Parquet holds a version the
+Each file is replaced atomically (written to a temporary file, then moved
+into place, and read without memory-mapping so the replace also works on
+Windows), but the two writes together are not atomic. If the process stops
+after the Parquet is rewritten but before the register is, the Parquet holds a version the
 register does not know about, and the next save for that site and tier takes
 the same number again. Writers are also not safe to run concurrently against
 one store, since each does a read-modify-write of the whole Parquet and
