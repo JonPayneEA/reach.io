@@ -32,6 +32,22 @@
 #' it invisibly, so it can be chained:
 #' \code{add_hydro_year(dt)[]}.
 #'
+#' @details
+#' Only the calendar date is used: the time of day is discarded, so every
+#' reading on one date gets the same `hydro_year` and `hydro_year_day`.
+#' `POSIXct` input is converted with `as.Date()`, which reads it in UTC unless
+#' told otherwise, so a timestamp is labelled by its UTC date. If the
+#' hydrological day should follow local time, convert to `Date` in the required
+#' time zone before calling.
+#'
+#' Missing dates are not supported: remove or fill them first (depending on
+#' where it sits, a missing date can make `as.Date()` fail inside the function).
+#'
+#' Existing `hydro_year` / `hydro_year_day` columns are replaced without
+#' warning. Because `dt` is modified by reference, the caller's table changes
+#' even when the return value is not assigned; take `data.table::copy()` first
+#' to keep the original intact.
+#'
 #' @param dt A `data.table`.
 #' @param date_col Character scalar. Name of the column containing date or
 #'   datetime values. Defaults to `"dateTime"`. The column may be `POSIXct`,
@@ -58,12 +74,21 @@ add_hydro_year <- function(dt, date_col = "dateTime") {
     stop(sprintf("`dt` has no column named '%s'.", date_col))
   }
 
+  # Work on calendar dates: the time of day plays no part in the Oct-Sep label.
   dates    <- as.Date(dt[[date_col]])
   m        <- data.table::month(dates)
   y        <- data.table::year(dates)
+  # The hydro year is named for the calendar year in which it ENDS, so Oct-Dec
+  # belong to the next one (2023-10-15 -> 2024). hy_start is the 1 Oct that
+  # opened that year, i.e. in calendar year hy - 1.
   hy       <- y + as.integer(m >= 10L)
   hy_start <- as.Date(paste0(hy - 1L, "-10-01"))
 
+  # Day 1 is 1 Oct. Date subtraction counts real days, so 29 Feb is included
+  # automatically (a hydro year containing it has 366 days).
+  # NB: inside dt[...] the symbols `hy`, `dates` and `hy_start` resolve to
+  # columns of `dt` before these local variables, so a table that already has a
+  # column with one of those names would be labelled from that column instead.
   dt[, hydro_year     := hy]
   dt[, hydro_year_day := as.integer(dates - hy_start) + 1L]
 
