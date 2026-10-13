@@ -195,3 +195,46 @@ test_that("run_incremental restores the caller's future plan", {
                                    log_path = tempfile()))
   expect_equal(class(future::plan()), before)
 })
+
+
+# -- regression: incremental after a same-day backfill must not lose data -------
+
+test_that("run_incremental keeps earlier same-day Bronze rows (no overwrite)", {
+  root     <- withr::local_tempdir()
+  reg_path <- make_test_registry(root, reg_row("G020"))
+
+  # Backfill earlier TODAY: all of 1 Jan 2023 (96 rows), filed under today's date
+  ts <- format(as.POSIXct("2023-01-01", tz = "UTC") + (0:95) * 900, "%Y-%m-%d %H:%M:%S")
+  seed_bronze(root, "G020", ts, received = Sys.Date())
+
+  # Incremental run later the same day returns only newer rows
+  mock_route(bronze_rows("G020", c("2023-01-02 00:00:00", "2023-01-02 00:15:00"),
+                         received = Sys.Date()))
+  log_dt <- run_incremental(reg_path, root, end_date = "2023-02-01",
+                            n_workers = 1L, log_path = tempfile())
+  expect_equal(log_dt$status, "SUCCESS")
+  expect_equal(nrow(read_bronze(root, "G020", "Q")@readings), 98L)
+})
+
+
+# -- gauge_ids: unknown and excluded ids are reported separately ----------------
+
+test_that("run_incremental distinguishes unknown ids from inactive / non-live ones", {
+  root <- withr::local_tempdir()
+  reg  <- data.table::rbindlist(list(
+    reg_row("RUN"), reg_row("OFF", active = FALSE), reg_row("HIST", live = FALSE)
+  ))
+  reg_path <- make_test_registry(root, reg)
+  mock_route(data.table::data.table())
+
+  w <- character()
+  withCallingHandlers(
+    suppressMessages(run_incremental(
+      reg_path, root, gauge_ids = c("RUN", "OFF", "HIST", "GHOST"),
+      n_workers = 1L, log_path = tempfile())),
+    warning = function(cnd) { w <<- c(w, conditionMessage(cnd)); invokeRestart("muffleWarning") }
+  )
+  expect_true(any(grepl("not found in registry: GHOST", w)))
+  expect_true(any(grepl("inactive or not live: OFF, HIST", w)))
+  expect_false(any(grepl("not found in registry:.*OFF", w)))
+})

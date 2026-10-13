@@ -238,3 +238,46 @@ test_that("read_bronze honours a time of day in start and end", {
   obj <- read_bronze(root, "S1", "P", start = "2023-01-01 07:00", end = "2023-01-01")
   expect_equal(format(obj@readings$dateTime, "%H:%M"), c("12:00", "18:00"))
 })
+
+
+# -- same-day writes merge rather than replace ----------------------------------
+#
+# Regression: the file name ends in the received DATE, so a second write of the
+# same series and year on the same day hits the same path. It used to replace
+# the file (a full day of rows became 2 after a same-day incremental run).
+
+test_that("a same-day write merges into the existing year file", {
+  root <- withr::local_tempdir()
+  # 96 quarter-hours = exactly 1 January, so the second write's rows are new
+  first <- bronze_fixture(format(as.POSIXct("2023-01-01", tz = "UTC") + (0:95) * 900,
+                                 "%Y-%m-%d %H:%M:%S"), value = 1:96)
+  second <- bronze_fixture(c("2023-01-02 00:00:00", "2023-01-02 00:15:00"),
+                           value = c(901, 902))
+  f1 <- write_fixture(root, first)
+  f2 <- write_fixture(root, second)
+
+  expect_identical(f1$path, f2$path)                 # genuinely the same file
+  stored <- data.table::as.data.table(arrow::read_parquet(f2$path))
+  expect_equal(nrow(stored), 98L)
+  expect_false(is.unsorted(stored$timestamp))
+  expect_equal(f2$rows, 2L)                          # rows written by THIS call
+  expect_equal(f2$period_end, "2023-01-02")          # period describes the merged file
+  expect_equal(f2$period_start, "2023-01-01")
+})
+
+test_that("on a same-day overlap the newer value wins and nothing is duplicated", {
+  root <- withr::local_tempdir()
+  ts <- c("2023-01-01 00:00:00", "2023-01-01 00:15:00")
+  write_fixture(root, bronze_fixture(ts, value = c(1, 2)))
+  f <- write_fixture(root, bronze_fixture(c(ts[2], "2023-01-01 00:30:00"),
+                                          value = c(20, 30)))
+  stored <- data.table::as.data.table(arrow::read_parquet(f$path))
+  expect_equal(stored$value, c(1, 20, 30))
+})
+
+test_that("a write on a different day still creates a separate file", {
+  root <- withr::local_tempdir()
+  a <- write_fixture(root, bronze_fixture("2023-01-01 00:00:00", received = "2026-01-01"))
+  b <- write_fixture(root, bronze_fixture("2023-01-01 00:15:00", received = "2026-01-02"))
+  expect_false(identical(a$path, b$path))
+})

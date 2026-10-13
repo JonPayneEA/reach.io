@@ -164,3 +164,168 @@ test_that("rating versions and lookups are scoped to the requested site and tier
   expect_equal(rs@station_id, "A")
   expect_length(rs@curves, 3L)
 })
+
+
+# -- save_rating(): superseding is per site AND tier -----------------------------
+#
+# Regression: `tier == tier` inside `reg[...]` compared the column with itself,
+# so saving a silver rating marked the same site's bronze rating Superseded.
+
+save_one <- function(root, site, tier, from, to = NA, ...) {
+  suppressMessages(save_rating(
+    FlodeRatingCurve(limbs = rating_limbs(), station_id = site,
+                     valid_from = as.Date(from),
+                     valid_to   = if (is.na(to)) as.Date(NA) else as.Date(to)),
+    root = root, tier = tier, saved_by = "tester",
+    method_of_receipt = "test", derivation_method = "spot gaugings", ...
+  ))
+}
+
+read_register <- function(root) {
+  data.table::fread(file.path(root, "register", "rating_register.csv"))
+}
+
+test_that("saving a rating in one tier does not supersede the same site in another tier", {
+  root <- withr::local_tempdir()
+  save_one(root, "A", "bronze", "2020-01-01")
+  save_one(root, "A", "silver", "2020-01-01")
+  reg <- read_register(root)
+  expect_equal(reg[tier == "bronze", status], "Active")
+  expect_equal(reg[tier == "silver", status], "Active")
+})
+
+test_that("a new version supersedes the old one within the same site and tier only", {
+  root <- withr::local_tempdir()
+  save_one(root, "A", "bronze", "2020-01-01", "2020-12-31")
+  save_one(root, "B", "bronze", "2020-01-01", "2020-12-31")
+  save_one(root, "A", "bronze", "2021-01-01", "2021-12-31")
+  reg <- read_register(root)
+  expect_equal(reg[site_id == "A" & version == 1, status], "Superseded")
+  expect_equal(reg[site_id == "A" & version == 2, status], "Active")
+  expect_equal(reg[site_id == "B", status], "Active")      # other site untouched
+})
+
+test_that("saving a RatingSet leaves every member Active and supersedes the old set", {
+  root <- withr::local_tempdir()
+  save_one(root, "A", "gold", "2019-01-01", "2019-12-31")          # an earlier version
+  set <- FlodeRatingSet(
+    curves = lapply(c("2020", "2021", "2022"), function(y) {
+      FlodeRatingCurve(limbs = rating_limbs(), station_id = "A",
+                       valid_from = as.Date(paste0(y, "-01-01")),
+                       valid_to   = as.Date(paste0(y, "-12-31")))
+    }),
+    station_id = "A"
+  )
+  suppressMessages(save_rating(set, root = root, tier = "gold", saved_by = "tester",
+                               method_of_receipt = "test",
+                               derivation_method = "spot gaugings"))
+  reg <- read_register(root)
+  expect_equal(nrow(reg), 4L)
+  expect_equal(reg[version == 1, status], "Superseded")          # the earlier one
+  expect_equal(reg[version %in% 2:4, status], rep("Active", 3))  # whole new set current
+})
+
+
+# -- check_gaps(): separate gaps stay separate ------------------------------------
+#
+# Regression: diff() of POSIXct is a difftime with auto-chosen units, and dividing
+# it by seconds gave ~0, so every missing step was merged into one gap period.
+
+three_gap_times <- function() {
+  ts <- as.POSIXct("2023-01-01", tz = "UTC") + (0:99) * 900
+  ts[-c(11:13, 40, 70:71)]            # gaps of 3, 1 and 2 steps
+}
+
+expect_three_gaps <- function(g, ts_all) {
+  expect_equal(nrow(g), 3L)
+  expect_equal(g$n_missing, c(3L, 1L, 2L))
+  step <- function(i) as.POSIXct("2023-01-01", tz = "UTC") + (i - 1) * 900
+  expect_equal(g$gap_start, step(c(11, 40, 70)))
+  expect_equal(g$gap_end,   step(c(13, 40, 71)))
+}
+
+test_that("check_gaps reports separate gap periods separately", {
+  root <- withr::local_tempdir()
+  x <- bronze_rows("S1", format(three_gap_times(), "%Y-%m-%d %H:%M:%S"))
+  .write_bronze_by_year(x, root, "hydrometric", "EA", "Q", x$dataset_id[1L])
+  capture.output(g <- check_gaps(root, "S1", "Q", expected_interval = "15min"))
+  expect_three_gaps(g)
+})
+
+test_that("check_gaps handles hourly and daily steps too", {
+  root <- withr::local_tempdir()
+  hrs <- as.POSIXct("2023-01-01", tz = "UTC") + (0:47) * 3600
+  x <- bronze_rows("H1", format(hrs[-c(5, 6, 30)], "%Y-%m-%d %H:%M:%S"), type = "H")
+  .write_bronze_by_year(x, root, "hydrometric", "EA", "H", x$dataset_id[1L])
+  capture.output(g <- check_gaps(root, "H1", "H", expected_interval = "hourly"))
+  expect_equal(g$n_missing, c(2L, 1L))
+})
+
+test_that("check_silver_gaps reports separate gap periods separately", {
+  root <- withr::local_tempdir()
+  p <- file.path(root, "silver", "hydrometric", "Q", "2023", "EA_S1_Q_20230101.parquet")
+  dir.create(dirname(p), recursive = TRUE)
+  ts <- three_gap_times()
+  storage.mode(ts) <- "double"
+  arrow::write_parquet(
+    data.frame(timestamp = ts, site_id = "S1", qc_flag = 1L, value = 1), p
+  )
+  capture.output(g <- check_silver_gaps(root, "S1", "Q", expected_interval = "15min"))
+  expect_three_gaps(g)
+})
+
+
+# -- summarise_coverage(): expected_obs ------------------------------------------
+#
+# Regression: temporal_resolution is a grouping column, which is not part of .SD,
+# so the lookup always failed and expected_obs was NA for every row.
+
+test_that("summarise_coverage computes expected_obs from the register resolution", {
+  root <- two_series_store()      # S1: 15min, 1 day; S2: daily, 4 days
+  capture.output(cov <- summarise_coverage(root))
+  expect_equal(cov[site_id == "S1", expected_obs], 96L)   # one whole day of 15-min steps
+  expect_equal(cov[site_id == "S2", expected_obs], 4L)    # four daily steps
+  expect_equal(cov[site_id == "S2", days_held], 3L)
+})
+
+test_that("catalogue functions cope with a register that has no period dates", {
+  root <- withr::local_tempdir()
+  dir.create(file.path(root, "register"))
+  data.table::fwrite(
+    data.table::data.table(dataset_id = "EA_S1_Q_20260101", tier = "Bronze",
+                           site_id = "S1", supplier_code = "EA", data_type = "Q",
+                           temporal_resolution = "15min",
+                           file_path = file.path(root, "bronze", "hydrometric", "EA", "Q",
+                                                 "2023", "EA_S1_Q_20260101.parquet")),
+    file.path(root, "register", "hydrometric_data_register.csv")
+  )
+  capture.output(a <- list_available_gauges(root))
+  expect_equal(a$site_id, "S1")
+  expect_true(is.na(a$start))
+  capture.output(b <- summarise_coverage(root))
+  expect_true(is.na(b$expected_obs))
+})
+
+
+# -- catchment readers accept the registry that build_gauge_registry() writes ----
+
+test_that("read_bronze_catchment works with a registry built by build_gauge_registry()", {
+  root <- withr::local_tempdir()
+  register_series(root, "UP1", "Q", "EA", quarter_hours("2023-01-01 00:00:00", 4))
+  register_series(root, "UP1", "H", "EA", quarter_hours("2023-01-01 00:00:00", 4))
+
+  # A gauge with both flow and level appears twice in the registry
+  csv <- tempfile(fileext = ".csv")
+  data.table::fwrite(data.table::data.table(
+    gauge_id = c("UP1", "UP1", "LOW1"), source_system = "HDE",
+    data_type = c("flow", "level", "flow"), category = "hydrometric",
+    catchment = c("Upper", "Upper", "Lower"), ea_site_ref = "X"), csv)
+  reg <- build_gauge_registry(csv, tempfile())          # columns: gauge_id, catchment, ...
+
+  objs <- read_bronze_catchment(root, "Upper", "Q", registry = reg)
+  expect_named(objs, "UP1")                              # one entry, not one per data type
+  expect_error(read_bronze_catchment(root, "Nowhere", "Q", registry = reg),
+               "No gauges found in registry")
+  expect_error(read_bronze_catchment(root, "Upper", "Q", registry = data.table::data.table(x = 1)),
+               "must contain a 'site_id'")
+})

@@ -82,15 +82,20 @@ add_hydro_year <- function(dt, date_col = "dateTime") {
   # belong to the next one (2023-10-15 -> 2024). hy_start is the 1 Oct that
   # opened that year, i.e. in calendar year hy - 1.
   hy       <- y + as.integer(m >= 10L)
-  hy_start <- as.Date(paste0(hy - 1L, "-10-01"))
+  # Build the opening 1 Oct only for rows that have a date: as.Date() errors on
+  # a string such as "NA-10-01", so a missing date must stay NA instead. (Any
+  # missing date gives NA for both new columns.)
+  hy_start <- rep(as.Date(NA), length(hy))
+  ok       <- !is.na(hy)
+  hy_start[ok] <- as.Date(sprintf("%d-10-01", hy[ok] - 1L))
 
   # Day 1 is 1 Oct. Date subtraction counts real days, so 29 Feb is included
   # automatically (a hydro year containing it has 366 days).
-  # NB: inside dt[...] the symbols `hy`, `dates` and `hy_start` resolve to
-  # columns of `dt` before these local variables, so a table that already has a
-  # column with one of those names would be labelled from that column instead.
-  dt[, hydro_year     := hy]
-  dt[, hydro_year_day := as.integer(dates - hy_start) + 1L]
+  # set() rather than dt[, col := hy]: inside dt[...] the symbols `hy`, `dates`
+  # and `hy_start` would resolve to columns of `dt` of the same name before
+  # these local variables, labelling the rows from the wrong data.
+  data.table::set(dt, j = "hydro_year",     value = hy)
+  data.table::set(dt, j = "hydro_year_day", value = as.integer(dates - hy_start) + 1L)
 
   invisible(dt)
 }

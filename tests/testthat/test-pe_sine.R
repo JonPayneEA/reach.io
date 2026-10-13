@@ -281,3 +281,28 @@ test_that("fit -> generate -> disagg_to_15min chain works end-to-end", {
   expect_equal(nrow(dt_15), 366L * 96L)
   expect_true(all(dt_15$value >= 0))
 })
+
+
+# =============================================================================
+# phi is a phase, and NLS starts from the linear solution
+# =============================================================================
+
+test_that("phi is the day the curve rises through B; PE peaks about 91 days later", {
+  s   <- .make_sine_pe(B = 2.5, A = 2.0, phi = 81)
+  fit <- fit_pe_sine(s$pe, s$dates, method = "lm_fourier")
+  expect_equal(fit$phi, 81, tolerance = 1e-3)
+
+  gen  <- generate_pe_sine(fit$B, fit$A, fit$phi, "2021-01-01", "2021-12-31", as_s7 = FALSE)
+  peak <- as.integer(format(gen$date[which.max(gen$pe)], "%j"))
+  expect_equal(peak, 81 + 91, tolerance = 2 / 172)       # a mid-June (day ~172) peak
+})
+
+test_that("fit_pe_sine nls converges on noisy UK-like data (phi ~ 81) without falling back", {
+  set.seed(7)
+  s    <- .make_sine_pe(B = 2.5, A = 2.0, phi = 81)
+  pe_n <- s$pe + stats::rnorm(length(s$pe), sd = 0.3)
+  expect_no_warning(res <- fit_pe_sine(pe_n, s$dates, method = "nls"))
+  expect_equal(res$method, "nls")
+  expect_equal(res$phi, 81, tolerance = 0.05)
+  expect_gt(res$A, 0)
+})

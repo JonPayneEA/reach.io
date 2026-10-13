@@ -113,7 +113,7 @@ test_that("route_gauge(on_error = 'stop') re-raises the error", {
 test_that("route_gauge dispatches HDE gauges to fetch_from_hde", {
   expected <- bronze_rows("39001", "2020-01-01 00:00:00")
   testthat::local_mocked_bindings(
-    fetch_from_hde = function(gauge_id, data_type, start_date, end_date) expected
+    fetch_from_hde = function(gauge_id, data_type, start_date, end_date, ...) expected
   )
   gauge  <- data.table::data.table(gauge_id = "39001", source_system = "HDE",
                                    data_type = "flow")

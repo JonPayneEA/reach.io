@@ -127,10 +127,12 @@
 
   # -- Narrow by year ----------------------------------------------------------
   # Narrow to year subdirectories matching the date range
-  # The year directory is whatever silver_path() chose: it parses the year from
-  # the dataset_id's trailing date, so this is a coarse pre-filter only; exact
-  # bounds are applied to the rows in read_silver(). Non-numeric directory names
-  # are dropped when a range is given.
+  # promote_to_silver() files Silver by observation year (as Bronze is), so the
+  # year directories can be chosen from start/end. Files written by older
+  # versions used the received year and may be missed by a date-range read;
+  # re-promote them. This is a coarse pre-filter only; exact bounds are applied
+  # to the rows in read_silver(). Non-numeric directory names are dropped when a
+  # range is given.
   year_dirs <- unlist(lapply(dt_dirs, function(d) {
     yd <- list.dirs(d, recursive = FALSE, full.names = TRUE)
     if (!is.null(start) || !is.null(end)) {
@@ -423,10 +425,11 @@ read_silver_multi <- function(root, gauge_ids, data_type, ...) {
 #' catchments.
 #'
 #' @details
-#' The registry must contain columns literally named `site_id` and
-#' `catchment_col`. The registry written by [build_gauge_registry()] names its
-#' columns `gauge_id` and `catchment`, so it needs renaming (or a suitable
-#' `catchment_col`) before use here. Gauges are matched on exact equality with
+#' The registry needs an id column (`site_id`, or `gauge_id` as written by
+#' [build_gauge_registry()]) and the catchment column named by `catchment_col`;
+#' with the default `"catchment_id"`, a registry that has `catchment` instead
+#' (again as [build_gauge_registry()] writes it) is accepted. A gauge appears
+#' once per data type in the registry, so ids are de-duplicated. Gauges are matched on exact equality with
 #' `catchment_id`; the registry's `data_type` and `category` are not consulted,
 #' so the single `data_type` you pass is requested for every gauge. A catchment
 #' with no gauges in the registry is an error, whereas gauges that have no
@@ -436,9 +439,9 @@ read_silver_multi <- function(root, gauge_ids, data_type, ...) {
 #' @param catchment_id Character. Catchment identifier to filter the registry
 #'   on.
 #' @param data_type Character. Framework data type code.
-#' @param registry A `data.table` or `data.frame` with at minimum columns
-#'   `site_id` and `catchment_id`. Typically the output of
-#'   [build_gauge_registry()].
+#' @param registry A `data.table` or `data.frame` with an id column
+#'   (`site_id` or `gauge_id`) and a catchment column (`catchment_id`, or
+#'   `catchment`). Typically the output of [build_gauge_registry()].
 #' @param catchment_col Character. Column name in `registry` that holds
 #'   catchment identifiers. Default `"catchment_id"`.
 #' @param ... Additional arguments passed to [read_silver_multi()].
@@ -458,22 +461,9 @@ read_silver_catchment <- function(root, catchment_id, data_type,
                                    registry,
                                    catchment_col = "catchment_id",
                                    ...) {
-  registry <- data.table::as.data.table(registry)
-
-  # Validate the registry shape up front: `[[` on a missing column returns NULL,
-  # which would otherwise surface as a misleading "no gauges found" error below
-  if (!catchment_col %in% names(registry))
-    stop(sprintf(
-      "Column '%s' not found in registry. Available: %s",
-      catchment_col, paste(names(registry), collapse = ", ")
-    ))
-  if (!"site_id" %in% names(registry))
-    stop("Registry must contain a 'site_id' column.")
-
-  # Plain vector indexing (no dt[...]) on purpose: the default catchment_col is
-  # "catchment_id", the same name as the argument, and inside dt[...] the column
-  # would win and match every row
-  gauge_ids <- registry[["site_id"]][registry[[catchment_col]] == catchment_id]
+  # Registry shape checks and the catchment match live in one shared helper
+  # (see .gauges_in_catchment() in package.R)
+  gauge_ids <- .gauges_in_catchment(registry, catchment_id, catchment_col)
 
   if (length(gauge_ids) == 0L)
     stop(sprintf("No gauges found in registry for catchment '%s'.",

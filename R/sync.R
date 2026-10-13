@@ -109,7 +109,7 @@
 #' fetch_readings(
 #'   "abc123-flow-m-86400-m3s-qualified",
 #'   from_date = "2022-01-01",
-#'   to_date   = "2022-12-31"
+#'   to_date   = "2023-01-01"
 #' )
 #' }
 fetch_readings <- function(measure_notation,
@@ -146,10 +146,10 @@ fetch_readings <- function(measure_notation,
 
   dt <- data.table::as.data.table(items)
   # Tag every row with its measure so rows stay attributable once
-  # download_hydrology() combines many measures. The right-hand side is the
-  # function argument only while the response carries no column of the same
-  # name; if one ever appeared, data.table would resolve the name to it.
-  dt[, measure_notation := measure_notation]
+  # download_hydrology() combines many measures. set() takes the function
+  # argument itself, even if the response were to carry a column of the same
+  # name (inside dt[...] that name would resolve to the column instead).
+  data.table::set(dt, j = "measure_notation", value = measure_notation)
 
   # Parse date columns to proper R types for correct downstream filtering
   # e.g. dt[date >= as.Date("2022-06-01")]
@@ -229,6 +229,9 @@ make_date_chunks <- function(from_date, to_date) {
 #' @param category Character. Bronze data category (disk mode).
 #' @param register_path Character or `NULL`. Provenance register CSV (disk
 #'   mode).
+#' @param trace Character or `NULL`. Series discriminator for the Bronze
+#'   `dataset_id` (disk mode), used when a station has several measures of one
+#'   data type.
 #'
 #' @return A named list: `measure`, `data` (`data.table` or `NULL` in disk
 #'   mode), `file` (`NA` in memory mode; Bronze paths joined by `"; "` in disk
@@ -237,7 +240,8 @@ make_date_chunks <- function(from_date, to_date) {
 #' @noRd
 run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
                      site_id = NA_character_, period = NA_character_,
-                     category = "hydrometric", register_path = NULL) {
+                     category = "hydrometric", register_path = NULL,
+                     trace = NULL) {
 
   # `ok` starts TRUE and is only ever flipped to FALSE: any failed chunk marks
   # the whole measure as not ok, even though chunks that succeeded are kept.
@@ -263,35 +267,34 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
       dt <- fetch_readings(mid, chunk_from, chunk_to,
                            observation_type = observation_type)
 
-      # `next` inside tryCatch() acts on the enclosing for loop. Note it also
-      # skips the Sys.sleep(1) below, so empty chunks are not paced.
       if (nrow(dt) == 0) {
         message("    No data for this chunk - skipping.")
-        next
+      } else {
+        # fetch_readings() makes a single unpaged request, so reaching the cap
+        # means the API cut the response off. Data is kept but flagged; ok is
+        # not set to FALSE.
+        if (nrow(dt) >= API_HARD_LIMIT) {
+          warning(sprintf(
+            "Chunk %d/%d for '%s' hit the API row limit (%d). Data may be truncated - consider method = 'batch'.",
+            j, nrow(chunks), mid, API_HARD_LIMIT
+          ))
+        }
+
+        # Append to a list (cheap); combined once after the loop.
+        chunk_list[[length(chunk_list) + 1L]] <- dt
+        total_rows <- total_rows + nrow(dt)
+        message(sprintf("    %d rows (running total: %d)", nrow(dt), total_rows))
       }
-
-      # fetch_readings() makes a single unpaged request, so reaching the cap
-      # means the API cut the response off. Data is kept but flagged; ok is
-      # not set to FALSE.
-      if (nrow(dt) >= API_HARD_LIMIT) {
-        warning(sprintf(
-          "Chunk %d/%d for '%s' hit the API row limit (%d). Data may be truncated - consider method = 'batch'.",
-          j, nrow(chunks), mid, API_HARD_LIMIT
-        ))
-      }
-
-      # Append to a list (cheap); combined once after the loop.
-      chunk_list[[length(chunk_list) + 1L]] <- dt
-      total_rows <- total_rows + nrow(dt)
-      message(sprintf("    %d rows (running total: %d)", nrow(dt), total_rows))
-
-      Sys.sleep(1)  # EA fair-use: one request at a time
 
     }, error = function(e) {
       message("    ERROR: ", conditionMessage(e))
       # <<- is needed: the handler runs in its own function scope.
       ok <<- FALSE
     })
+
+    # EA fair use: one request at a time. The pause is outside the tryCatch so
+    # EVERY chunk is paced - successful, empty and failed alike.
+    .pace()
   }
 
   # -- Combine and write ------------------------------------------------------
@@ -305,15 +308,24 @@ run_sync <- function(mid, chunks, output, out_dir, param, observation_type,
   # Disk mode writes once per measure, after all chunks, so the Bronze writer
   # can split the full series by observation year (a chunk boundary need not
   # match a calendar year). Nothing is written, and no register rows are added,
-  # when no chunk returned data. This call is outside the tryCatch above, so a
-  # write error propagates to the caller.
+  # when no chunk returned data. A write error is caught like a failed chunk
+  # (message, ok = FALSE) so one measure that cannot be written does not abort
+  # a long download of many measures; run_batch() behaves the same way.
   if (output == "disk" && !is.null(combined) && nrow(combined) > 0L) {
-    paths <- handle_output(combined, "disk", out_dir, param, mid,
-                           site_id = site_id, period = period,
-                           category = category, register_path = register_path,
-                           method_of_receipt = "API pull (sync)")
-    # One summary row per measure: collapse the per-year paths into one string
-    dest <- paste(paths, collapse = "; ")
+    tryCatch({
+      paths <- handle_output(combined, "disk", out_dir, param, mid,
+                             site_id = site_id, period = period,
+                             category = category, register_path = register_path,
+                             method_of_receipt = "API pull (sync)",
+                             trace = trace)
+      # One summary row per measure: collapse the per-year paths into one string.
+      # Plain `<-`: the tryCatch() expression runs in this function's frame
+      # (only the handler below needs `<<-`).
+      dest <- paste(paths, collapse = "; ")
+    }, error = function(e) {
+      message("    ERROR writing Bronze: ", conditionMessage(e))
+      ok <<- FALSE
+    })
   }
 
   # `rows` is the number of rows fetched across chunks, not the number written

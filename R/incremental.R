@@ -256,12 +256,12 @@ get_high_watermark <- function(output_dir, gauge_id, data_type,
 #' Bronze file names end in the received date (see [read_bronze()]). If a
 #' series is written twice for the same observation year on the same calendar
 #' day, for example by a second run or by this function after a same-day
-#' [run_backfill()], the later file replaces the earlier one and holds only
-#' the rows that run wrote.
+#' [run_backfill()], the new rows are merged into the existing file rather
+#' than replacing it, so nothing already stored is lost.
 #'
-#' `gauge_ids` is checked against the registry after it has been narrowed to
-#' active, live rows, so an inactive or non-live gauge is reported as not
-#' found.
+#' `gauge_ids` that are not in the registry at all, and ids that are registered
+#' but skipped because the row is inactive or has `live = FALSE`, are warned
+#' about separately. It is an error only if no requested gauge is left to run.
 #'
 #' @inheritSection run_backfill EA fair use
 #'
@@ -327,23 +327,30 @@ run_incremental <- function(registry_path,
   # -- Load registry and restrict to active, live gauges ----------------------
   # live = FALSE marks historical dumps (WISKI .all) that have no feed to
   # poll. An NA, or a registry with no `live` column at all, counts as live.
-  registry_dt <- data.table::as.data.table(
+  registry_all <- data.table::as.data.table(
     arrow::read_parquet(registry_path)
   )
-  registry_dt <- registry_dt[active == TRUE]
+  registry_dt <- registry_all[active == TRUE]
   if ("live" %in% names(registry_dt)) {
     registry_dt <- registry_dt[is.na(live) | live == TRUE]
   }
 
   # -- Optionally restrict to a gauge subset ----------------------------------
-  # Checked against the already-filtered registry, so an inactive or non-live
-  # gauge is reported as "not found" too. Warn for partial misses; stop only
-  # when nothing is left to run.
+  # Two different problems are reported separately: ids that are not in the
+  # registry at all, and ids that are registered but excluded above (inactive,
+  # or live = FALSE). Warn for partial misses; stop only when nothing is left
+  # to run.
   if (!is.null(gauge_ids)) {
-    unknown <- setdiff(gauge_ids, registry_dt$gauge_id)
+    unknown  <- setdiff(gauge_ids, registry_all$gauge_id)
+    excluded <- setdiff(intersect(gauge_ids, registry_all$gauge_id),
+                        registry_dt$gauge_id)
     if (length(unknown) > 0) {
       warning(sprintf("gauge_ids not found in registry: %s",
                       paste(unknown, collapse = ", ")))
+    }
+    if (length(excluded) > 0) {
+      warning(sprintf("gauge_ids skipped because they are inactive or not live: %s",
+                      paste(excluded, collapse = ", ")))
     }
     registry_dt <- registry_dt[gauge_id %in% gauge_ids]
     if (nrow(registry_dt) == 0) {

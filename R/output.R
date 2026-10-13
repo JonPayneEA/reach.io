@@ -44,6 +44,9 @@
 #'   Default `"EA"` (the Hydrology API).
 #' @param category Character. Data category for the path. Default
 #'   `"hydrometric"`.
+#' @param trace Character or `NULL`. Optional series discriminator added to the
+#'   `dataset_id` (see [make_dataset_id()]); used when several measures at one
+#'   station share a data type, so each is filed separately.
 #' @param register_path Character or `NULL`. Hydrometric Data Register CSV. When
 #'   supplied, a provenance record is appended for every file written.
 #' @param method_of_receipt Character. Recorded in the register. Default
@@ -60,7 +63,8 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
                            supplier_code = "EA",
                            category = "hydrometric",
                            register_path = NULL,
-                           method_of_receipt = "API pull") {
+                           method_of_receipt = "API pull",
+                           trace = NULL) {
 
   # Memory mode is a pass-through: no schema is applied, so the caller keeps the
   # raw API columns (dateTime, value, quality, ...) rather than Bronze names
@@ -76,9 +80,10 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
   # The measure notation stands in for the site when no WISKI/site id was found
   # for the station, so the series is still filed under a stable name.
   # The dataset_id carries today's date (the default received_date): this is
-  # what makes a later re-download a new file rather than an overwrite.
+  # what makes a later-day re-download a new file; a same-day repeat is merged
+  # into the existing file by the writer.
   sid        <- if (!is.na(site_id) && nzchar(site_id)) site_id else measure_id
-  dataset_id <- make_dataset_id(supplier_code, sid, data_type)
+  dataset_id <- make_dataset_id(supplier_code, sid, data_type, trace = trace)
 
   # -- Apply schema and write ---------------------------------------------------
   # The API returns dateTime/value/quality; `quality` becomes supplier_flag
@@ -107,9 +112,14 @@ handle_output <- function(dt, output, out_dir, parameter, measure_id,
   # name is fixed as "HDE" regardless of supplier_code, since this helper only
   # serves the Hydrology API download paths.
   if (!is.null(register_path) && nrow(files) > 0L) {
+    # The register records the source system (e.g. "HDE"), which is the key of
+    # SUPPLIER_CODES whose value is this supplier_code; fall back to the code
+    # itself for a supplier that is not in the table
+    supplier_name <- names(SUPPLIER_CODES)[match(supplier_code, SUPPLIER_CODES)]
+    if (is.na(supplier_name)) supplier_name <- supplier_code
     .write_provenance_rows(
       .bronze_prov_rows(files, dataset_id,
-                        supplier            = "HDE",
+                        supplier            = supplier_name,
                         supplier_code       = supplier_code,
                         site_id             = sid,
                         data_type           = data_type,
@@ -444,11 +454,15 @@ format_for_fmp <- function(flows,
   }
 
   time_col  <- sprintf("%.3f", rel_hours)
-  val_mat   <- as.matrix(merged[, ..val_cols])
-  val_str   <- apply(val_mat, 2L, fmt_val)
-  # With a single site apply() returns a plain vector; restore a rows x 1
-  # matrix so the row loop below can index val_str[i, ]
-  if (is.null(dim(val_str))) dim(val_str) <- c(length(val_str), 1L)
+  # Format column by column and build the matrix explicitly (rows x sites).
+  # apply() returned a plain vector for a single site and a transposed shape
+  # for a single timestamp, so the shape had to be patched afterwards and was
+  # wrong when there was one timestamp but several sites.
+  val_str   <- matrix(
+    vapply(val_cols, function(cn) fmt_val(merged[[cn]]),
+           character(nrow(merged))),
+    nrow = nrow(merged), ncol = length(val_cols)
+  )
 
   row_strs <- vapply(
     seq_len(nrow(val_str)),

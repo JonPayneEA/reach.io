@@ -82,7 +82,7 @@ VALID_CATEGORIES <- c("hydrometric", "radarH19", "MOSES")
 #' The trailing `YYYYMMDD` is the *received* date, not an observation date.
 #' Because Bronze is append-only, the same series ingested on different days
 #' gets different IDs (and so different files), whereas re-ingesting on the
-#' same day produces the same ID and overwrites that day's files. Readers
+#' same day produces the same ID, and the writer merges into that day's files. Readers
 #' rely on this layout: [read_bronze()] orders files by the trailing date to
 #' decide which copy of a duplicated observation is the most recent, and
 #' strips it again to recognise rows of the same series.
@@ -96,7 +96,7 @@ VALID_CATEGORIES <- c("hydrometric", "radarH19", "MOSES")
 #'   `"MO"`. Use [source_to_supplier()] to derive from `source_system`.
 #' @param site_id Character. Gauge or site identifier.
 #' @param data_type Character. Framework data type code: `"Q"`, `"H"`,
-#'   `"P"`, `"SM"`, or `"SWE"`. Use [param_to_data_type()] to derive from
+#'   `"P"`, `"SM"`, `"SWE"` or `"PE"`. Use [param_to_data_type()] to derive from
 #'   parameter name.
 #' @param received_date Date or character. Date the data was received or
 #'   ingested. Defaults to today.
@@ -430,7 +430,10 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
 #' the year directory always reflects the *observation* year (not the ingest
 #' year). Bronze is append-only: re-ingesting the same series on a later day
 #' adds a new file (new `dataset_id` date); duplicates are resolved on read by
-#' [read_bronze()]. Re-ingesting on the same day overwrites that day's file.
+#' [read_bronze()]. Re-ingesting on the same day merges into that day's file:
+#' existing rows are kept and, for a timestamp present in both, the new row
+#' wins. (Replacing the file would silently drop the earlier rows, for example
+#' when an incremental run follows a backfill on the same day.)
 #'
 #' @param bronze_dt A `data.table` conforming to the Bronze schema.
 #' @param output_dir,category,supplier_code,data_type,dataset_id See
@@ -471,15 +474,31 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
     # year is passed explicitly: the default would use the received year
     path <- bronze_path(output_dir, category, supplier_code, data_type,
                         dataset_id, year = yr)
-    .write_parquet_atomic(part, path)
-    # period_start/end describe this year's file only; they become the
-    # time_period_start/end of that file's provenance record
+
+    # The file name ends in the received DATE, so a second write of the same
+    # series and year on the same day resolves to the same path (for example a
+    # backfill followed by an incremental run). Replacing the file would
+    # silently discard the earlier rows, so merge instead: existing rows are
+    # kept, and where a timestamp appears in both the NEW row wins.
+    merged <- part
+    if (file.exists(path)) {
+      existing <- data.table::as.data.table(arrow::read_parquet(path))
+      merged   <- data.table::rbindlist(list(existing, part),
+                                        use.names = TRUE, fill = TRUE)
+      merged   <- unique(merged, by = "timestamp", fromLast = TRUE)
+      data.table::setorder(merged, timestamp)
+    }
+    .write_parquet_atomic(merged, path)
+
+    # period_start/end describe the whole file as it now stands (including any
+    # rows merged in); they become the time_period_start/end of that file's
+    # provenance record. `rows` counts the rows written by THIS call.
     data.table::data.table(
       year         = yr,
       path         = path,
       rows         = nrow(part),
-      period_start = format(min(part$timestamp), "%Y-%m-%d", tz = "UTC"),
-      period_end   = format(max(part$timestamp), "%Y-%m-%d", tz = "UTC")
+      period_start = format(min(merged$timestamp), "%Y-%m-%d", tz = "UTC"),
+      period_end   = format(max(merged$timestamp), "%Y-%m-%d", tz = "UTC")
     )
   })
   data.table::rbindlist(files)
@@ -547,13 +566,14 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
 
 #' Write a Bronze provenance record to the Hydrometric Data Register
 #'
-#' Appends a provenance record row to the register CSV file for the given
-#' Bronze dataset. This satisfies the Section 4.2 requirement that every
-#' Bronze dataset has a complete provenance record before storage.
+#' Appends a provenance record row to the register CSV file for a Bronze
+#' file. This satisfies the Section 4.2 requirement that every Bronze dataset
+#' has a complete provenance record before storage.
 #'
-#' The register CSV is created if it does not exist. Each row represents
-#' one Bronze dataset following the field list in Section 10.1 of the
-#' framework.
+#' The register CSV is created if it does not exist. Each row follows the
+#' field list in Section 10.1 of the framework and describes one Bronze
+#' \emph{file}: a dataset is written as one file per observation year, so
+#' several rows can share a `dataset_id` (see Details).
 #'
 #' @details
 #' Because Bronze is written one file per observation year, a single ingest
@@ -613,7 +633,7 @@ bronze_path <- function(output_dir, category, supplier_code, data_type, dataset_
 #'   time_period_end     = "2024-12-31",
 #'   temporal_resolution = "15min",
 #'   method_of_receipt   = "API pull",
-#'   file_path           = "data/hydrometric/bronze/EA/Q/2026/EA_39001_Q_20260115.parquet"
+#'   file_path           = "data/hydrometric/bronze/hydrometric/EA/Q/2024/EA_39001_Q_20260115.parquet"
 #' )
 #' }
 write_provenance_record <- function(register_path,

@@ -222,3 +222,79 @@ test_that("fetch_from_wiski_all handles a missing file and unset root", {
   expect_error(suppressMessages(fetch_from_wiski_all("X", "flow", "2022-01-01", "2022-02-01")),
                "WISKI_ALL_ROOT")
 })
+
+
+# -- leftover temp blocks must not leak into a new ingest ------------------------
+#
+# Regression: pass 2 merges every block file in the temp directory, and an
+# existing directory was reused without being emptied.
+
+test_that("ingest_all_file ignores stale block files left in the temp directory", {
+  root <- withr::local_tempdir()
+  f    <- write_all_file(all_block(rows = flow_rows), path = file.path(root, "export.all"))
+
+  # First run keeps its intermediate files (as a debugging run would)
+  suppressMessages(ingest_all_file(f, root, keep_tmp = TRUE))
+  tmp <- file.path(root, ".tmp_export")
+  expect_true(dir.exists(tmp))
+
+  # Plant a stale block for a station that is NOT in the file we ingest next
+  stale <- data.table::data.table(
+    timestamp = as.POSIXct("2020-01-01", tz = "UTC"), Value = 9, Quality.Code = 100L,
+    station_number = "STALE1", station_name = "x", parameter = "Discharge",
+    unit = "m3/s", ts_name = "THM/STALE1/Q/15m.Cmd.RelAbs.P", lon = 0, lat = 0
+  )
+  arrow::write_parquet(stale, file.path(tmp, "STALE1__q__000099.parquet"))
+
+  log_dt <- suppressMessages(ingest_all_file(f, root))
+  expect_equal(log_dt$gauge_id, "2723TH")                       # only the real station
+  expect_false(dir.exists(tmp))                                 # cleaned up this time
+  expect_length(.list_bronze_files(root, "STALE1", "Q", "WISKI"), 0L)
+})
+
+
+# -- on_error: missing source data is a failure when asked to stop ---------------
+
+test_that("fetch_from_wiski_all(on_error = 'stop') fails for a missing file or series", {
+  root <- withr::local_tempdir()
+  write_all_file(all_block(rows = flow_rows), path = file.path(root, "2723TH.all"))
+  withr::local_envvar(WISKI_ALL_ROOT = root)
+
+  # no file at all
+  expect_error(
+    suppressMessages(fetch_from_wiski_all("ABSENT", "flow", "2022-01-01", "2022-02-01",
+                                          on_error = "stop")),
+    "No .all file"
+  )
+  # file exists but has no level series
+  expect_error(
+    suppressMessages(fetch_from_wiski_all("2723TH", "level", "2022-01-01", "2022-02-01",
+                                          on_error = "stop")),
+    "No level series for station '2723TH'"
+  )
+  # default still warns / returns empty
+  expect_equal(nrow(suppressMessages(
+    fetch_from_wiski_all("2723TH", "level", "2022-01-01", "2022-02-01"))), 0L)
+})
+
+test_that("route_gauge(on_error = 'stop') makes a missing .all file a failure", {
+  withr::local_envvar(WISKI_ALL_ROOT = withr::local_tempdir())
+  gauge <- data.table::data.table(gauge_id = "ABSENT", source_system = "WISKI_ALL",
+                                  data_type = "flow")
+  expect_error(
+    suppressMessages(route_gauge(gauge, "2022-01-01", "2022-02-01", on_error = "stop")),
+    "Route failed for ABSENT.*No .all file"
+  )
+})
+
+
+test_that("ingest_all_file warns when different time series share one series key", {
+  root <- withr::local_tempdir()
+  f <- write_all_file(
+    all_block(ts_name = "THM/2723TH/Q/15m.Cmd.RelAbs.P", rows = flow_rows),
+    all_block(ts_name = "THM/2723TH/Q/1d.Cmd.RelAbs.P",
+              rows = "05/01/2022 00:00:00,9,100")
+  )
+  expect_warning(suppressMessages(ingest_all_file(f, root)),
+                 "2 different time series names share the series key '2723TH__q'")
+})

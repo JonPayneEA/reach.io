@@ -22,14 +22,6 @@
 #' - [get_measures()] -- fetch available measure time series metadata
 #' - [download_hydrology()] -- download readings for one or more parameters
 #'
-#' ## Schema and provenance tools
-#' - [make_dataset_id()] -- generate a Bronze dataset ID
-#' - [source_to_supplier()] -- map source_system to supplier code
-#' - [param_to_data_type()] -- map parameter name to framework data type code
-#' - [apply_bronze_schema()] -- coerce a data.table to the Bronze Parquet schema
-#' - [bronze_path()] -- build the Bronze file path following framework Appendix C
-#' - [write_provenance_record()] -- append a provenance record to the register
-#'
 #' ## Setup
 #' - [setup_hydro_store()] -- create the hydrometric data store directory structure
 #'
@@ -129,7 +121,7 @@ VALID_SOURCES <- c("HDE", "WISKI", "WISKI_ALL")
 # argument. Use .filter_rows() or which() first in those cases.
 # Add a name here when new data.table code introduces another bare column name.
 utils::globalVariables(c(
-  ".", "..present_cols", "..val_cols", ".covered", ".series", ".snap_key",
+  ".", "..present_cols", "..val_cols", ".covered", ".dist", ".rank", ".series", ".snap_key",
   ".snapped", "C", "Time.stamp", "a", "active", "b", "backfill_done",
   "catchment", "category", "cum_x", "cum_y", "data_type", "dataset_id",
   "date_added", "dateTime", "datetime_str", "doubtful", "ea_site_ref",
@@ -203,6 +195,60 @@ utils::globalVariables(c(
   if (is.na(d)) stop(sprintf("Could not parse date bound '%s'.", x), call. = FALSE)
   t <- as.POSIXct(format(d, "%Y-%m-%d"), tz = "UTC")
   if (which == "end") t + end_of_day else t
+}
+
+
+#' Pause between requests to the EA API
+#'
+#' The Hydrology API fair-use guidance asks for one request at a time. All the
+#' per-request pauses go through this one function so the delay is defined in a
+#' single place and tests can replace it with a no-op (base `Sys.sleep()` itself
+#' cannot be mocked).
+#'
+#' @param secs Numeric. Seconds to wait. Default 1.
+#' @noRd
+.pace <- function(secs = 1) Sys.sleep(secs)
+
+
+#' Gauge ids belonging to a catchment, from a registry table
+#'
+#' Shared by [read_bronze_catchment()] and [read_silver_catchment()]. The id
+#' column is `site_id` or, failing that, `gauge_id` (what
+#' [build_gauge_registry()] writes). The catchment column is `catchment_col`;
+#' for the default `"catchment_id"` the registry's own `catchment` column is
+#' used if that is what it has. A gauge appears once per data type in the
+#' registry, so the ids are de-duplicated. Plain vector indexing is used on
+#' purpose: inside `dt[...]` the argument `catchment_id` would resolve to the
+#' registry column of the same name and match every row.
+#'
+#' @param registry A `data.frame` / `data.table`.
+#' @param catchment_id Character. The catchment to select.
+#' @param catchment_col Character. Name of the catchment column.
+#' @return A character vector of unique gauge ids (possibly empty).
+#' @noRd
+.gauges_in_catchment <- function(registry, catchment_id,
+                                 catchment_col = "catchment_id") {
+  registry <- data.table::as.data.table(registry)
+
+  id_col <- intersect(c("site_id", "gauge_id"), names(registry))[1L]
+  if (is.na(id_col))
+    stop("Registry must contain a 'site_id' (or 'gauge_id') column.")
+
+  # Validate up front: `[[` on a missing column gives NULL, which would
+  # otherwise surface as a misleading "no gauges found" error
+  if (!catchment_col %in% names(registry)) {
+    if (identical(catchment_col, "catchment_id") && "catchment" %in% names(registry)) {
+      catchment_col <- "catchment"
+    } else {
+      stop(sprintf(
+        "Column '%s' not found in registry. Available: %s",
+        catchment_col, paste(names(registry), collapse = ", ")
+      ))
+    }
+  }
+
+  rows <- which(registry[[catchment_col]] == catchment_id)
+  unique(as.character(registry[[id_col]][rows]))
 }
 
 

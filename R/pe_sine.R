@@ -28,9 +28,11 @@
 #' Estimates the three parameters of the annual PE sine model:
 #' \deqn{PE(t) = B + A \sin\!\left(\frac{2\pi}{365.25}(doy - \phi)\right)}
 #' where \eqn{B} is the annual mean (mm day\eqn{^{-1}}), \eqn{A} is the
-#' amplitude (mm day\eqn{^{-1}}), and \eqn{\phi} is the phase offset
-#' (day of year of peak PE; approximately 172 for UK lowland catchments,
-#' i.e. around 21 June).
+#' amplitude (mm day\eqn{^{-1}}), and \eqn{\phi} is the phase offset: the
+#' day of year at which the curve rises through the annual mean \eqn{B}. PE
+#' peaks about 91 days later (\eqn{\phi + 365.25/4}), so a UK-like mid-June
+#' peak (day of year about 172) corresponds to \eqn{\phi} of roughly 81, not
+#' 172.
 #'
 #' Two fitting methods are available. `"lm_fourier"` (the default) rewrites
 #' the model as a linear regression via a Fourier identity, making it
@@ -52,17 +54,17 @@
 #' **Meaning of `phi`.** As coded, the curve rises through `B` at
 #' `doy = phi` and reaches its maximum about 91 days later, at
 #' `phi + 365.25 / 4`. `phi` is therefore the day the curve crosses the annual
-#' mean going upward, which differs from the "day of peak" wording above.
-#' Parameters from this function are consistent with [generate_pe_sine()] and
-#' [compare_pe_sine()], which use the same formula, but the date of maximum PE
-#' is `phi + 91.3` (wrapped at 365.25), not `phi`.
+#' mean going upward, not the day of peak PE. Parameters from this function are
+#' consistent with [generate_pe_sine()] and [compare_pe_sine()], which use the
+#' same formula; the date of maximum PE is `phi + 91.3` (wrapped at 365.25).
 #'
 #' **Methods.** `"lm_fourier"` expands the sine into
 #' `B + C1 sin(w doy) + C2 cos(w doy)` (with `w = 2 pi / 365.25`), fits it by
 #' ordinary least squares, and recovers `A = sqrt(C1^2 + C2^2)` and
 #' `phi = atan2(-C2, C1) / w`, wrapped into `[0, 365.25)`. `A` is a norm, so it
 #' is never negative. `"nls"` fits `B`, `A` and `phi` directly, starting from
-#' `B = mean(pe)`, `A = (max - min) / 2` and `phi = 172`, without bounds, so
+#' the `"lm_fourier"` solution (the exact least-squares answer for this model,
+#' so NLS refines rather than searches), without bounds, so
 #' `A` can come back negative (equivalent to shifting `phi` by half a year);
 #' `phi` is wrapped but the sign of `A` is not normalised. If NLS fails, a
 #' warning is issued and the `"lm_fourier"` result is returned instead; check
@@ -90,7 +92,8 @@
 #' \describe{
 #'   \item{`B`}{Annual mean PE (mm day\eqn{^{-1}}).}
 #'   \item{`A`}{Amplitude (mm day\eqn{^{-1}}).}
-#'   \item{`phi`}{Phase offset (day of year of peak PE).}
+#'   \item{`phi`}{Phase offset: day of year at which the curve rises through
+#'     `B`. Peak PE falls about 91 days later (`phi + 91.3`).}
 #'   \item{`r_squared`}{Coefficient of determination of the sine fit.}
 #'   \item{`rmse`}{Root mean squared error (mm day\eqn{^{-1}}).}
 #'   \item{`method`}{The method actually used (may differ from `method` if
@@ -168,17 +171,21 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
   }
 
   # -- nls method -------------------------------------------------------------
-  # Direct fit of the three parameters from the starting values below. There
-  # are no bounds, so unlike lm_fourier the optimiser can return a negative A
-  # (the same curve as a positive A with phi shifted by half a year): phi is
-  # wrapped into [0, 365.25) but the sign of A is left as found.
+  # Direct fit of the three parameters. There are no bounds, so unlike
+  # lm_fourier the optimiser can return a negative A (the same curve as a
+  # positive A with phi shifted by half a year): phi is wrapped into [0, 365.25)
+  # but the sign of A is left as found.
+  # Starting values come from the linear Fourier fit, which is the exact
+  # least-squares solution for this model, so nls() starts at the answer and
+  # only polishes it. (A fixed phi = 172 was used before; that start described
+  # a September peak in this parameterisation and is meaningless as a guess.)
   .fit_nls <- function() {
-    amp_guess <- (max(pe) - min(pe)) / 2
+    lin <- .fit_lm_fourier()
     result <- tryCatch(
       stats::nls(
         pe ~ B + A * sin(omega * (doy - phi)),
         data  = list(pe = pe, doy = doy, omega = omega),
-        start = list(B = mean(pe), A = amp_guess, phi = 172)
+        start = list(B = lin$B, A = lin$A, phi = lin$phi)
       ),
       # Any nls() failure (non-convergence, singular gradient, ...) becomes a
       # warning; the NULL it returns triggers the lm_fourier fallback below.
@@ -235,7 +242,9 @@ fit_pe_sine <- function(pe, dates, method = c("lm_fourier", "nls")) {
 #'
 #' @param B Numeric. Annual mean PE (mm day\eqn{^{-1}}).
 #' @param A Numeric. Amplitude (mm day\eqn{^{-1}}).
-#' @param phi Numeric. Phase offset — day of year of peak PE (~172 for UK).
+#' @param phi Numeric. Phase offset: the day of year at which the curve rises
+#'   through `B` (peak PE is about 91 days later, so about 81 for a UK-like
+#'   mid-June peak).
 #' @param start Date or character (`"YYYY-MM-DD"`). Start of the output series
 #'   (inclusive).
 #' @param end Date or character (`"YYYY-MM-DD"`). End of the output series

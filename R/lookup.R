@@ -414,10 +414,10 @@ get_measures <- function(parameter   = c("rainfall", "flow", "level"),
   }
 
   dt <- data.table::as.data.table(items)
-  # Ensure a `parameter` column. Caution: on the right-hand side data.table
-  # resolves `parameter` to a column of that name if the API response already
-  # has one, and only otherwise to the function argument. Trailing [] makes
-  # the := result print visibly.
-  dt[, parameter := parameter][]
-  return(dt)
+  # Ensure a `parameter` column holding the requested parameter. set() takes
+  # the function argument itself; the old `dt[, parameter := parameter]` form
+  # resolved the right-hand side to a response column of that name if the API
+  # ever returned one (see .filter_rows() in package.R for the scoping rule).
+  data.table::set(dt, j = "parameter", value = parameter)
+  return(dt[])
 }

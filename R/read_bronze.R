@@ -475,11 +475,12 @@ read_bronze_multi <- function(root, gauge_ids, data_type, ...) {
 #' registry, then delegates to [read_bronze_multi()].
 #'
 #' @details
-#' The registry must contain columns literally named `site_id` and
-#' `catchment_col`. Note that the registry written by [build_gauge_registry()]
-#' names its columns `gauge_id` and `catchment`, so it needs renaming (or a
-#' suitable `catchment_col`) before use here. Gauges are matched on exact
-#' equality with `catchment_id`; the registry's own `data_type`, `category` and
+#' The registry needs an id column (`site_id`, or `gauge_id` as written by
+#' [build_gauge_registry()]) and the catchment column named by `catchment_col`;
+#' with the default `"catchment_id"`, a registry that has `catchment` instead
+#' (again as [build_gauge_registry()] writes it) is accepted. A gauge appears
+#' once per data type in the registry, so ids are de-duplicated. Gauges are
+#' matched on exact equality with `catchment_id`; the registry's own `data_type`, `category` and
 #' `source_system` are not consulted, so the single `data_type` you pass is
 #' requested for every gauge, with the default `supplier_code = "EA"` unless
 #' supplied through `...`.
@@ -492,9 +493,9 @@ read_bronze_multi <- function(root, gauge_ids, data_type, ...) {
 #' @param catchment_id Character. Catchment identifier to filter the registry
 #'   on.
 #' @param data_type Character. Framework data type code.
-#' @param registry A `data.table` or `data.frame` with at minimum columns
-#'   `site_id` and `catchment_id`. Typically the output of
-#'   [build_gauge_registry()].
+#' @param registry A `data.table` or `data.frame` with an id column
+#'   (`site_id` or `gauge_id`) and a catchment column (`catchment_id`, or
+#'   `catchment`). Typically the output of [build_gauge_registry()].
 #' @param catchment_col Character. Column name in `registry` that holds
 #'   catchment identifiers. Default `"catchment_id"`.
 #' @param ... Additional arguments passed to [read_bronze_multi()].
@@ -514,22 +515,9 @@ read_bronze_catchment <- function(root, catchment_id, data_type,
                                    registry,
                                    catchment_col = "catchment_id",
                                    ...) {
-  registry <- data.table::as.data.table(registry)
-
-  # Validate the registry shape up front: `[[` on a missing column returns NULL,
-  # which would otherwise surface as a misleading "no gauges found" error below
-  if (!catchment_col %in% names(registry))
-    stop(sprintf(
-      "Column '%s' not found in registry. Available: %s",
-      catchment_col, paste(names(registry), collapse = ", ")
-    ))
-  if (!"site_id" %in% names(registry))
-    stop("Registry must contain a 'site_id' column.")
-
-  # Plain vector indexing (no dt[...]) on purpose: the default catchment_col is
-  # "catchment_id", the same name as the argument, and inside dt[...] the column
-  # would win and match every row
-  gauge_ids <- registry[["site_id"]][registry[[catchment_col]] == catchment_id]
+  # Registry shape checks and the catchment match live in one shared helper
+  # (see .gauges_in_catchment() in package.R)
+  gauge_ids <- .gauges_in_catchment(registry, catchment_id, catchment_col)
 
   if (length(gauge_ids) == 0L)
     stop(sprintf("No gauges found in registry for catchment '%s'.",
